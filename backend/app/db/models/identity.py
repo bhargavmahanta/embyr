@@ -151,3 +151,68 @@ class Job(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         sa.DateTime(timezone=True)
     )
+
+
+class LearnerPreference(Base):
+    __tablename__ = "learner_preferences"
+    __table_args__ = (
+        sa.CheckConstraint("version > 0", name="learner_preferences_version"),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        sa.ForeignKey("app_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    adventure_preference: Mapped[str] = mapped_column(sa.Text)
+    preferred_effort: Mapped[str] = mapped_column(sa.Text)
+    support_style: Mapped[str] = mapped_column(sa.Text)
+    practical_opt_in: Mapped[bool] = mapped_column(
+        sa.Boolean, server_default=sa.text("false")
+    )
+    version: Mapped[int] = mapped_column(sa.Integer, server_default=sa.text("1"))
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+
+
+class UserMotivation(Base):
+    __tablename__ = "user_motivations"
+
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        sa.ForeignKey("app_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    motivation_code: Mapped[str] = mapped_column(sa.Text, primary_key=True)
+    free_text: Mapped[str | None] = mapped_column(sa.Text)
+
+
+class ExplicitInterestPreference(Base):
+    __tablename__ = "explicit_interest_preferences"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "preference in ('NEUTRAL', 'MORE', 'LESS', 'PAUSED', "
+            "'NOT_INTERESTED')",
+            name="explicit_interest_preferences_preference",
+        ),
+        sa.CheckConstraint(
+            "version > 0", name="explicit_interest_preferences_version"
+        ),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        sa.ForeignKey("app_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    entity_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        sa.ForeignKey("learning_entities.id"),
+        primary_key=True,
+    )
+    preference: Mapped[str] = mapped_column(sa.Text)
+    version: Mapped[int] = mapped_column(sa.Integer, server_default=sa.text("1"))
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )

@@ -1,6 +1,14 @@
 """SQLAlchemy persistence models grouped by domain."""
 
-from app.db.models.identity import AppUser, IdempotencyRecord, Job, UserDevice
+from app.db.models.identity import (
+    AppUser,
+    ExplicitInterestPreference,
+    IdempotencyRecord,
+    Job,
+    LearnerPreference,
+    UserDevice,
+    UserMotivation,
+)
 from app.db.models.ontology import (
     Claim,
     EntityDomain,
@@ -17,12 +25,15 @@ __all__ = [
     "Claim",
     "EntityDomain",
     "EntityEmbedding",
+    "ExplicitInterestPreference",
     "IdempotencyRecord",
     "Job",
     "LearningEntity",
     "LearningEntityVersion",
     "LearningObjective",
+    "LearnerPreference",
     "Misconception",
     "OntologyEdge",
     "UserDevice",
+    "UserMotivation",
 ]
