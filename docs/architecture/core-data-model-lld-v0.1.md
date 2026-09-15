@@ -2218,4 +2218,3 @@ At the same time, it gives us clean migration paths toward:
 The underlying product semantics do not need to change when those systems become more sophisticated.
 
 > **Facts are recorded. Evidence is interpreted. State is inferred. The world is rendered.**
-

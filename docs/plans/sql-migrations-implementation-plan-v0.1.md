@@ -1094,4 +1094,3 @@ Then manually verify these invariants against a fresh PostgreSQL instance:
 ## Implementation Boundary After This Plan
 
 When this plan passes, the next plan should implement FastAPI repositories/services and the API endpoints in `api-contracts-v0.1.md`. Do not start Android client implementation until the OpenAPI contract tests and the first backend vertical slice (`onboarding -> recommendation -> exploration -> reflection -> assessment -> world delta`) pass end-to-end.
-

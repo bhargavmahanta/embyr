@@ -566,4 +566,3 @@ In addition to standard authentication/authorization/not-found errors, clients m
 10. Short-lived signed storage credentials are regenerated and never treated as the durable idempotent response.
 11. External authentication identity and internal learner identity remain separate; learner-domain requests operate on internal `app_users.id`.
 12. API additions are backward-compatible within `/v1`; breaking changes require `/v2`.
-
