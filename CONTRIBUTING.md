@@ -5,7 +5,7 @@ an explicit problem and within the accepted product and architecture boundaries.
 
 ## Main Branch
 
-`main` is the protected, stable branch.
+`main` is the stable branch and must be protected.
 
 - Do not develop directly on `main`.
 - Do not force-push `main`.
