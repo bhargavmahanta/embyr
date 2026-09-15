@@ -1,0 +1,48 @@
+name: Architecture Change
+description: Propose an evidence-backed change to an accepted architecture decision.
+title: "[Architecture]: "
+labels:
+  - "type:architecture"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Architecture changes require evidence from implementation constraints,
+        user testing, security findings, performance or cost measurements, or
+        validated product evidence. Do not open an architecture change merely
+        because another technology looks interesting.
+  - type: textarea
+    id: current-limitation
+    attributes:
+      label: Current Limitation
+      description: Which accepted decision or boundary is no longer sufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Provide measured or validated evidence for changing the current decision.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed Change
+      description: Describe the smallest architecture change that addresses the evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Compare alternatives, including keeping the current decision.
+    validations:
+      required: true
+  - type: textarea
+    id: implications
+    attributes:
+      label: Product, Security, and Performance Implications
+      description: Describe relevant product, security, performance, operational, and cost effects.
+    validations:
+      required: true

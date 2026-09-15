@@ -1,0 +1,68 @@
+name: Bug
+description: Report reproducible incorrect behavior.
+title: "[Bug]: "
+labels:
+  - "type:bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, credentials, production data, or private user
+        information in this report or its attachments.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Summarize the incorrect behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: Provide the smallest reliable sequence that reproduces the problem.
+      placeholder: |
+        1. Go to ...
+        2. Perform ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the relevant app version, device, operating system, and service environment.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Screenshots
+      description: Remove secrets and private user information before attaching logs or screenshots.
+      placeholder: Add sanitized evidence, or write "None".
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Select the observed impact. Priority will be triaged separately.
+      options:
+        - Critical — release or project blocker
+        - High — major capability is unusable
+        - Medium — capability is impaired but usable
+        - Low — limited impact or workaround available
+    validations:
+      required: true

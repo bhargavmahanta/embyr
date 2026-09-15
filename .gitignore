@@ -1,0 +1,39 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Android, Kotlin, and Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+
+# IDE and editor files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Research working files
+.ipynb_checkpoints/
+research/**/.cache/
+research/**/tmp/
+research/**/outputs/tmp/
