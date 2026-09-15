@@ -127,15 +127,21 @@ def test_exploration_status_requires_coherent_timestamps(
     entity_id = _insert_versioned_entity(migrated_connection)
     now = datetime.now(UTC)
 
-    with pytest.raises(IntegrityError), migrated_connection.begin_nested():
+    with pytest.raises(IntegrityError) as error, migrated_connection.begin_nested():
         _insert_exploration(
             migrated_connection,
             user_id=user_id,
             entity_id=entity_id,
             status=status,
+            started_at=now,
             paused_at=now if paused else None,
             completed_at=now if completed else None,
         )
+
+    assert (
+        error.value.orig.diag.constraint_name
+        == "ck_explorations_ck_explorations_status_timestamps"
+    )
 
 
 def test_resumed_exploration_can_retain_pause_timestamp(migrated_connection):
