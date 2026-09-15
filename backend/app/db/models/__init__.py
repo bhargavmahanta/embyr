@@ -9,6 +9,7 @@ from app.db.models.identity import (
     UserDevice,
     UserMotivation,
 )
+from app.db.models.exploration import Exploration, Reflection
 from app.db.models.ontology import (
     Claim,
     EntityDomain,
@@ -26,6 +27,7 @@ __all__ = [
     "EntityDomain",
     "EntityEmbedding",
     "ExplicitInterestPreference",
+    "Exploration",
     "IdempotencyRecord",
     "Job",
     "LearningEntity",
@@ -34,6 +36,7 @@ __all__ = [
     "LearnerPreference",
     "Misconception",
     "OntologyEdge",
+    "Reflection",
     "UserDevice",
     "UserMotivation",
 ]
