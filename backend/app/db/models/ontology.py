@@ -195,6 +195,9 @@ class LearningObjective(Base):
             ["learning_entity_versions.entity_id", "learning_entity_versions.version"],
             name="fk_learning_objectives_entity_version",
         ),
+        sa.UniqueConstraint(
+            "entity_id", "id", name="uq_learning_objectives_entity_id_id"
+        ),
         sa.CheckConstraint(
             "importance >= 0 and importance <= 1",
             name="learning_objectives_importance",

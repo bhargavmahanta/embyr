@@ -253,8 +253,206 @@ def upgrade() -> None:
         """
     )
 
+    op.create_unique_constraint(
+        op.f("uq_learning_objectives_entity_id_id"),
+        "learning_objectives",
+        ["entity_id", "id"],
+    )
+
+    op.create_table(
+        "evaluation_runs",
+        sa.Column(
+            "id", _uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False
+        ),
+        sa.Column("user_id", _uuid(), nullable=False),
+        sa.Column("response_id", _uuid(), nullable=False),
+        sa.Column("evaluator_type", sa.Text(), nullable=False),
+        sa.Column("evaluator_version", sa.Text(), nullable=False),
+        sa.Column("rubric_version", sa.Text(), nullable=False),
+        sa.Column("result", sa.Text()),
+        sa.Column("confidence", sa.Double()),
+        sa.Column("feedback", sa.Text()),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column("supersedes_id", _uuid()),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "status in ('PENDING', 'SUCCEEDED', 'SUPERSEDED', 'REVOKED', "
+            "'FAILED')",
+            name=op.f("ck_evaluation_runs_status"),
+        ),
+        sa.CheckConstraint(
+            "result is null or result in ('SUPPORTED', 'PARTIAL', "
+            "'MISCONCEPTION', 'INSUFFICIENT_EVIDENCE', 'UNCERTAIN')",
+            name=op.f("ck_evaluation_runs_result"),
+        ),
+        sa.CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name=op.f("ck_evaluation_runs_confidence"),
+        ),
+        sa.CheckConstraint(
+            "status not in ('PENDING', 'SUCCEEDED', 'SUPERSEDED', 'REVOKED', "
+            "'FAILED') or "
+            "(status in ('PENDING', 'FAILED') and result is null and "
+            "confidence is null and feedback is null) or "
+            "(status in ('SUCCEEDED', 'SUPERSEDED', 'REVOKED') and "
+            "result is not null and confidence is not null and feedback is not null)",
+            name=op.f("ck_evaluation_runs_payload"),
+        ),
+        sa.CheckConstraint(
+            "supersedes_id is null or supersedes_id <> id",
+            name=op.f("ck_evaluation_runs_not_self_superseding"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id", "response_id"],
+            ["assessment_responses.user_id", "assessment_responses.id"],
+            ondelete="CASCADE",
+            name=op.f("fk_evaluation_runs_response_owner"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id", "supersedes_id", "response_id"],
+            ["evaluation_runs.user_id", "evaluation_runs.id", "evaluation_runs.response_id"],
+            name=op.f("fk_evaluation_runs_superseded_owner_response"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_evaluation_runs")),
+        sa.UniqueConstraint(
+            "user_id",
+            "id",
+            "response_id",
+            name=op.f("uq_evaluation_runs_owner_id_response"),
+        ),
+        sa.UniqueConstraint(
+            "supersedes_id", name=op.f("uq_evaluation_runs_supersedes_id")
+        ),
+    )
+    op.create_index(
+        "uq_evaluation_runs_active_response",
+        "evaluation_runs",
+        ["response_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'SUCCEEDED'"),
+    )
+    op.create_index(
+        "ix_evaluation_runs_user_response_created",
+        "evaluation_runs",
+        ["user_id", "response_id", sa.text("created_at DESC")],
+    )
+
+    op.create_table(
+        "learning_evidence",
+        sa.Column(
+            "id", _uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False
+        ),
+        sa.Column("user_id", _uuid(), nullable=False),
+        sa.Column("entity_id", _uuid(), nullable=False),
+        sa.Column("objective_id", _uuid(), nullable=False),
+        sa.Column("source_type", sa.Text(), nullable=False),
+        sa.Column("source_id", _uuid(), nullable=False),
+        sa.Column("evaluation_run_id", _uuid()),
+        sa.Column("evidence_type", sa.Text(), nullable=False),
+        sa.Column("evidence_strength", sa.Text(), nullable=False),
+        sa.Column("support_level", sa.Text()),
+        sa.Column("evaluation_confidence", sa.Double()),
+        sa.Column("status", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "evidence_type in ('RECOGNITION', 'RECALL', 'EXPLANATION', "
+            "'APPLICATION', 'ARGUMENT', 'PREDICTION', 'CREATION', "
+            "'DEMONSTRATION', 'REFLECTION', 'RETENTION')",
+            name=op.f("ck_learning_evidence_type"),
+        ),
+        sa.CheckConstraint(
+            "evidence_strength in ('WEAK', 'MODERATE', 'STRONG')",
+            name=op.f("ck_learning_evidence_strength"),
+        ),
+        sa.CheckConstraint(
+            f"support_level is null or support_level in ({SUPPORT_LEVEL_SQL})",
+            name=op.f("ck_learning_evidence_support_level"),
+        ),
+        sa.CheckConstraint(
+            "evaluation_confidence is null or "
+            "(evaluation_confidence >= 0 and evaluation_confidence <= 1)",
+            name=op.f("ck_learning_evidence_confidence"),
+        ),
+        sa.CheckConstraint(
+            "status in ('ACTIVE', 'SUPERSEDED', 'REVOKED')",
+            name=op.f("ck_learning_evidence_status"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["app_users.id"],
+            ondelete="CASCADE",
+            name=op.f("fk_learning_evidence_user_id_app_users"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["entity_id", "objective_id"],
+            ["learning_objectives.entity_id", "learning_objectives.id"],
+            name=op.f("fk_learning_evidence_objective_entity"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id", "evaluation_run_id", "source_id"],
+            [
+                "evaluation_runs.user_id",
+                "evaluation_runs.id",
+                "evaluation_runs.response_id",
+            ],
+            name=op.f("fk_learning_evidence_evaluation_owner_source"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_learning_evidence")),
+        sa.UniqueConstraint(
+            "user_id", "id", name=op.f("uq_learning_evidence_user_id_id")
+        ),
+    )
+    op.create_index(
+        "ix_learning_evidence_user_active_created",
+        "learning_evidence",
+        ["user_id", sa.text("created_at DESC")],
+        postgresql_where=sa.text("status = 'ACTIVE'"),
+    )
+    op.create_index(
+        "ix_learning_evidence_objective_status",
+        "learning_evidence",
+        ["objective_id", "status"],
+    )
+    op.create_index(
+        "ix_learning_evidence_evaluation_run_id",
+        "learning_evidence",
+        ["evaluation_run_id"],
+    )
+
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_learning_evidence_evaluation_run_id", table_name="learning_evidence"
+    )
+    op.drop_index(
+        "ix_learning_evidence_objective_status", table_name="learning_evidence"
+    )
+    op.drop_index(
+        "ix_learning_evidence_user_active_created", table_name="learning_evidence"
+    )
+    op.drop_table("learning_evidence")
+    op.drop_index(
+        "ix_evaluation_runs_user_response_created", table_name="evaluation_runs"
+    )
+    op.drop_index(
+        "uq_evaluation_runs_active_response", table_name="evaluation_runs"
+    )
+    op.drop_table("evaluation_runs")
+    op.drop_constraint(
+        op.f("uq_learning_objectives_entity_id_id"),
+        "learning_objectives",
+        type_="unique",
+    )
     op.execute(
         "drop trigger trg_assessment_responses_immutable on assessment_responses"
     )

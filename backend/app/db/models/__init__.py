@@ -5,6 +5,8 @@ from app.db.models.assessment import (
     AssessmentResponse,
     AssessmentSession,
     AssessmentSupportRequest,
+    EvaluationRun,
+    LearningEvidence,
 )
 from app.db.models.identity import (
     AppUser,
@@ -36,12 +38,14 @@ __all__ = [
     "Claim",
     "EntityDomain",
     "EntityEmbedding",
+    "EvaluationRun",
     "ExplicitInterestPreference",
     "Exploration",
     "IdempotencyRecord",
     "Job",
     "LearningEntity",
     "LearningEntityVersion",
+    "LearningEvidence",
     "LearningObjective",
     "LearnerPreference",
     "Misconception",

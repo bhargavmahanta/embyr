@@ -400,6 +400,17 @@ def test_support_request_enforces_level_and_interaction_ownership(
                 "requested_level": "SMALL_NUDGE",
             },
         )
+    _assert_constraint(
+        migrated_connection,
+        "fk_assessment_support_requests_interaction_owner_session",
+        statement,
+        {
+            "user_id": graph["user_id"],
+            "session_id": graph["session_id"],
+            "interaction_id": uuid4(),
+            "requested_level": "SMALL_NUDGE",
+        },
+    )
 
 
 def test_response_enforces_ownership_uniqueness_and_support_level(
@@ -407,6 +418,21 @@ def test_response_enforces_ownership_uniqueness_and_support_level(
 ):
     graph = _valid_graph(migrated_connection)
     other_user_id = _insert_user(migrated_connection)
+    entity_id, objective_id = _insert_entity_and_objective(migrated_connection)
+    other_exploration_id = _insert_exploration(
+        migrated_connection, user_id=graph["user_id"], entity_id=entity_id
+    )
+    other_session_id = _insert_session(
+        migrated_connection,
+        user_id=graph["user_id"],
+        exploration_id=other_exploration_id,
+    )
+    _insert_interaction(
+        migrated_connection,
+        user_id=graph["user_id"],
+        session_id=other_session_id,
+        objective_id=objective_id,
+    )
     statement = text(
         """
         insert into assessment_responses
@@ -440,6 +466,21 @@ def test_response_enforces_ownership_uniqueness_and_support_level(
             "support_used": "ANSWER",
         },
     )
+    for session_id, interaction_id in [
+        (other_session_id, graph["interaction_id"]),
+        (graph["session_id"], uuid4()),
+    ]:
+        _assert_constraint(
+            migrated_connection,
+            "fk_assessment_responses_interaction_owner_session",
+            statement,
+            {
+                "user_id": graph["user_id"],
+                "session_id": session_id,
+                "interaction_id": interaction_id,
+                "support_used": None,
+            },
+        )
     migrated_connection.execute(
         statement,
         {
