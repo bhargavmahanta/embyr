@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+from time import monotonic, sleep
 from uuid import uuid4
 
 import pytest
@@ -683,6 +686,70 @@ def test_evaluation_cannot_leave_active_evidence_when_superseded(
         error.value.orig.diag.constraint_name
         == "ck_evaluation_runs_active_evidence"
     )
+
+
+def test_concurrent_evidence_insert_serializes_with_evaluation_supersession(
+    migrated_engine,
+):
+    with migrated_engine.begin() as setup_connection:
+        graph = _response_graph(setup_connection)
+        evaluation_id = _insert_evaluation(
+            setup_connection,
+            user_id=graph["user_id"],
+            response_id=graph["response_id"],
+        )
+
+    worker_pid: Queue[int] = Queue()
+
+    def supersede_evaluation() -> None:
+        with migrated_engine.begin() as worker_connection:
+            worker_pid.put(
+                worker_connection.execute(text("select pg_backend_pid()"))
+                .scalar_one()
+            )
+            worker_connection.execute(
+                text(
+                    "update evaluation_runs set status = 'SUPERSEDED' "
+                    "where id = :id"
+                ),
+                {"id": evaluation_id},
+            )
+
+    evidence_connection = migrated_engine.connect()
+    evidence_transaction = evidence_connection.begin()
+    try:
+        evidence_connection.execute(
+            EVIDENCE_INSERT, _evidence_parameters(graph, evaluation_id)
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            supersession = executor.submit(supersede_evaluation)
+            pid = worker_pid.get(timeout=5)
+            deadline = monotonic() + 5
+            blocked = False
+            with migrated_engine.connect() as observer:
+                while monotonic() < deadline:
+                    blocked = observer.execute(
+                        text("select cardinality(pg_blocking_pids(:pid)) > 0"),
+                        {"pid": pid},
+                    ).scalar_one()
+                    if blocked:
+                        break
+                    if supersession.done():
+                        break
+                    sleep(0.01)
+
+            assert blocked, "evaluation transition did not wait for evidence validation"
+            evidence_transaction.commit()
+            with pytest.raises(IntegrityError) as error:
+                supersession.result(timeout=5)
+            assert (
+                error.value.orig.diag.constraint_name
+                == "ck_evaluation_runs_active_evidence"
+            )
+    finally:
+        if evidence_transaction.is_active:
+            evidence_transaction.rollback()
+        evidence_connection.close()
 
 
 def test_evidence_status_changes_retain_historical_rows(migrated_connection):

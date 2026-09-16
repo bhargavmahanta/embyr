@@ -307,6 +307,125 @@ def upgrade() -> None:
         """
     )
 
+    op.execute(
+        """
+        create function protect_answered_assessment_interaction()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if exists (
+                select 1
+                  from assessment_responses ar
+                 where ar.user_id = old.user_id
+                   and ar.assessment_session_id = old.assessment_session_id
+                   and ar.interaction_id = old.id
+            ) then
+                if tg_op = 'DELETE' then
+                    if current_user <> 'app_maintenance' then
+                        raise exception using
+                            errcode = '55000',
+                            constraint = 'ck_assessment_interactions_historical_prompt',
+                            message = 'answered assessment interactions are historical';
+                    end if;
+                    return old;
+                end if;
+                if new is distinct from old then
+                    raise exception using
+                        errcode = '55000',
+                        constraint = 'ck_assessment_interactions_historical_prompt',
+                        message = 'answered assessment interactions are historical';
+                end if;
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_assessment_interactions_historical_prompt
+        before update or delete on assessment_interactions
+        for each row execute function protect_answered_assessment_interaction()
+        """
+    )
+
+    op.execute(
+        """
+        create function protect_assessed_objective_version()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if (new.entity_id is distinct from old.entity_id
+                or new.entity_version is distinct from old.entity_version)
+               and exists (
+                    select 1
+                      from assessment_interactions ai
+                      join assessment_responses ar
+                        on ar.user_id = ai.user_id
+                       and ar.assessment_session_id = ai.assessment_session_id
+                       and ar.interaction_id = ai.id
+                     where ai.objective_id = old.id
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_learning_objectives_assessment_history',
+                    message = 'objectives referenced by assessment history cannot change entity version';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_learning_objectives_assessment_history
+        before update of entity_id, entity_version on learning_objectives
+        for each row execute function protect_assessed_objective_version()
+        """
+    )
+
+    op.execute(
+        """
+        create function protect_assessed_exploration_entity()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if (new.entity_id is distinct from old.entity_id
+                or new.entity_version is distinct from old.entity_version)
+               and exists (
+                    select 1
+                      from assessment_sessions s
+                      join assessment_interactions ai
+                        on ai.user_id = s.user_id
+                       and ai.assessment_session_id = s.id
+                      join assessment_responses ar
+                        on ar.user_id = ai.user_id
+                       and ar.assessment_session_id = ai.assessment_session_id
+                       and ar.interaction_id = ai.id
+                     where s.user_id = old.user_id
+                       and s.exploration_id = old.id
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_explorations_assessment_history',
+                    message = 'explorations referenced by assessment history cannot change entity version';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_explorations_assessment_history
+        before update of entity_id, entity_version on explorations
+        for each row execute function protect_assessed_exploration_entity()
+        """
+    )
+
     op.create_unique_constraint(
         op.f("uq_learning_objectives_entity_id_id"),
         "learning_objectives",
@@ -581,7 +700,8 @@ def upgrade() -> None:
                and ai.id = ar.interaction_id
              where er.user_id = new.user_id
                and er.id = new.evaluation_run_id
-               and er.response_id = new.source_id;
+               and er.response_id = new.source_id
+             for share of er;
             if not found then
                 return new;
             end if;
@@ -730,6 +850,20 @@ def downgrade() -> None:
     op.execute("drop function validate_learning_evidence_evaluation()")
     op.execute("drop trigger trg_evaluation_runs_history on evaluation_runs")
     op.execute("drop function protect_evaluation_run_history()")
+    op.execute(
+        "drop trigger trg_explorations_assessment_history on explorations"
+    )
+    op.execute("drop function protect_assessed_exploration_entity()")
+    op.execute(
+        "drop trigger trg_learning_objectives_assessment_history "
+        "on learning_objectives"
+    )
+    op.execute("drop function protect_assessed_objective_version()")
+    op.execute(
+        "drop trigger trg_assessment_interactions_historical_prompt "
+        "on assessment_interactions"
+    )
+    op.execute("drop function protect_answered_assessment_interaction()")
     op.drop_index(
         "ix_learning_evidence_evaluation_run_id", table_name="learning_evidence"
     )

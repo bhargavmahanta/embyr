@@ -616,7 +616,10 @@ def test_response_update_and_nonmaintenance_delete_are_rejected_and_retained(
             {"id": graph["exploration_id"]},
         )
     assert cascade_error.value.orig.sqlstate == "55000"
-    assert "app_maintenance" in str(cascade_error.value.orig)
+    assert (
+        cascade_error.value.orig.diag.constraint_name
+        == "ck_assessment_interactions_historical_prompt"
+    )
 
 
 def test_support_request_is_persisted_before_response_support_snapshot(
@@ -673,3 +676,69 @@ def test_support_request_is_persisted_before_response_support_snapshot(
         ),
         {"support_id": support_id, "response_id": response_id},
     ).one() == ("STRONG_HINT", "STRONG_HINT")
+
+
+def test_answered_interaction_and_parent_version_snapshot_cannot_be_rewritten(
+    migrated_connection,
+):
+    graph = _valid_graph(migrated_connection)
+    migrated_connection.execute(
+        text(
+            """
+            insert into assessment_responses
+              (user_id, assessment_session_id, interaction_id, response_type,
+               response_content)
+            values
+              (:user_id, :session_id, :interaction_id, 'FREE_TEXT',
+               '{"text":"Historical answer"}'::jsonb)
+            """
+        ),
+        {
+            "user_id": graph["user_id"],
+            "session_id": graph["session_id"],
+            "interaction_id": graph["interaction_id"],
+        },
+    )
+    other_entity_id, other_objective_id = _insert_entity_and_objective(
+        migrated_connection
+    )
+
+    for statement, parameters, expected in [
+        (
+            text(
+                "update assessment_interactions set prompt_definition = "
+                "'{\"prompt\":\"Rewritten\"}'::jsonb where id = :id"
+            ),
+            {"id": graph["interaction_id"]},
+            "ck_assessment_interactions_historical_prompt",
+        ),
+        (
+            text(
+                "update assessment_interactions set objective_id = :objective_id "
+                "where id = :id"
+            ),
+            {
+                "id": graph["interaction_id"],
+                "objective_id": other_objective_id,
+            },
+            "ck_assessment_interactions_historical_prompt",
+        ),
+        (
+            text(
+                "update learning_objectives set entity_id = :entity_id "
+                "where id = :id"
+            ),
+            {"id": graph["objective_id"], "entity_id": other_entity_id},
+            "ck_learning_objectives_assessment_history",
+        ),
+        (
+            text(
+                "update explorations set entity_id = :entity_id where id = :id"
+            ),
+            {"id": graph["exploration_id"], "entity_id": other_entity_id},
+            "ck_explorations_assessment_history",
+        ),
+    ]:
+        with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
+            migrated_connection.execute(statement, parameters)
+        assert error.value.orig.diag.constraint_name == expected
