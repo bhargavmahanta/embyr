@@ -27,6 +27,14 @@ from app.db.models.identity import (
 )
 from app.db.models.exploration import Exploration, Reflection
 from app.db.models.events import LearningEvent
+from app.db.models.learner_state import (
+    LearnerChallengeState,
+    LearnerConfidenceState,
+    LearnerInterestState,
+    LearnerObjectiveState,
+    LearnerRetentionState,
+    StateEvidenceLink,
+)
 from app.db.models.ontology import (
     Claim,
     EntityDomain,
@@ -59,13 +67,19 @@ __all__ = [
     "LearningEvidence",
     "LearningEvent",
     "LearningObjective",
+    "LearnerChallengeState",
+    "LearnerConfidenceState",
+    "LearnerInterestState",
+    "LearnerObjectiveState",
     "LearnerPreference",
+    "LearnerRetentionState",
     "MediaObject",
     "Misconception",
     "OntologyEdge",
     "PracticalChallenge",
     "PracticalChallengeVersion",
     "Reflection",
+    "StateEvidenceLink",
     "UploadSession",
     "UserDevice",
     "UserMotivation",
