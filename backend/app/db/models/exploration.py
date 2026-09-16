@@ -31,6 +31,28 @@ class Exploration(Base):
             "entity_version",
             name="uq_explorations_user_id_id_entity_version",
         ),
+        sa.ForeignKeyConstraint(
+            ["practical_challenge_id", "practical_challenge_version_id"],
+            [
+                "practical_challenge_versions.challenge_id",
+                "practical_challenge_versions.id",
+            ],
+            name="fk_explorations_practical_challenge_version",
+        ),
+        sa.UniqueConstraint(
+            "user_id",
+            "id",
+            "practical_challenge_id",
+            "practical_challenge_version_id",
+            name="uq_explorations_owner_challenge_version",
+        ),
+        sa.CheckConstraint(
+            "(practical_challenge_id is null and "
+            "practical_challenge_version_id is null) or "
+            "(practical_challenge_id is not null and "
+            "practical_challenge_version_id is not null)",
+            name="explorations_practical_challenge_pair",
+        ),
         sa.CheckConstraint(
             "learning_intent in ('DIRECT_INTEREST', 'PREREQUISITE_SUPPORT', "
             "'RELATED_EXPLORATION', 'RETENTION_REVISIT', 'PRACTICAL_SUPPORT', "
@@ -75,6 +97,9 @@ class Exploration(Base):
     entity_version: Mapped[int] = mapped_column(sa.Integer)
     recommendation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     practical_challenge_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    practical_challenge_version_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True)
+    )
     learning_intent: Mapped[str] = mapped_column(sa.Text)
     status: Mapped[str] = mapped_column(sa.Text)
     started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
@@ -94,6 +119,12 @@ class Reflection(Base):
             name="fk_reflections_exploration_owner_entity",
         ),
         sa.UniqueConstraint("user_id", "id", name="uq_reflections_user_id_id"),
+        sa.UniqueConstraint(
+            "user_id",
+            "exploration_id",
+            "id",
+            name="uq_reflections_owner_exploration_id",
+        ),
         sa.CheckConstraint("version > 0", name="reflections_version"),
         sa.Index("ix_reflections_user_exploration", "user_id", "exploration_id"),
     )

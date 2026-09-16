@@ -8,6 +8,14 @@ from app.db.models.assessment import (
     EvaluationRun,
     LearningEvidence,
 )
+from app.db.models.artifacts import (
+    Artifact,
+    ArtifactAnalysis,
+    MediaObject,
+    PracticalChallenge,
+    PracticalChallengeVersion,
+    UploadSession,
+)
 from app.db.models.identity import (
     AppUser,
     ExplicitInterestPreference,
@@ -31,6 +39,8 @@ from app.db.models.ontology import (
 
 __all__ = [
     "AppUser",
+    "Artifact",
+    "ArtifactAnalysis",
     "AssessmentInteraction",
     "AssessmentResponse",
     "AssessmentSession",
@@ -48,9 +58,13 @@ __all__ = [
     "LearningEvidence",
     "LearningObjective",
     "LearnerPreference",
+    "MediaObject",
     "Misconception",
     "OntologyEdge",
+    "PracticalChallenge",
+    "PracticalChallengeVersion",
     "Reflection",
+    "UploadSession",
     "UserDevice",
     "UserMotivation",
 ]
