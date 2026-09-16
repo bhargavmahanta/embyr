@@ -279,6 +279,57 @@ def upgrade() -> None:
 
     op.execute(
         """
+        create function validate_assessment_response_objective_version()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            perform 1
+              from assessment_interactions ai
+             where ai.user_id = new.user_id
+               and ai.assessment_session_id = new.assessment_session_id
+               and ai.id = new.interaction_id;
+            if not found then
+                return new;
+            end if;
+
+            perform 1
+              from assessment_interactions ai
+              join assessment_sessions s
+                on s.user_id = ai.user_id
+               and s.id = ai.assessment_session_id
+              join explorations e
+                on e.user_id = s.user_id
+               and e.id = s.exploration_id
+              join learning_objectives o
+                on o.id = ai.objective_id
+               and o.entity_id = e.entity_id
+               and o.entity_version = s.entity_version
+             where ai.user_id = new.user_id
+               and ai.assessment_session_id = new.assessment_session_id
+               and ai.id = new.interaction_id
+             for share of ai, s, e, o;
+            if not found then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_assessment_responses_objective_version',
+                    message = 'assessment response objective must match the assessed entity version';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_assessment_responses_objective_version
+        before insert on assessment_responses
+        for each row execute function validate_assessment_response_objective_version()
+        """
+    )
+
+    op.execute(
+        """
         create function prevent_assessment_response_mutation()
         returns trigger
         language plpgsql
@@ -336,6 +387,9 @@ def upgrade() -> None:
                         constraint = 'ck_assessment_interactions_historical_prompt',
                         message = 'answered assessment interactions are historical';
                 end if;
+            end if;
+            if tg_op = 'DELETE' then
+                return old;
             end if;
             return new;
         end;
@@ -890,6 +944,11 @@ def downgrade() -> None:
         "drop trigger trg_assessment_responses_immutable on assessment_responses"
     )
     op.execute("drop function prevent_assessment_response_mutation()")
+    op.execute(
+        "drop trigger trg_assessment_responses_objective_version "
+        "on assessment_responses"
+    )
+    op.execute("drop function validate_assessment_response_objective_version()")
     op.drop_index(
         "ix_assessment_responses_user_submitted",
         table_name="assessment_responses",

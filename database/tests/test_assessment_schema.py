@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from queue import Queue
+from time import monotonic, sleep
 from uuid import uuid4
 
 import pytest
@@ -742,3 +745,135 @@ def test_answered_interaction_and_parent_version_snapshot_cannot_be_rewritten(
         with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
             migrated_connection.execute(statement, parameters)
         assert error.value.orig.diag.constraint_name == expected
+
+
+def test_unanswered_interaction_allows_parent_cascade_delete(migrated_connection):
+    graph = _valid_graph(migrated_connection)
+
+    result = migrated_connection.execute(
+        text("delete from explorations where id = :id"),
+        {"id": graph["exploration_id"]},
+    )
+
+    assert result.rowcount == 1
+    assert migrated_connection.execute(
+        text("select count(*) from assessment_interactions where id = :id"),
+        {"id": graph["interaction_id"]},
+    ).scalar_one() == 0
+
+
+@pytest.mark.parametrize("mutated_parent", ["objective", "exploration"])
+def test_response_revalidates_entity_version_after_pre_response_parent_change(
+    migrated_connection, mutated_parent
+):
+    graph = _valid_graph(migrated_connection)
+    other_entity_id, _ = _insert_entity_and_objective(migrated_connection)
+    if mutated_parent == "objective":
+        migrated_connection.execute(
+            text(
+                "update learning_objectives set entity_id = :entity_id "
+                "where id = :id"
+            ),
+            {"entity_id": other_entity_id, "id": graph["objective_id"]},
+        )
+    else:
+        migrated_connection.execute(
+            text("update explorations set entity_id = :entity_id where id = :id"),
+            {"entity_id": other_entity_id, "id": graph["exploration_id"]},
+        )
+
+    with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
+        migrated_connection.execute(
+            text(
+                """
+                insert into assessment_responses
+                  (user_id, assessment_session_id, interaction_id, response_type,
+                   response_content)
+                values
+                  (:user_id, :session_id, :interaction_id, 'FREE_TEXT',
+                   '{"text":"Would freeze inconsistent history"}'::jsonb)
+                """
+            ),
+            {
+                "user_id": graph["user_id"],
+                "session_id": graph["session_id"],
+                "interaction_id": graph["interaction_id"],
+            },
+        )
+
+    assert (
+        error.value.orig.diag.constraint_name
+        == "ck_assessment_responses_objective_version"
+    )
+
+
+def test_response_insert_serializes_with_objective_version_change(migrated_engine):
+    with migrated_engine.begin() as setup_connection:
+        graph = _valid_graph(setup_connection)
+        other_entity_id, _ = _insert_entity_and_objective(setup_connection)
+
+    worker_pid: Queue[int] = Queue()
+
+    def insert_response() -> None:
+        with migrated_engine.begin() as worker_connection:
+            worker_pid.put(
+                worker_connection.execute(text("select pg_backend_pid()"))
+                .scalar_one()
+            )
+            worker_connection.execute(
+                text(
+                    """
+                    insert into assessment_responses
+                      (user_id, assessment_session_id, interaction_id,
+                       response_type, response_content)
+                    values
+                      (:user_id, :session_id, :interaction_id, 'FREE_TEXT',
+                       '{"text":"Concurrent response"}'::jsonb)
+                    """
+                ),
+                {
+                    "user_id": graph["user_id"],
+                    "session_id": graph["session_id"],
+                    "interaction_id": graph["interaction_id"],
+                },
+            )
+
+    parent_connection = migrated_engine.connect()
+    parent_transaction = parent_connection.begin()
+    try:
+        parent_connection.execute(
+            text(
+                "update learning_objectives set entity_id = :entity_id "
+                "where id = :id"
+            ),
+            {"entity_id": other_entity_id, "id": graph["objective_id"]},
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            response_insert = executor.submit(insert_response)
+            pid = worker_pid.get(timeout=5)
+            deadline = monotonic() + 5
+            blocked = False
+            with migrated_engine.connect() as observer:
+                while monotonic() < deadline:
+                    blocked = observer.execute(
+                        text("select cardinality(pg_blocking_pids(:pid)) > 0"),
+                        {"pid": pid},
+                    ).scalar_one()
+                    if blocked:
+                        break
+                    if response_insert.done():
+                        break
+                    sleep(0.01)
+
+            assert blocked, "response insert did not lock the objective snapshot"
+            parent_transaction.commit()
+            with pytest.raises(DBAPIError) as error:
+                response_insert.result(timeout=5)
+            assert (
+                error.value.orig.diag.constraint_name
+                == "ck_assessment_responses_objective_version"
+            )
+    finally:
+        if parent_transaction.is_active:
+            parent_transaction.rollback()
+        parent_connection.close()
