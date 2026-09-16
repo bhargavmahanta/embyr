@@ -18,6 +18,12 @@ class Exploration(Base):
             ["learning_entity_versions.entity_id", "learning_entity_versions.version"],
             name="fk_explorations_entity_version",
         ),
+        sa.ForeignKeyConstraint(
+            ["user_id", "recommendation_id"],
+            ["recommendations.user_id", "recommendations.id"],
+            ondelete="SET NULL (recommendation_id)",
+            name="fk_explorations_recommendation_owner",
+        ),
         sa.UniqueConstraint("user_id", "id", name="uq_explorations_user_id_id"),
         sa.UniqueConstraint(
             "user_id",
