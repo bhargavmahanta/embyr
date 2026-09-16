@@ -46,6 +46,14 @@ from app.db.models.ontology import (
     OntologyEdge,
 )
 from app.db.models.recommendations import Recommendation
+from app.db.models.world import (
+    LearnerWorld,
+    WorldArtifact,
+    WorldChange,
+    WorldConnection,
+    WorldNode,
+    WorldRegion,
+)
 
 __all__ = [
     "AppUser",
@@ -74,6 +82,7 @@ __all__ = [
     "LearnerObjectiveState",
     "LearnerPreference",
     "LearnerRetentionState",
+    "LearnerWorld",
     "MediaObject",
     "Misconception",
     "OntologyEdge",
@@ -85,4 +94,9 @@ __all__ = [
     "UploadSession",
     "UserDevice",
     "UserMotivation",
+    "WorldArtifact",
+    "WorldChange",
+    "WorldConnection",
+    "WorldNode",
+    "WorldRegion",
 ]
