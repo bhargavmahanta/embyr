@@ -840,6 +840,7 @@ def test_response_insert_serializes_with_objective_version_change(migrated_engin
 
     parent_connection = migrated_engine.connect()
     parent_transaction = parent_connection.begin()
+    executor = ThreadPoolExecutor(max_workers=1)
     try:
         parent_connection.execute(
             text(
@@ -848,32 +849,32 @@ def test_response_insert_serializes_with_objective_version_change(migrated_engin
             ),
             {"entity_id": other_entity_id, "id": graph["objective_id"]},
         )
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            response_insert = executor.submit(insert_response)
-            pid = worker_pid.get(timeout=5)
-            deadline = monotonic() + 5
-            blocked = False
-            with migrated_engine.connect() as observer:
-                while monotonic() < deadline:
-                    blocked = observer.execute(
-                        text("select cardinality(pg_blocking_pids(:pid)) > 0"),
-                        {"pid": pid},
-                    ).scalar_one()
-                    if blocked:
-                        break
-                    if response_insert.done():
-                        break
-                    sleep(0.01)
+        response_insert = executor.submit(insert_response)
+        pid = worker_pid.get(timeout=5)
+        deadline = monotonic() + 5
+        blocked = False
+        with migrated_engine.connect() as observer:
+            while monotonic() < deadline:
+                blocked = observer.execute(
+                    text("select cardinality(pg_blocking_pids(:pid)) > 0"),
+                    {"pid": pid},
+                ).scalar_one()
+                if blocked:
+                    break
+                if response_insert.done():
+                    break
+                sleep(0.01)
 
-            assert blocked, "response insert did not lock the objective snapshot"
-            parent_transaction.commit()
-            with pytest.raises(DBAPIError) as error:
-                response_insert.result(timeout=5)
-            assert (
-                error.value.orig.diag.constraint_name
-                == "ck_assessment_responses_objective_version"
-            )
+        assert blocked, "response insert did not lock the objective snapshot"
+        parent_transaction.commit()
+        with pytest.raises(DBAPIError) as error:
+            response_insert.result(timeout=5)
+        assert (
+            error.value.orig.diag.constraint_name
+            == "ck_assessment_responses_objective_version"
+        )
     finally:
         if parent_transaction.is_active:
             parent_transaction.rollback()
         parent_connection.close()
+        executor.shutdown(wait=True)
