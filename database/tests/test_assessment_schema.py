@@ -343,6 +343,63 @@ def test_interaction_requires_owned_session_existing_objective_and_positive_sequ
     )
 
 
+def test_interaction_objective_matches_assessed_entity_and_version(
+    migrated_connection,
+):
+    graph = _valid_graph(migrated_connection)
+    _, other_objective_id = _insert_entity_and_objective(migrated_connection)
+    migrated_connection.execute(
+        text(
+            """
+            insert into learning_entity_versions
+              (entity_id, version, title, summary, knowledge_types, scope)
+            values
+              (:entity_id, 2, 'Second version', 'Summary',
+               array['CONCEPTUAL'], 'NORMAL')
+            """
+        ),
+        {"entity_id": graph["entity_id"]},
+    )
+    version_two_objective_id = migrated_connection.execute(
+        text(
+            """
+            insert into learning_objectives
+              (entity_id, entity_version, objective_type, description, importance)
+            values
+              (:entity_id, 2, 'EXPLANATION', 'Explain version two', 0.8)
+            returning id
+            """
+        ),
+        {"entity_id": graph["entity_id"]},
+    ).scalar_one()
+
+    statement = text(
+        """
+        insert into assessment_interactions
+          (user_id, assessment_session_id, objective_id, interaction_type,
+           prompt_definition, rubric_version, sequence)
+        values
+          (:user_id, :session_id, :objective_id, 'FREE_RESPONSE',
+           '{"prompt":"Explain it"}'::jsonb, 'rubric-v1', :sequence)
+        """
+    )
+    for objective_id, sequence in [
+        (other_objective_id, 2),
+        (version_two_objective_id, 3),
+    ]:
+        _assert_constraint(
+            migrated_connection,
+            "ck_assessment_interactions_objective_version",
+            statement,
+            {
+                "user_id": graph["user_id"],
+                "session_id": graph["session_id"],
+                "objective_id": objective_id,
+                "sequence": sequence,
+            },
+        )
+
+
 def test_support_request_enforces_level_and_interaction_ownership(
     migrated_connection,
 ):
@@ -552,3 +609,67 @@ def test_response_update_and_nonmaintenance_delete_are_rejected_and_retained(
         text("select response_content ->> 'text' from assessment_responses where id = :id"),
         {"id": response_id},
     ).scalar_one() == "Historical answer"
+
+    with pytest.raises(DBAPIError) as cascade_error, migrated_connection.begin_nested():
+        migrated_connection.execute(
+            text("delete from explorations where id = :id"),
+            {"id": graph["exploration_id"]},
+        )
+    assert cascade_error.value.orig.sqlstate == "55000"
+    assert "app_maintenance" in str(cascade_error.value.orig)
+
+
+def test_support_request_is_persisted_before_response_support_snapshot(
+    migrated_connection,
+):
+    graph = _valid_graph(migrated_connection)
+    support_id = migrated_connection.execute(
+        text(
+            """
+            insert into assessment_support_requests
+              (user_id, assessment_session_id, interaction_id, requested_level,
+               delivered_content, support_source)
+            values
+              (:user_id, :session_id, :interaction_id, 'STRONG_HINT',
+               '{"text":"Focus on causality"}'::jsonb, 'GENERATED')
+            returning id
+            """
+        ),
+        {
+            "user_id": graph["user_id"],
+            "session_id": graph["session_id"],
+            "interaction_id": graph["interaction_id"],
+        },
+    ).scalar_one()
+    response_id = migrated_connection.execute(
+        text(
+            """
+            insert into assessment_responses
+              (user_id, assessment_session_id, interaction_id, response_type,
+               response_content, support_used)
+            values
+              (:user_id, :session_id, :interaction_id, 'FREE_TEXT',
+               '{"text":"Supported answer"}'::jsonb, 'STRONG_HINT')
+            returning id
+            """
+        ),
+        {
+            "user_id": graph["user_id"],
+            "session_id": graph["session_id"],
+            "interaction_id": graph["interaction_id"],
+        },
+    ).scalar_one()
+
+    assert migrated_connection.execute(
+        text(
+            """
+            select r.support_used, s.requested_level
+            from assessment_responses r
+            join assessment_support_requests s
+              on s.id = :support_id
+             and s.interaction_id = r.interaction_id
+            where r.id = :response_id
+            """
+        ),
+        {"support_id": support_id, "response_id": response_id},
+    ).one() == ("STRONG_HINT", "STRONG_HINT")

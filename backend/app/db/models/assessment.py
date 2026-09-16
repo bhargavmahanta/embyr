@@ -96,11 +96,7 @@ class AssessmentInteraction(Base):
             name="uq_assessment_interactions_session_sequence",
         ),
         sa.CheckConstraint("sequence > 0", name="sequence"),
-        sa.Index(
-            "ix_assessment_interactions_session_sequence",
-            "assessment_session_id",
-            "sequence",
-        ),
+        sa.Index("ix_assessment_interactions_objective_id", "objective_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -334,6 +330,11 @@ class LearningEvidence(Base):
         ),
         sa.CheckConstraint(
             "status in ('ACTIVE', 'SUPERSEDED', 'REVOKED')", name="status"
+        ),
+        sa.CheckConstraint(
+            "(source_type = 'ASSESSMENT_RESPONSE' and evaluation_run_id is not null) "
+            "or (source_type <> 'ASSESSMENT_RESPONSE' and evaluation_run_id is null)",
+            name="assessment_source",
         ),
         sa.Index(
             "ix_learning_evidence_user_active_created",

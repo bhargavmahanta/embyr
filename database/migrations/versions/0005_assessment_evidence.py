@@ -126,9 +126,63 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_assessment_interactions_session_sequence",
+        "ix_assessment_interactions_objective_id",
         "assessment_interactions",
-        ["assessment_session_id", "sequence"],
+        ["objective_id"],
+    )
+
+    op.execute(
+        """
+        create function validate_assessment_interaction_objective_version()
+        returns trigger
+        language plpgsql
+        as $$
+        declare
+            assessed_entity_id uuid;
+            assessed_entity_version integer;
+            objective_entity_id uuid;
+            objective_entity_version integer;
+        begin
+            select entity_id, entity_version
+              into objective_entity_id, objective_entity_version
+              from learning_objectives
+             where id = new.objective_id;
+            if not found then
+                return new;
+            end if;
+
+            select e.entity_id, s.entity_version
+              into assessed_entity_id, assessed_entity_version
+              from assessment_sessions s
+              join explorations e
+                on e.user_id = s.user_id
+               and e.id = s.exploration_id
+               and e.entity_version = s.entity_version
+             where s.user_id = new.user_id
+               and s.id = new.assessment_session_id;
+            if not found then
+                return new;
+            end if;
+
+            if objective_entity_id <> assessed_entity_id
+               or objective_entity_version <> assessed_entity_version then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_assessment_interactions_objective_version',
+                    message = 'assessment objective must match the assessed entity version';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_assessment_interactions_objective_version
+        before insert or update of user_id, assessment_session_id, objective_id
+        on assessment_interactions
+        for each row execute function validate_assessment_interaction_objective_version()
+        """
     )
 
     op.create_table(
@@ -387,6 +441,13 @@ def upgrade() -> None:
             "status in ('ACTIVE', 'SUPERSEDED', 'REVOKED')",
             name=op.f("ck_learning_evidence_status"),
         ),
+        sa.CheckConstraint(
+            "(source_type = 'ASSESSMENT_RESPONSE' and "
+            "evaluation_run_id is not null) or "
+            "(source_type <> 'ASSESSMENT_RESPONSE' and "
+            "evaluation_run_id is null)",
+            name=op.f("ck_learning_evidence_assessment_source"),
+        ),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["app_users.id"],
@@ -429,8 +490,246 @@ def upgrade() -> None:
         ["evaluation_run_id"],
     )
 
+    op.execute(
+        """
+        create function protect_evaluation_run_history()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if tg_op = 'DELETE' then
+                if current_user <> 'app_maintenance' then
+                    raise exception using
+                        errcode = '55000',
+                        constraint = 'ck_evaluation_runs_maintenance_delete',
+                        message = 'evaluation runs may be deleted only by app_maintenance';
+                end if;
+                return old;
+            end if;
+
+            if new.id is distinct from old.id
+               or new.user_id is distinct from old.user_id
+               or new.response_id is distinct from old.response_id
+               or new.evaluator_type is distinct from old.evaluator_type
+               or new.evaluator_version is distinct from old.evaluator_version
+               or new.rubric_version is distinct from old.rubric_version
+               or new.supersedes_id is distinct from old.supersedes_id
+               or new.created_at is distinct from old.created_at
+               or (
+                    (new.result is distinct from old.result
+                     or new.confidence is distinct from old.confidence
+                     or new.feedback is distinct from old.feedback)
+                    and not (
+                        old.status = 'PENDING'
+                        and new.status in ('SUCCEEDED', 'FAILED')
+                    )
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_evaluation_runs_immutable_payload',
+                    message = 'evaluation identity and completed payload are immutable';
+            end if;
+
+            if new.status is distinct from old.status
+               and not (
+                    (old.status = 'PENDING' and new.status in ('SUCCEEDED', 'FAILED'))
+                    or (old.status = 'SUCCEEDED' and new.status in ('SUPERSEDED', 'REVOKED'))
+                    or (old.status = 'SUPERSEDED' and new.status = 'REVOKED')
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_evaluation_runs_status_transition',
+                    message = 'invalid evaluation status transition';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_evaluation_runs_history
+        before update or delete on evaluation_runs
+        for each row execute function protect_evaluation_run_history()
+        """
+    )
+
+    op.execute(
+        """
+        create function validate_learning_evidence_evaluation()
+        returns trigger
+        language plpgsql
+        as $$
+        declare
+            evaluation_status text;
+            evaluation_result text;
+            response_objective_id uuid;
+        begin
+            if new.evaluation_run_id is null then
+                return new;
+            end if;
+
+            select er.status, er.result, ai.objective_id
+              into evaluation_status, evaluation_result, response_objective_id
+              from evaluation_runs er
+              join assessment_responses ar
+                on ar.user_id = er.user_id
+               and ar.id = er.response_id
+              join assessment_interactions ai
+                on ai.user_id = ar.user_id
+               and ai.assessment_session_id = ar.assessment_session_id
+               and ai.id = ar.interaction_id
+             where er.user_id = new.user_id
+               and er.id = new.evaluation_run_id
+               and er.response_id = new.source_id;
+            if not found then
+                return new;
+            end if;
+
+            if response_objective_id <> new.objective_id then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_learning_evidence_evaluation_objective',
+                    message = 'evaluation evidence objective must match the response interaction';
+            end if;
+            if new.status = 'ACTIVE'
+               and (evaluation_status <> 'SUCCEEDED'
+                    or evaluation_result = 'UNCERTAIN') then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_learning_evidence_active_evaluation',
+                    message = 'active evidence requires a current conclusive evaluation';
+            end if;
+            if evaluation_status in ('PENDING', 'FAILED')
+               or evaluation_result = 'UNCERTAIN' then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_learning_evidence_evaluation_result',
+                    message = 'inconclusive evaluation cannot produce learning evidence';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_learning_evidence_20_validate_evaluation
+        before insert or update of user_id, objective_id, source_type, source_id,
+            evaluation_run_id, status
+        on learning_evidence
+        for each row execute function validate_learning_evidence_evaluation()
+        """
+    )
+
+    op.execute(
+        """
+        create function protect_learning_evidence_history()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if tg_op = 'DELETE' then
+                if current_user <> 'app_maintenance' then
+                    raise exception using
+                        errcode = '55000',
+                        constraint = 'ck_learning_evidence_maintenance_delete',
+                        message = 'learning evidence may be deleted only by app_maintenance';
+                end if;
+                return old;
+            end if;
+
+            if new.id is distinct from old.id
+               or new.user_id is distinct from old.user_id
+               or new.entity_id is distinct from old.entity_id
+               or new.objective_id is distinct from old.objective_id
+               or new.source_type is distinct from old.source_type
+               or new.source_id is distinct from old.source_id
+               or new.evaluation_run_id is distinct from old.evaluation_run_id
+               or new.evidence_type is distinct from old.evidence_type
+               or new.evidence_strength is distinct from old.evidence_strength
+               or new.support_level is distinct from old.support_level
+               or new.evaluation_confidence is distinct from old.evaluation_confidence
+               or new.created_at is distinct from old.created_at then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_learning_evidence_immutable_payload',
+                    message = 'learning evidence provenance and payload are immutable';
+            end if;
+
+            if new.status is distinct from old.status
+               and not (
+                    (old.status = 'ACTIVE' and new.status in ('SUPERSEDED', 'REVOKED'))
+                    or (old.status = 'SUPERSEDED' and new.status = 'REVOKED')
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    constraint = 'ck_learning_evidence_status_transition',
+                    message = 'invalid learning evidence status transition';
+            end if;
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_learning_evidence_10_history
+        before update or delete on learning_evidence
+        for each row execute function protect_learning_evidence_history()
+        """
+    )
+
+    op.execute(
+        """
+        create function validate_evaluation_active_evidence()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if (new.status <> 'SUCCEEDED' or new.result = 'UNCERTAIN')
+               and exists (
+                    select 1
+                      from learning_evidence le
+                     where le.evaluation_run_id = new.id
+                       and le.status = 'ACTIVE'
+               ) then
+                raise exception using
+                    errcode = '23514',
+                    constraint = 'ck_evaluation_runs_active_evidence',
+                    message = 'non-current or inconclusive evaluation cannot retain active evidence';
+            end if;
+            return null;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create constraint trigger ct_evaluation_runs_active_evidence
+        after insert or update on evaluation_runs
+        deferrable initially deferred
+        for each row execute function validate_evaluation_active_evidence()
+        """
+    )
+
 
 def downgrade() -> None:
+    op.execute(
+        "drop trigger ct_evaluation_runs_active_evidence on evaluation_runs"
+    )
+    op.execute("drop function validate_evaluation_active_evidence()")
+    op.execute(
+        "drop trigger trg_learning_evidence_10_history on learning_evidence"
+    )
+    op.execute("drop function protect_learning_evidence_history()")
+    op.execute(
+        "drop trigger trg_learning_evidence_20_validate_evaluation "
+        "on learning_evidence"
+    )
+    op.execute("drop function validate_learning_evidence_evaluation()")
+    op.execute("drop trigger trg_evaluation_runs_history on evaluation_runs")
+    op.execute("drop function protect_evaluation_run_history()")
     op.drop_index(
         "ix_learning_evidence_evaluation_run_id", table_name="learning_evidence"
     )
@@ -467,8 +766,13 @@ def downgrade() -> None:
         table_name="assessment_support_requests",
     )
     op.drop_table("assessment_support_requests")
+    op.execute(
+        "drop trigger trg_assessment_interactions_objective_version "
+        "on assessment_interactions"
+    )
+    op.execute("drop function validate_assessment_interaction_objective_version()")
     op.drop_index(
-        "ix_assessment_interactions_session_sequence",
+        "ix_assessment_interactions_objective_id",
         table_name="assessment_interactions",
     )
     op.drop_table("assessment_interactions")

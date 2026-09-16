@@ -4,11 +4,18 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 
 def _assert_constraint(connection, expected: str, statement, parameters) -> None:
     with pytest.raises(IntegrityError) as error, connection.begin_nested():
+        connection.execute(statement, parameters)
+
+    assert error.value.orig.diag.constraint_name == expected
+
+
+def _assert_db_constraint(connection, expected: str, statement, parameters) -> None:
+    with pytest.raises(DBAPIError) as error, connection.begin_nested():
         connection.execute(statement, parameters)
 
     assert error.value.orig.diag.constraint_name == expected
@@ -463,6 +470,8 @@ def test_evidence_requires_matching_entity_objective_and_evaluation_source(
             None,
             entity_id=other_entity,
             objective_id=graph["objective_id"],
+            source_type="REFLECTION",
+            evaluation_confidence=None,
         ),
     )
     _assert_constraint(
@@ -491,6 +500,188 @@ def test_evidence_requires_matching_entity_objective_and_evaluation_source(
             source_id=uuid4(),
             evaluation_confidence=None,
         ),
+    )
+
+
+def test_assessment_evidence_requires_an_evaluation_and_matching_objective(
+    migrated_connection,
+):
+    graph = _response_graph(migrated_connection)
+    evaluation_id = _insert_evaluation(
+        migrated_connection,
+        user_id=graph["user_id"],
+        response_id=graph["response_id"],
+    )
+    other_entity_id, other_objective_id = _insert_entity_objective(
+        migrated_connection
+    )
+
+    _assert_constraint(
+        migrated_connection,
+        "ck_learning_evidence_assessment_source",
+        EVIDENCE_INSERT,
+        _evidence_parameters(graph, None),
+    )
+    _assert_constraint(
+        migrated_connection,
+        "ck_learning_evidence_assessment_source",
+        EVIDENCE_INSERT,
+        _evidence_parameters(
+            graph,
+            evaluation_id,
+            source_type="REFLECTION",
+        ),
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_learning_evidence_evaluation_objective",
+        EVIDENCE_INSERT,
+        _evidence_parameters(
+            graph,
+            evaluation_id,
+            entity_id=other_entity_id,
+            objective_id=other_objective_id,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("evaluation_overrides", "expected"),
+    [
+        (
+            {
+                "status": "PENDING",
+                "result": None,
+                "confidence": None,
+                "feedback": None,
+            },
+            "ck_learning_evidence_active_evaluation",
+        ),
+        (
+            {
+                "status": "FAILED",
+                "result": None,
+                "confidence": None,
+                "feedback": None,
+            },
+            "ck_learning_evidence_active_evaluation",
+        ),
+        (
+            {"status": "SUPERSEDED"},
+            "ck_learning_evidence_active_evaluation",
+        ),
+        (
+            {"status": "REVOKED"},
+            "ck_learning_evidence_active_evaluation",
+        ),
+        (
+            {"result": "UNCERTAIN"},
+            "ck_learning_evidence_active_evaluation",
+        ),
+    ],
+)
+def test_active_evidence_requires_current_conclusive_evaluation(
+    migrated_connection, evaluation_overrides, expected
+):
+    graph = _response_graph(migrated_connection)
+    evaluation_id = _insert_evaluation(
+        migrated_connection,
+        user_id=graph["user_id"],
+        response_id=graph["response_id"],
+        **evaluation_overrides,
+    )
+
+    _assert_db_constraint(
+        migrated_connection,
+        expected,
+        EVIDENCE_INSERT,
+        _evidence_parameters(graph, evaluation_id),
+    )
+
+
+def test_evaluation_and_evidence_payloads_are_historical(migrated_connection):
+    graph = _response_graph(migrated_connection)
+    evaluation_id = _insert_evaluation(
+        migrated_connection,
+        user_id=graph["user_id"],
+        response_id=graph["response_id"],
+    )
+    evidence_id = migrated_connection.execute(
+        EVIDENCE_INSERT, _evidence_parameters(graph, evaluation_id)
+    ).scalar_one()
+
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_evaluation_runs_immutable_payload",
+        text("update evaluation_runs set feedback = 'Rewritten' where id = :id"),
+        {"id": evaluation_id},
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_learning_evidence_immutable_payload",
+        text(
+            "update learning_evidence set evidence_strength = 'WEAK' where id = :id"
+        ),
+        {"id": evidence_id},
+    )
+
+    migrated_connection.execute(
+        text("update learning_evidence set status = 'SUPERSEDED' where id = :id"),
+        {"id": evidence_id},
+    )
+    migrated_connection.execute(
+        text("update evaluation_runs set status = 'SUPERSEDED' where id = :id"),
+        {"id": evaluation_id},
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_evaluation_runs_status_transition",
+        text("update evaluation_runs set status = 'SUCCEEDED' where id = :id"),
+        {"id": evaluation_id},
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_learning_evidence_status_transition",
+        text("update learning_evidence set status = 'ACTIVE' where id = :id"),
+        {"id": evidence_id},
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_evaluation_runs_maintenance_delete",
+        text("delete from evaluation_runs where id = :id"),
+        {"id": evaluation_id},
+    )
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_learning_evidence_maintenance_delete",
+        text("delete from learning_evidence where id = :id"),
+        {"id": evidence_id},
+    )
+
+
+def test_evaluation_cannot_leave_active_evidence_when_superseded(
+    migrated_connection,
+):
+    graph = _response_graph(migrated_connection)
+    evaluation_id = _insert_evaluation(
+        migrated_connection,
+        user_id=graph["user_id"],
+        response_id=graph["response_id"],
+    )
+    migrated_connection.execute(
+        EVIDENCE_INSERT, _evidence_parameters(graph, evaluation_id)
+    )
+
+    with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
+        migrated_connection.execute(
+            text("update evaluation_runs set status = 'SUPERSEDED' where id = :id"),
+            {"id": evaluation_id},
+        )
+        migrated_connection.execute(text("set constraints all immediate"))
+
+    assert (
+        error.value.orig.diag.constraint_name
+        == "ck_evaluation_runs_active_evidence"
     )
 
 
@@ -569,6 +760,7 @@ def test_evaluation_correction_supersedes_history_and_adds_replacement_atomicall
             evaluation_confidence=0.7,
         ),
     ).scalar_one()
+    migrated_connection.execute(text("set constraints all immediate"))
 
     evaluation_statuses = dict(migrated_connection.execute(
         text(
