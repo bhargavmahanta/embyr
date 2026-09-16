@@ -184,6 +184,38 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        create function prevent_referenced_command_owner_change()
+        returns trigger
+        language plpgsql
+        as $$
+        begin
+            if new.user_id is distinct from old.user_id
+               and exists (
+                    select 1
+                      from learning_events
+                     where command_id = old.id
+               ) then
+                raise exception using
+                    errcode = '55000',
+                    message = 'a referenced command owner is immutable',
+                    constraint =
+                        'ck_idempotency_records_referenced_owner_immutable';
+            end if;
+
+            return new;
+        end;
+        $$
+        """
+    )
+    op.execute(
+        """
+        create trigger trg_idempotency_records_referenced_owner_immutable
+        before update of user_id on idempotency_records
+        for each row execute function prevent_referenced_command_owner_change()
+        """
+    )
+    op.execute(
+        """
         create function prevent_learning_event_mutation()
         returns trigger
         language plpgsql
@@ -209,6 +241,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("drop trigger trg_learning_events_immutable on learning_events")
     op.execute("drop function prevent_learning_event_mutation()")
+    op.execute(
+        "drop trigger trg_idempotency_records_referenced_owner_immutable "
+        "on idempotency_records"
+    )
+    op.execute("drop function prevent_referenced_command_owner_change()")
     op.execute("drop trigger trg_learning_events_command_owner on learning_events")
     op.execute("drop function validate_learning_event_command_owner()")
     op.drop_index(

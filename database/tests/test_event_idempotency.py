@@ -7,6 +7,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.db.models.events import LearningEvent
+
 
 def _assert_constraint(connection, expected: str, statement, parameters) -> None:
     with pytest.raises(IntegrityError) as error, connection.begin_nested():
@@ -246,6 +248,46 @@ def test_command_must_belong_to_event_owner(migrated_connection):
     assert error.value.orig.diag.constraint_name == (
         "ck_learning_events_command_owner"
     )
+
+
+def test_referenced_command_owner_cannot_change(migrated_connection):
+    owner_id = _insert_user(migrated_connection)
+    other_user_id = _insert_user(migrated_connection)
+    command_id = _insert_command(migrated_connection, user_id=owner_id)
+    migrated_connection.execute(
+        _event_statement(),
+        _event_parameters(
+            user_id=owner_id, command_id=command_id, event_ordinal=0
+        ),
+    )
+
+    with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
+        migrated_connection.execute(
+            text(
+                "update idempotency_records set user_id = :user_id "
+                "where id = :command_id"
+            ),
+            {"user_id": other_user_id, "command_id": command_id},
+        )
+
+    assert error.value.orig.diag.constraint_name == (
+        "ck_idempotency_records_referenced_owner_immutable"
+    )
+
+
+def test_model_check_names_match_migration_contract():
+    check_names = {
+        constraint.name
+        for constraint in LearningEvent.__table__.constraints
+        if constraint.__class__.__name__ == "CheckConstraint"
+    }
+
+    assert check_names == {
+        "ck_learning_events_command_ordinal_pair",
+        "ck_learning_events_event_ordinal",
+        "ck_learning_events_learning_intent",
+        "ck_learning_events_schema_version",
+    }
 
 
 def test_offline_occurrence_and_ingestion_times_remain_distinct(

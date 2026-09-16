@@ -58,21 +58,21 @@ class LearningEvent(Base):
         sa.CheckConstraint(
             "(command_id is null and event_ordinal is null) or "
             "(command_id is not null and event_ordinal is not null)",
-            name="learning_events_command_ordinal_pair",
+            name="command_ordinal_pair",
         ),
         sa.CheckConstraint(
             "event_ordinal is null or event_ordinal >= 0",
-            name="learning_events_event_ordinal",
+            name="event_ordinal",
         ),
         sa.CheckConstraint(
             "learning_intent is null or learning_intent in "
             "('DIRECT_INTEREST', 'PREREQUISITE_SUPPORT', "
             "'RELATED_EXPLORATION', 'RETENTION_REVISIT', "
             "'PRACTICAL_SUPPORT', 'SERENDIPITY')",
-            name="learning_events_learning_intent",
+            name="learning_intent",
         ),
         sa.CheckConstraint(
-            "schema_version > 0", name="learning_events_schema_version"
+            "schema_version > 0", name="schema_version"
         ),
         sa.Index(
             "uq_learning_events_command_ordinal",
