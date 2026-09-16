@@ -25,6 +25,12 @@ class Exploration(Base):
             "entity_id",
             name="uq_explorations_user_id_id_entity_id",
         ),
+        sa.UniqueConstraint(
+            "user_id",
+            "id",
+            "entity_version",
+            name="uq_explorations_user_id_id_entity_version",
+        ),
         sa.CheckConstraint(
             "learning_intent in ('DIRECT_INTEREST', 'PREREQUISITE_SUPPORT', "
             "'RELATED_EXPLORATION', 'RETENTION_REVISIT', 'PRACTICAL_SUPPORT', "
