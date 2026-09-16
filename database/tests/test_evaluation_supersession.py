@@ -914,6 +914,12 @@ def test_successful_uncertain_evaluation_requires_no_evidence(migrated_connectio
         feedback="More information is needed.",
     )
 
+    _assert_db_constraint(
+        migrated_connection,
+        "ck_learning_evidence_evaluation_result",
+        EVIDENCE_INSERT,
+        _evidence_parameters(graph, evaluation_id, status="SUPERSEDED"),
+    )
     assert migrated_connection.execute(
         text(
             "select count(*) from learning_evidence where evaluation_run_id = :id"
