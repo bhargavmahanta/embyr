@@ -26,6 +26,7 @@ from app.db.models.identity import (
     UserMotivation,
 )
 from app.db.models.exploration import Exploration, Reflection
+from app.db.models.events import LearningEvent
 from app.db.models.ontology import (
     Claim,
     EntityDomain,
@@ -56,6 +57,7 @@ __all__ = [
     "LearningEntity",
     "LearningEntityVersion",
     "LearningEvidence",
+    "LearningEvent",
     "LearningObjective",
     "LearnerPreference",
     "MediaObject",
