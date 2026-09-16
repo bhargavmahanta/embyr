@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+from queue import Queue
+from time import monotonic, sleep
 from uuid import uuid4
 
 import pytest
@@ -333,12 +336,22 @@ def _load_changes(connection, *, world_id, after_revision: int, limit: int):
 
 
 def _resync_required(connection, *, world_id, after_revision: int) -> bool:
-    oldest = connection.execute(
-        text("select min(revision) from world_changes where world_id = :world_id"),
+    head, oldest = connection.execute(
+        text(
+            """
+            select lw.current_revision, min(wc.revision)
+              from learner_worlds lw
+              left join world_changes wc on wc.world_id = lw.id
+             where lw.id = :world_id
+             group by lw.current_revision
+            """
+        ),
         {"world_id": world_id},
-    ).scalar_one()
-    if oldest is None:
+    ).one()
+    if head <= after_revision:
         return False
+    if oldest is None:
+        return True
     return oldest > after_revision + 1
 
 
@@ -1038,6 +1051,80 @@ def test_revision_advancement_is_contiguous(migrated_connection):
     assert revisions == [1, 2, 3]
 
 
+def test_concurrent_revision_advancement_locks_before_allocation(migrated_engine):
+    with migrated_engine.begin() as setup_connection:
+        user_id = _insert_user(setup_connection)
+        world_id = _insert_world(setup_connection, user_id=user_id)
+
+    worker_pid: Queue[int] = Queue()
+
+    def allocate_revision() -> int:
+        with migrated_engine.begin() as worker_connection:
+            worker_pid.put(
+                worker_connection.execute(text("select pg_backend_pid()"))
+                .scalar_one()
+            )
+            revision = _advance_revision(worker_connection, user_id=user_id)
+            _insert_change(
+                worker_connection,
+                user_id=user_id,
+                world_id=world_id,
+                revision=revision,
+            )
+            return revision
+
+    first_connection = migrated_engine.connect()
+    first_transaction = first_connection.begin()
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        first_revision = _advance_revision(first_connection, user_id=user_id)
+        _insert_change(
+            first_connection,
+            user_id=user_id,
+            world_id=world_id,
+            revision=first_revision,
+        )
+
+        second_allocation = executor.submit(allocate_revision)
+        pid = worker_pid.get(timeout=5)
+        deadline = monotonic() + 5
+        blocked_query = None
+        with migrated_engine.connect() as observer:
+            while monotonic() < deadline:
+                blocked_query = observer.execute(
+                    text(
+                        "select query from pg_stat_activity "
+                        "where pid = :pid "
+                        "and cardinality(pg_blocking_pids(:pid)) > 0"
+                    ),
+                    {"pid": pid},
+                ).scalar_one_or_none()
+                if blocked_query is not None or second_allocation.done():
+                    break
+                sleep(0.01)
+
+        assert blocked_query is not None, "second revision allocation did not block"
+        assert "for update" in blocked_query.lower()
+        first_transaction.commit()
+        second_revision = second_allocation.result(timeout=5)
+
+        assert [first_revision, second_revision] == [1, 2]
+        with migrated_engine.connect() as verification_connection:
+            revisions = verification_connection.execute(
+                text(
+                    "select revision from world_changes "
+                    "where world_id = :world_id order by revision"
+                ),
+                {"world_id": world_id},
+            ).scalars().all()
+        assert revisions == [1, 2]
+    finally:
+        if first_transaction.is_active:
+            first_transaction.rollback()
+        first_connection.close()
+        executor.shutdown(wait=True)
+
+
 def test_world_head_matches_last_change(migrated_connection):
     user_id = _insert_user(migrated_connection)
     world_id = _insert_world(migrated_connection, user_id=user_id)
@@ -1199,6 +1286,20 @@ def test_delta_query_signals_resync_when_history_is_pruned(migrated_connection):
     )
     assert (
         _resync_required(migrated_connection, world_id=world_id, after_revision=2)
+        is False
+    )
+
+    migrated_connection.execute(
+        text("delete from world_changes where world_id = :world_id"),
+        {"world_id": world_id},
+    )
+
+    assert (
+        _resync_required(migrated_connection, world_id=world_id, after_revision=0)
+        is True
+    )
+    assert (
+        _resync_required(migrated_connection, world_id=world_id, after_revision=5)
         is False
     )
 
