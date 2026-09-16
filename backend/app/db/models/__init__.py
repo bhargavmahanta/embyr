@@ -45,6 +45,7 @@ from app.db.models.ontology import (
     Misconception,
     OntologyEdge,
 )
+from app.db.models.recommendations import Recommendation
 
 __all__ = [
     "AppUser",
@@ -78,6 +79,7 @@ __all__ = [
     "OntologyEdge",
     "PracticalChallenge",
     "PracticalChallengeVersion",
+    "Recommendation",
     "Reflection",
     "StateEvidenceLink",
     "UploadSession",
