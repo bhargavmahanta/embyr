@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement Embyr's approved PostgreSQL persistence architecture as twelve
+Implement Embyr's approved PostgreSQL persistence architecture as thirteen
 immutable Alembic migrations backed by SQLAlchemy 2.x metadata and real
 PostgreSQL integration tests.
 
