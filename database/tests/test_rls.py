@@ -423,6 +423,269 @@ def test_upgrade_rejects_unsafe_runtime_role_attributes(
         engine.dispose()
 
 
+@pytest.mark.parametrize("granted_role", (WORKER_ROLE, None))
+def test_upgrade_rejects_any_outbound_runtime_role_membership(
+    database_url,
+    migrated_engine,
+    granted_role,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    generic_role = f"rls_generic_group_{uuid4().hex}"
+    target_role = granted_role or generic_role
+    command.downgrade(config, "0011a_account_deletion")
+
+    try:
+        with engine.begin() as connection:
+            if granted_role is None:
+                connection.execute(text(f"create role {generic_role} nologin"))
+            connection.execute(text(f"grant {target_role} to {BACKEND_ROLE}"))
+
+        with pytest.raises(
+            RuntimeError,
+            match="runtime roles must not be members of other roles",
+        ):
+            command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one() == "0011a_account_deletion"
+            assert connection.execute(
+                text("select count(*) from pg_policies where schemaname = 'public'")
+            ).scalar_one() == 0
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"revoke {target_role} from {BACKEND_ROLE}")
+            )
+            if granted_role is None:
+                connection.execute(text(f"drop role {generic_role}"))
+            current = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+        if current != "0012_rls_and_security":
+            command.upgrade(config, "head")
+        engine.dispose()
+
+
+def test_upgrade_allows_app_owner_membership_in_maintenance_role(
+    database_url,
+    migrated_engine,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    admin_role = "app_owner"
+    command.downgrade(config, "0011a_account_deletion")
+
+    with engine.begin() as connection:
+        role_existed = connection.execute(
+            text("select 1 from pg_roles where rolname = :role"),
+            {"role": admin_role},
+        ).scalar_one_or_none() is not None
+        if not role_existed:
+            connection.execute(text(f"create role {admin_role} nologin"))
+        membership_existed = connection.execute(
+            text(
+                """
+                select 1
+                from pg_auth_members membership
+                join pg_roles granted on granted.oid = membership.roleid
+                join pg_roles member on member.oid = membership.member
+                where granted.rolname = :granted_role
+                  and member.rolname = :member_role
+                """
+            ),
+            {
+                "granted_role": MAINTENANCE_ROLE,
+                "member_role": admin_role,
+            },
+        ).scalar_one_or_none() is not None
+        if not membership_existed:
+            connection.execute(
+                text(f"grant {MAINTENANCE_ROLE} to {admin_role}")
+            )
+
+    try:
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one() == "0012_rls_and_security"
+            assert connection.execute(
+                text(
+                    """
+                    select count(*)
+                    from pg_auth_members membership
+                    join pg_roles granted on granted.oid = membership.roleid
+                    join pg_roles member on member.oid = membership.member
+                    where granted.rolname = :granted_role
+                      and member.rolname = :member_role
+                    """
+                ),
+                {
+                    "granted_role": MAINTENANCE_ROLE,
+                    "member_role": admin_role,
+                },
+            ).scalar_one() == 1
+    finally:
+        with engine.begin() as connection:
+            if not membership_existed:
+                connection.execute(
+                    text(f"revoke {MAINTENANCE_ROLE} from {admin_role}")
+                )
+            if not role_existed:
+                connection.execute(text(f"drop role {admin_role}"))
+            current = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+        if current != "0012_rls_and_security":
+            command.upgrade(config, "head")
+        engine.dispose()
+
+
+def test_upgrade_revokes_preexisting_supabase_client_access(
+    database_url,
+    migrated_engine,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    created_roles: list[str] = []
+    command.downgrade(config, "0011a_account_deletion")
+
+    try:
+        with engine.begin() as connection:
+            for role in CLIENT_ROLES:
+                exists = connection.execute(
+                    text("select 1 from pg_roles where rolname = :role"),
+                    {"role": role},
+                ).scalar_one_or_none()
+                if exists is None:
+                    connection.execute(text(f"create role {role} nologin"))
+                    created_roles.append(role)
+                connection.execute(
+                    text(
+                        f"grant select on public.learner_preferences to {role}"
+                    )
+                )
+                connection.execute(
+                    text(f"grant create on schema public to {role}")
+                )
+                connection.execute(
+                    text(
+                        f"grant execute on function {MAINTENANCE_FUNCTION}(uuid) "
+                        f"to {role}"
+                    )
+                )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            for role in CLIENT_ROLES:
+                assert connection.execute(
+                    text(
+                        "select has_table_privilege("
+                        ":role, 'public.learner_preferences', 'SELECT')"
+                    ),
+                    {"role": role},
+                ).scalar_one() is False
+                assert connection.execute(
+                    text(
+                        "select has_schema_privilege("
+                        ":role, 'public', 'CREATE')"
+                    ),
+                    {"role": role},
+                ).scalar_one() is False
+                assert connection.execute(
+                    text(
+                        "select has_function_privilege("
+                        ":role, "
+                        "'public.maintenance_delete_account(uuid)', "
+                        "'EXECUTE')"
+                    ),
+                    {"role": role},
+                ).scalar_one() is False
+    finally:
+        with engine.begin() as connection:
+            for role in CLIENT_ROLES:
+                connection.execute(
+                    text(
+                        f"revoke all on public.learner_preferences from {role}"
+                    )
+                )
+                connection.execute(
+                    text(f"revoke create on schema public from {role}")
+                )
+                connection.execute(
+                    text(
+                        f"revoke all on function {MAINTENANCE_FUNCTION}(uuid) "
+                        f"from {role}"
+                    )
+                )
+            for role in created_roles:
+                connection.execute(text(f"drop role {role}"))
+            current = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+        if current != "0012_rls_and_security":
+            command.upgrade(config, "head")
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("missing_role", "attributes"),
+    (
+        (BACKEND_ROLE, "nologin nobypassrls"),
+        (WORKER_ROLE, "nologin bypassrls"),
+        (MAINTENANCE_ROLE, "nologin bypassrls"),
+    ),
+)
+def test_upgrade_aborts_when_required_runtime_role_is_missing(
+    database_url,
+    migrated_engine,
+    missing_role,
+    attributes,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    command.downgrade(config, "0011a_account_deletion")
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f"drop role {missing_role}"))
+
+        with pytest.raises(RuntimeError, match=f"missing: {missing_role}"):
+            command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one() == "0011a_account_deletion"
+            assert connection.execute(
+                text("select count(*) from pg_policies where schemaname = 'public'")
+            ).scalar_one() == 0
+    finally:
+        with engine.begin() as connection:
+            exists = connection.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": missing_role},
+            ).scalar_one_or_none()
+            if exists is None:
+                connection.execute(
+                    text(f"create role {missing_role} {attributes}")
+                )
+            current = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+        if current != "0012_rls_and_security":
+            command.upgrade(config, "head")
+        engine.dispose()
+
+
 def test_public_has_no_create_on_public_schema(migrated_connection):
     privileges = {
         row.privilege_type
