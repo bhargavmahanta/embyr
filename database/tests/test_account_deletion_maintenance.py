@@ -1025,6 +1025,7 @@ def test_downgrade_restores_previous_trigger_and_removes_function(database_url):
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     try:
+        command.upgrade(config, "head")
         command.downgrade(config, "0011_stories_and_exports")
         with engine.connect() as connection:
             assert _function_row(connection) is None
