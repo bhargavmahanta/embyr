@@ -104,7 +104,6 @@ class AccountOperationRequest(Base):
         sa.ForeignKeyConstraint(
             ["user_id", "idempotency_record_id"],
             ["idempotency_records.user_id", "idempotency_records.id"],
-            ondelete="CASCADE",
             name="fk_account_operation_requests_idempotency_owner",
         ),
         sa.UniqueConstraint(

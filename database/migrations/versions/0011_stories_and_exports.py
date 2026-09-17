@@ -129,7 +129,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["user_id", "idempotency_record_id"],
             ["idempotency_records.user_id", "idempotency_records.id"],
-            ondelete="CASCADE",
             name=op.f("fk_account_operation_requests_idempotency_owner"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_account_operation_requests")),

@@ -636,15 +636,18 @@ def test_deleting_user_removes_owned_stories_and_operations(migrated_connection)
         assert remaining == 0
 
 
-def test_deleting_idempotency_record_removes_its_operation(migrated_connection):
+def test_deleting_idempotency_record_preserves_its_operation(migrated_connection):
     user_id = _insert_user(migrated_connection)
     record_id = _insert_idempotency_record(migrated_connection, user_id=user_id)
     _insert_operation(
         migrated_connection, user_id=user_id, idempotency_record_id=record_id
     )
 
-    migrated_connection.execute(
-        text("delete from idempotency_records where id = :id"), {"id": record_id}
+    _assert_constraint(
+        migrated_connection,
+        "fk_account_operation_requests_idempotency_owner",
+        text("delete from idempotency_records where id = :id"),
+        {"id": record_id},
     )
 
     remaining = migrated_connection.execute(
@@ -654,7 +657,7 @@ def test_deleting_idempotency_record_removes_its_operation(migrated_connection):
         ),
         {"id": record_id},
     ).scalar_one()
-    assert remaining == 0
+    assert remaining == 1
 
 
 def test_deleting_user_preserves_canonical_ontology(migrated_connection):
