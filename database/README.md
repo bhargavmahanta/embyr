@@ -55,3 +55,22 @@ Environment administrators create databases and credentials and enable
 The final M1 security migration will validate the provisioned runtime roles and
 apply grants and row-level-security policies; it will not store role passwords
 or silently skip missing security configuration.
+
+## Account deletion maintenance path
+
+`0011a_account_deletion` repairs whole-account deletion ahead of the security
+migration:
+
+- `public.maintenance_delete_account(uuid)` is a `SECURITY DEFINER` routine that
+  deletes exactly one learner's owned rows with explicit, ordered `DELETE`
+  statements and removes `app_users` last. A `NULL` target raises `22004`; an
+  unknown target is a no-op, so retries are idempotent.
+- The Experience Ledger guard permits DELETE of `learning_events` only when
+  `current_user = 'app_maintenance'`. Its UPDATE path and all ordinary-role
+  DELETE paths remain rejected.
+
+Migration order is `0011_stories_and_exports` -> `0011a_account_deletion` ->
+`0012_rls_and_security`. The routine is inert to application roles after
+`0011a`: EXECUTE is revoked from PUBLIC and ownership is not transferred.
+`0012` provisions `app_maintenance`, transfers function ownership, and grants
+EXECUTE to the trusted worker.

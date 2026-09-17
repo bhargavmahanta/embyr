@@ -978,6 +978,48 @@ git commit -m "feat(db): add stories and account operations"
 
 ---
 
+### Task 11a: Trusted Account Deletion Maintenance Path
+
+**Files:**
+- Create: `database/migrations/versions/0011a_account_deletion.py`
+- Create: `database/tests/test_account_deletion_maintenance.py`
+- Modify: `database/README.md`
+
+**Interfaces:**
+- Adds `public.maintenance_delete_account(uuid)`, a `SECURITY DEFINER` routine that deletes one learner's owned rows in explicit dependency order and removes `app_users` last.
+- Narrows the Experience Ledger immutability guard so only `app_maintenance` may DELETE `learning_events`; UPDATE stays forbidden for every role and ordinary roles still cannot DELETE history.
+
+This is a prerequisite to Task 12. The routine is inert after `0011a`: EXECUTE is revoked from PUBLIC and ownership stays with the migration owner. Task 12 provisions `app_maintenance`, transfers function ownership, and grants EXECUTE to the trusted worker.
+
+- [ ] **Step 1: Narrow the Experience Ledger guard**
+
+Replace `prevent_learning_event_mutation()` so a DELETE by `current_user = 'app_maintenance'` returns `old`; every other UPDATE/DELETE path still raises `55000` (`ck_learning_events_immutable`). Migrations `0001`-`0011` are not modified.
+
+- [ ] **Step 2: Add the ordered maintenance routine**
+
+```sql
+create function public.maintenance_delete_account(p_user_id uuid)
+returns void
+language plpgsql security definer
+set search_path = pg_catalog, public, pg_temp;
+```
+
+Delete learner-owned rows explicitly, child-first, then `delete from public.app_users where id = p_user_id;`. A `NULL` target raises `22004`; an unknown target is a no-op. No dynamic SQL, no in-routine commits, and no FK or constraint changes.
+
+- [ ] **Step 3: Revoke runtime access**
+
+`revoke all on function public.maintenance_delete_account(uuid) from public;`
+
+- [ ] **Step 4: Verify and commit**
+
+```bash
+pytest database/tests/test_account_deletion_maintenance.py -v
+git add database/migrations/versions/0011a_account_deletion.py database/tests/test_account_deletion_maintenance.py database/README.md
+git commit -m "fix(db): add trusted account deletion maintenance path"
+```
+
+---
+
 ### Task 12: Row-Level Security and Database Roles
 
 **Files:**

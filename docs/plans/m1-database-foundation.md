@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement Embyr's approved PostgreSQL persistence architecture as twelve
+Implement Embyr's approved PostgreSQL persistence architecture as thirteen
 immutable Alembic migrations backed by SQLAlchemy 2.x metadata and real
 PostgreSQL integration tests.
 
@@ -30,7 +30,8 @@ When the frozen documents differ, implementation follows this order:
 8. `0009_recommendations`.
 9. `0010_world`.
 10. `0011_stories_and_exports`.
-11. `0012_rls_and_security` and the final verification gate.
+11. `0011a_account_deletion` and the trusted account-deletion maintenance path.
+12. `0012_rls_and_security` and the final verification gate.
 
 Each unit is implemented on a short-lived branch tied to its M1 issue. Before
 merge, it must pass its focused tests, the complete migration chain to its new
@@ -80,6 +81,13 @@ Production role creation and credentials are provisioning responsibilities.
 Migration `0012` verifies the roles and applies grants and policies; it must not
 silently skip security when provisioning is incomplete.
 
+Migration `0011a_account_deletion` adds `public.maintenance_delete_account(uuid)`
+as a `SECURITY DEFINER` routine plus one narrow DELETE exception for the
+Experience Ledger guard. It leaves EXECUTE revoked from PUBLIC and does not
+transfer ownership, so the routine stays inert to application roles until
+`0012` provisions `app_maintenance`, transfers ownership, and grants the
+trusted worker. Migrations `0001`-`0011` remain immutable.
+
 ## Reconciliations
 
 - M1 follows the SQL plan's `app_users(auth_provider, auth_subject)` mapping for
@@ -98,7 +106,7 @@ silently skip security when provisioning is incomplete.
 
 ## Completion gate
 
-M1 is complete only when all twelve migrations are merged in order, Alembic has
+M1 is complete only when all thirteen migrations are merged in order, Alembic has
 exactly one head (`0012_rls_and_security`), an empty PostgreSQL/pgvector database
 upgrades to head, a disposable database completes `head -> base -> head`, every
 database and RLS test passes, role responsibilities are documented, and no
