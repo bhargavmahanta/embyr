@@ -8,12 +8,24 @@ from urllib.parse import urlparse
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Connection, Engine, create_engine
+from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.exc import DBAPIError
 from testcontainers.community.postgres import PostgresContainer
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPOSITORY_ROOT / "database" / "alembic.ini"
 PGVECTOR_IMAGE = "pgvector/pgvector:pg16"
+
+# Runtime roles that migration ``0012_rls_and_security`` verifies. They are
+# provisioned here rather than by the migration because creating a BYPASSRLS
+# role requires superuser authority a migration credential is not guaranteed to
+# hold on hosted PostgreSQL. The roles live at the cluster level and are
+# discarded with the disposable test cluster.
+RUNTIME_ROLES: dict[str, str] = {
+    "app_backend": "nologin nobypassrls",
+    "app_worker": "nologin bypassrls",
+    "app_maintenance": "nologin bypassrls",
+}
 
 
 def _psycopg_url(url: str) -> str:
@@ -46,11 +58,39 @@ def make_alembic_config(database_url: str) -> Config:
     return config
 
 
+def provision_runtime_roles(engine: Engine) -> None:
+    """Idempotently create the externally provisioned runtime roles.
+
+    Migration ``0012_rls_and_security`` verifies these roles instead of
+    creating them, so the harness must provide them before ``upgrade head``.
+    When a dedicated ``EMBYR_TEST_DATABASE_URL`` is used, the roles must either
+    already exist or be creatable; otherwise the failure is explicit rather
+    than silently skipping the security boundary.
+    """
+    with engine.begin() as connection:
+        for role, attributes in RUNTIME_ROLES.items():
+            exists = connection.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": role},
+            ).scalar_one_or_none()
+            if exists is not None:
+                continue
+            try:
+                connection.execute(text(f"create role {role} {attributes}"))
+            except DBAPIError as error:
+                raise RuntimeError(
+                    "the test database must expose pre-provisioned runtime "
+                    f"role {role!r} or allow creating it, because migration "
+                    "0012 verifies the role instead of provisioning it"
+                ) from error
+
+
 @pytest.fixture(scope="session")
 def migrated_engine(database_url: str) -> Iterator[Engine]:
     config = make_alembic_config(database_url)
-    command.upgrade(config, "head")
     engine = create_engine(database_url)
+    provision_runtime_roles(engine)
+    command.upgrade(config, "head")
     try:
         yield engine
     finally:
