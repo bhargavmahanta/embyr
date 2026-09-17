@@ -69,14 +69,22 @@ The M1 runtime roles are:
 `0012` rejects any runtime role with `SUPERUSER`, `CREATEROLE`, `CREATEDB`, or
 `REPLICATION`. It also verifies `app_backend` is `NOBYPASSRLS`, verifies
 `app_worker` and `app_maintenance` are `BYPASSRLS`, and requires
-`app_maintenance` to be `NOLOGIN`. Provisioning must give the migration identity
-the authority to transfer ownership of `maintenance_delete_account` to
-`app_maintenance` (membership in `app_maintenance`, or a superuser migration
-identity) and to grant schema privileges as the `public` schema owner. The
-migration grants `app_maintenance` `CREATE` on `public` only for the ownership
-transfer and revokes it in the same transaction. Creating a `BYPASSRLS` role
-requires superuser authority, so on hosted PostgreSQL the roles, attributes, and
-membership remain environment-admin responsibilities.
+`app_maintenance` to be `NOLOGIN`. Each runtime role must be standalone: none
+of `app_backend`, `app_worker`, or `app_maintenance` may itself be a member of
+another role. Incoming administrative membership such as `app_owner` in
+`app_maintenance` remains permitted for ownership transfer.
+
+Provisioning must give the migration identity enough authority to run `ALTER
+FUNCTION ... OWNER TO app_maintenance`, grant the temporary schema `CREATE`
+needed for that transfer, and run `ALTER DEFAULT PRIVILEGES FOR ROLE
+<application object owner>`. For the default-privilege operation, the migration
+identity must be the application object owner itself, a member with sufficient
+`SET ROLE`/membership semantics, or an administrative/superuser identity capable
+of the operation. The migration grants `app_maintenance` `CREATE` on `public`
+only for the ownership transfer and revokes it in the same transaction.
+Creating a `BYPASSRLS` role requires superuser authority, so on hosted
+PostgreSQL the roles, attributes, and administrative membership remain
+environment-admin responsibilities.
 
 ## Runtime grants and row-level security
 
@@ -120,6 +128,10 @@ provisioned the runtime roles and attributes above and demonstrated the
 ownership transfer of `maintenance_delete_account` to `app_maintenance`. The
 migration is provider-independent and deliberately verifies rather than
 provisions roles; it cannot create `BYPASSRLS` roles or role memberships.
+Future hosted migrations that create Embyr tables must also verify the actual
+Supabase default ACLs do not re-grant `anon`, `authenticated`, or `service_role`
+access. Migration 0012 does not speculate about unmeasured hosted table-default
+ACLs.
 
 ## Account deletion maintenance path
 
