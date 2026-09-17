@@ -101,6 +101,9 @@ def _insert_operation(
     started_at=None,
     completed_at=None,
 ):
+    if created_at is None and started_at is not None:
+        created_at = started_at
+
     return connection.execute(
         text(
             """
