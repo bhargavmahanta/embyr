@@ -217,6 +217,30 @@ def _verify_runtime_roles(bind: sa.engine.Connection) -> None:
             "must create them (with the documented attributes) before applying "
             "this migration."
         )
+
+    memberships = bind.execute(
+        sa.text(
+            """
+            select member_role.rolname as member_name,
+                   granted_role.rolname as granted_name
+            from pg_auth_members membership
+            join pg_roles member_role on member_role.oid = membership.member
+            join pg_roles granted_role on granted_role.oid = membership.roleid
+            where member_role.rolname = any(:roles)
+            order by member_role.rolname, granted_role.rolname
+            """
+        ),
+        {"roles": list(RUNTIME_ROLES)},
+    ).all()
+    if memberships:
+        edges = ", ".join(
+            f"{row.member_name} -> {row.granted_name}" for row in memberships
+        )
+        raise RuntimeError(
+            "runtime roles must not be members of other roles; found: "
+            f"{edges}"
+        )
+
     for role, row in rows.items():
         if row.rolsuper:
             raise RuntimeError(f"{role} must not be SUPERUSER")
