@@ -46,6 +46,7 @@ from app.db.models.ontology import (
     OntologyEdge,
 )
 from app.db.models.recommendations import Recommendation
+from app.db.models.stories import AccountOperationRequest, CuriosityStory
 from app.db.models.world import (
     LearnerWorld,
     WorldArtifact,
@@ -56,6 +57,7 @@ from app.db.models.world import (
 )
 
 __all__ = [
+    "AccountOperationRequest",
     "AppUser",
     "Artifact",
     "ArtifactAnalysis",
@@ -64,6 +66,7 @@ __all__ = [
     "AssessmentSession",
     "AssessmentSupportRequest",
     "Claim",
+    "CuriosityStory",
     "EntityDomain",
     "EntityEmbedding",
     "EvaluationRun",
