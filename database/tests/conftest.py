@@ -27,6 +27,12 @@ RUNTIME_ROLES: dict[str, str] = {
     "app_maintenance": "nologin bypassrls",
 }
 
+# The migration/object owner. It is provisioned here for the same reason as the
+# runtime roles: migration ``0013_default_acl_hardening`` hardens
+# ``app_owner``'s default privileges but never creates cluster roles.
+OWNER_ROLE = "app_owner"
+OWNER_ROLE_ATTRIBUTES = "nologin nobypassrls"
+
 
 def _psycopg_url(url: str) -> str:
     return url.replace("postgresql+psycopg2://", "postgresql+psycopg://")
@@ -59,16 +65,18 @@ def make_alembic_config(database_url: str) -> Config:
 
 
 def provision_runtime_roles(engine: Engine) -> None:
-    """Idempotently create the externally provisioned runtime roles.
+    """Idempotently create the externally provisioned roles.
 
-    Migration ``0012_rls_and_security`` verifies these roles instead of
-    creating them, so the harness must provide them before ``upgrade head``.
-    When a dedicated ``EMBYR_TEST_DATABASE_URL`` is used, the roles must either
-    already exist or be creatable; otherwise the failure is explicit rather
-    than silently skipping the security boundary.
+    Migration ``0012_rls_and_security`` verifies the runtime roles instead of
+    creating them, and ``0013_default_acl_hardening`` requires the
+    ``app_owner`` role, so the harness must provide them before ``upgrade
+    head``. When a dedicated ``EMBYR_TEST_DATABASE_URL`` is used, the roles
+    must either already exist or be creatable; otherwise the failure is
+    explicit rather than silently skipping the security boundary.
     """
+    roles = {**RUNTIME_ROLES, OWNER_ROLE: OWNER_ROLE_ATTRIBUTES}
     with engine.begin() as connection:
-        for role, attributes in RUNTIME_ROLES.items():
+        for role, attributes in roles.items():
             exists = connection.execute(
                 text("select 1 from pg_roles where rolname = :role"),
                 {"role": role},
@@ -83,6 +91,17 @@ def provision_runtime_roles(engine: Engine) -> None:
                     f"role {role!r} or allow creating it, because migration "
                     "0012 verifies the role instead of provisioning it"
                 ) from error
+        # Mirror the platform provisioning that grants app_owner the schema
+        # authority and ownership-transfer membership migrations require.
+        connection.execute(
+            text(
+                "grant usage, create on schema public to app_owner "
+                "with grant option"
+            )
+        )
+        connection.execute(
+            text("grant app_maintenance to app_owner with set true")
+        )
 
 
 @pytest.fixture(scope="session")
