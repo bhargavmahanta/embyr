@@ -7,6 +7,7 @@ security semantics are mocked.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -14,6 +15,8 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
@@ -478,37 +481,39 @@ def test_upgrade_allows_app_owner_membership_in_maintenance_role(
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     admin_role = "app_owner"
-    command.downgrade(config, "0011a_account_deletion")
-
-    with engine.begin() as connection:
-        role_existed = connection.execute(
-            text("select 1 from pg_roles where rolname = :role"),
-            {"role": admin_role},
-        ).scalar_one_or_none() is not None
-        if not role_existed:
-            connection.execute(text(f"create role {admin_role} nologin"))
-        membership_existed = connection.execute(
-            text(
-                """
-                select 1
-                from pg_auth_members membership
-                join pg_roles granted on granted.oid = membership.roleid
-                join pg_roles member on member.oid = membership.member
-                where granted.rolname = :granted_role
-                  and member.rolname = :member_role
-                """
-            ),
-            {
-                "granted_role": MAINTENANCE_ROLE,
-                "member_role": admin_role,
-            },
-        ).scalar_one_or_none() is not None
-        if not membership_existed:
-            connection.execute(
-                text(f"grant {MAINTENANCE_ROLE} to {admin_role}")
-            )
+    role_existed = None
+    membership_existed = None
 
     try:
+        command.downgrade(config, "0011a_account_deletion")
+        with engine.begin() as connection:
+            role_existed = connection.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": admin_role},
+            ).scalar_one_or_none() is not None
+            if not role_existed:
+                connection.execute(text(f"create role {admin_role} nologin"))
+            membership_existed = connection.execute(
+                text(
+                    """
+                    select 1
+                    from pg_auth_members membership
+                    join pg_roles granted on granted.oid = membership.roleid
+                    join pg_roles member on member.oid = membership.member
+                    where granted.rolname = :granted_role
+                      and member.rolname = :member_role
+                    """
+                ),
+                {
+                    "granted_role": MAINTENANCE_ROLE,
+                    "member_role": admin_role,
+                },
+            ).scalar_one_or_none() is not None
+            if not membership_existed:
+                connection.execute(
+                    text(f"grant {MAINTENANCE_ROLE} to {admin_role}")
+                )
+
         command.upgrade(config, "head")
         with engine.connect() as connection:
             assert connection.execute(
@@ -532,17 +537,196 @@ def test_upgrade_allows_app_owner_membership_in_maintenance_role(
             ).scalar_one() == 1
     finally:
         with engine.begin() as connection:
-            if not membership_existed:
+            if membership_existed is False:
                 connection.execute(
                     text(f"revoke {MAINTENANCE_ROLE} from {admin_role}")
                 )
-            if not role_existed:
+            if role_existed is False:
                 connection.execute(text(f"drop role {admin_role}"))
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
         if current != "0012_rls_and_security":
             command.upgrade(config, "head")
+        engine.dispose()
+
+
+def test_client_access_is_revoked_before_noinherit_function_owner_transfer(
+    database_url,
+    migrated_engine,
+    monkeypatch,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    migration_role = f"rls_migration_owner_{uuid4().hex}"
+    client_role = "anon"
+    migration_path = (
+        REPOSITORY_ROOT
+        / "database"
+        / "migrations"
+        / "versions"
+        / "0012_rls_and_security.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_0012_for_test", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    command.downgrade(config, "0011a_account_deletion")
+    original_schema_owner = None
+    original_function_owner = None
+    original_table_owners = []
+    client_role_existed = None
+    client_execute_existed = None
+
+    try:
+        with engine.begin() as connection:
+            original_schema_owner = connection.execute(
+                text(
+                    "select pg_get_userbyid(nspowner) "
+                    "from pg_namespace where nspname = 'public'"
+                )
+            ).scalar_one()
+            original_function_owner = connection.execute(
+                text(
+                    """
+                    select pg_get_userbyid(p.proowner)
+                    from pg_proc p
+                    join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public'
+                      and p.proname = 'maintenance_delete_account'
+                    """
+                )
+            ).scalar_one()
+            client_role_existed = connection.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": client_role},
+            ).scalar_one_or_none() is not None
+            if not client_role_existed:
+                connection.execute(text(f"create role {client_role} nologin"))
+            client_execute_existed = connection.execute(
+                text(
+                    "select has_function_privilege("
+                    ":role, 'public.maintenance_delete_account(uuid)', 'EXECUTE')"
+                ),
+                {"role": client_role},
+            ).scalar_one()
+
+            connection.execute(text(f"create role {migration_role} noinherit nologin"))
+            original_table_owners = connection.execute(
+                text(
+                    """
+                    select c.relname, pg_get_userbyid(c.relowner)
+                    from pg_class c
+                    join pg_namespace n on n.oid = c.relnamespace
+                    where n.nspname = 'public' and c.relkind in ('r', 'p')
+                    """
+                )
+            ).all()
+            for table_name, _owner_name in original_table_owners:
+                table = connection.dialect.identifier_preparer.quote(table_name)
+                connection.execute(
+                    text(f"alter table public.{table} owner to {migration_role}")
+                )
+            connection.execute(
+                text(f"grant {MAINTENANCE_ROLE} to {migration_role}")
+            )
+            connection.execute(text(f"alter schema public owner to {migration_role}"))
+            connection.execute(
+                text(
+                    "alter function public.maintenance_delete_account(uuid) "
+                    f"owner to {migration_role}"
+                )
+            )
+            connection.execute(
+                text(
+                    "grant execute on function "
+                    "public.maintenance_delete_account(uuid) to anon"
+                )
+            )
+
+        with engine.begin() as connection:
+            connection.execute(text(f"set local role {migration_role}"))
+            monkeypatch.setattr(
+                migration,
+                "op",
+                Operations(MigrationContext.configure(connection)),
+            )
+            monkeypatch.setattr(migration, "_verify_runtime_roles", lambda bind: None)
+            monkeypatch.setattr(migration, "_harden_schema", lambda: None)
+            monkeypatch.setattr(migration, "_grant_canonical_read", lambda: None)
+            monkeypatch.setattr(migration, "_grant_identity", lambda: None)
+            monkeypatch.setattr(migration, "_grant_backend", lambda: None)
+            monkeypatch.setattr(migration, "_grant_worker", lambda: None)
+            monkeypatch.setattr(migration, "_grant_maintenance", lambda: None)
+            monkeypatch.setattr(migration, "_enable_rls", lambda: None)
+            monkeypatch.setattr(
+                migration,
+                "_harden_default_privileges",
+                lambda bind: None,
+            )
+            migration.upgrade()
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "select has_function_privilege("
+                    ":role, 'public.maintenance_delete_account(uuid)', 'EXECUTE')"
+                ),
+                {"role": client_role},
+            ).scalar_one() is False
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text("reset role"))
+            if original_function_owner is not None:
+                owner = connection.dialect.identifier_preparer.quote(
+                    original_function_owner
+                )
+                connection.execute(
+                    text(
+                        "alter function public.maintenance_delete_account(uuid) "
+                        f"owner to {owner}"
+                    )
+                )
+            connection.execute(
+                text(
+                    "revoke execute on function "
+                    "public.maintenance_delete_account(uuid) from app_worker"
+                )
+            )
+            if client_role_existed is True and client_execute_existed is True:
+                connection.execute(
+                    text(
+                        "grant execute on function "
+                        "public.maintenance_delete_account(uuid) to anon"
+                    )
+                )
+            elif client_role_existed is not None:
+                connection.execute(
+                    text(
+                        "revoke execute on function "
+                        "public.maintenance_delete_account(uuid) from anon"
+                    )
+                )
+            for table_name, owner_name in original_table_owners:
+                table = connection.dialect.identifier_preparer.quote(table_name)
+                owner = connection.dialect.identifier_preparer.quote(owner_name)
+                connection.execute(
+                    text(f"alter table public.{table} owner to {owner}")
+                )
+            if original_schema_owner is not None:
+                owner = connection.dialect.identifier_preparer.quote(
+                    original_schema_owner
+                )
+                connection.execute(text(f"alter schema public owner to {owner}"))
+            connection.execute(
+                text(f"revoke {MAINTENANCE_ROLE} from {migration_role}")
+            )
+            connection.execute(text(f"drop role {migration_role}"))
+            if client_role_existed is False:
+                connection.execute(text("drop role anon"))
+        command.upgrade(config, "head")
         engine.dispose()
 
 

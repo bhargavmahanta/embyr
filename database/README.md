@@ -102,6 +102,11 @@ enables `FORCE ROW LEVEL SECURITY` on every learner-owned table:
   analyses. Canonical ontology and practical-challenge tables are read-only.
 - `app_worker` holds `BYPASSRLS` and the DML needed for cross-user jobs,
   evaluation, and projections; immutable-source triggers remain enforced.
+- `app_owner` is `NOBYPASSRLS`. Although it owns the learner tables,
+  `FORCE ROW LEVEL SECURITY` still applies and no learner policy targets it,
+  so it cannot perform learner-table DML. Cross-user migration or seed DML
+  must use `app_worker` within its reviewed grants; per-user operations use
+  `app_backend` with transaction-local `app.user_id`.
 - `app_maintenance` holds `SELECT` and `DELETE` on learner-owned tables and
   owns the maintenance function. Only the trusted worker (`app_worker`) may
   execute it; `PUBLIC` retains no `EXECUTE`.
@@ -149,5 +154,5 @@ migration:
 Migration order is `0011_stories_and_exports` -> `0011a_account_deletion` ->
 `0012_rls_and_security`. The routine is inert to application roles after
 `0011a`: EXECUTE is revoked from PUBLIC and ownership is not transferred.
-`0012` provisions `app_maintenance`, transfers function ownership, and grants
-EXECUTE to the trusted worker.
+`0012` verifies the externally provisioned `app_maintenance` role, transfers
+function ownership, and grants EXECUTE to the trusted worker.

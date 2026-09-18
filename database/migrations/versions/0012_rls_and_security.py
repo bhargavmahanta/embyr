@@ -586,10 +586,10 @@ def upgrade() -> None:
     _grant_worker()
     _grant_maintenance()
 
+    _revoke_client_roles()
     _activate_maintenance_function()
     _enable_rls()
 
-    _revoke_client_roles()
     _harden_default_privileges(op.get_bind())
 
 
