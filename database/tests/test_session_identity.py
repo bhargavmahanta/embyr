@@ -12,6 +12,8 @@ reuse rather than hoping the pool happens to hand back the same connection.
 """
 from __future__ import annotations
 
+import asyncio
+import sys
 from uuid import uuid4
 
 import pytest
@@ -20,6 +22,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.session import set_current_user
+
+if sys.platform == "win32":
+    # Psycopg's async support cannot run on Windows' default ProactorEventLoop;
+    # the test suite must select the SelectorEventLoop. Test-only: production
+    # database code and the event loop it uses are unchanged.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 async def _identity(session) -> str | None:
@@ -63,20 +71,28 @@ async def test_identity_is_transaction_local_across_boundaries(pinned):
             assert await _identity(session) == str(user_a)
             pid_a = await _pid(session)
 
-    # Committed transaction released the same physical connection.
+    # Commit released the same physical connection and cleared user A.
     async with pinned.factory() as session:
         async with session.begin():
             assert await _pid(session) == pid_a
             assert (await _identity(session)) in (None, "")
             assert (await _identity(session)) != str(user_a)
-            await set_current_user(session, user_b)
-            assert await _identity(session) == str(user_b)
 
-    # Rolled-back transaction must not leak user B.
+    # Explicit rollback of user B on the same physical connection. The identity
+    # is visible inside the transaction, then the transaction is rolled back
+    # without an exception.
+    async with pinned.factory() as session:
+        await set_current_user(session, user_b)
+        assert await _identity(session) == str(user_b)
+        assert await _pid(session) == pid_a
+        await session.rollback()
+
+    # Neither identity survives its transaction boundary.
     async with pinned.factory() as session:
         async with session.begin():
             assert await _pid(session) == pid_a
             assert (await _identity(session)) in (None, "")
+            assert (await _identity(session)) != str(user_a)
             assert (await _identity(session)) != str(user_b)
 
 
