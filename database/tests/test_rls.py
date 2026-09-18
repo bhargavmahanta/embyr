@@ -29,6 +29,7 @@ WORKER_ROLE = "app_worker"
 MAINTENANCE_ROLE = "app_maintenance"
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account"
 CLIENT_ROLES = ("anon", "authenticated", "service_role")
+HEAD = "0013_default_acl_hardening"
 
 LEARNER_TABLES = (
     "user_devices",
@@ -225,7 +226,7 @@ def _alembic_config(url: str) -> Config:
 def test_alembic_has_exactly_one_head():
     script = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
 
-    assert script.get_heads() == ["0012_rls_and_security"]
+    assert script.get_heads() == [HEAD]
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +422,7 @@ def test_upgrade_rejects_unsafe_runtime_role_attributes(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 
@@ -468,7 +469,7 @@ def test_upgrade_rejects_any_outbound_runtime_role_membership(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 
@@ -518,7 +519,7 @@ def test_upgrade_allows_app_owner_membership_in_maintenance_role(
         with engine.connect() as connection:
             assert connection.execute(
                 text("select version_num from alembic_version")
-            ).scalar_one() == "0012_rls_and_security"
+            ).scalar_one() == HEAD
             assert connection.execute(
                 text(
                     """
@@ -546,7 +547,7 @@ def test_upgrade_allows_app_owner_membership_in_maintenance_role(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 
@@ -814,7 +815,7 @@ def test_upgrade_revokes_preexisting_supabase_client_access(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 
@@ -865,7 +866,7 @@ def test_upgrade_revokes_preexisting_untrusted_function_executor(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 
@@ -916,7 +917,7 @@ def test_upgrade_aborts_when_required_runtime_role_is_missing(
             current = connection.execute(
                 text("select version_num from alembic_version")
             ).scalar_one()
-        if current != "0012_rls_and_security":
+        if current != HEAD:
             command.upgrade(config, "head")
         engine.dispose()
 

@@ -82,9 +82,10 @@ identity must be the application object owner itself, a member with sufficient
 `SET ROLE`/membership semantics, or an administrative/superuser identity capable
 of the operation. The migration grants `app_maintenance` `CREATE` on `public`
 only for the ownership transfer and revokes it in the same transaction.
-Creating a `BYPASSRLS` role requires superuser authority, so on hosted
-PostgreSQL the roles, attributes, and administrative membership remain
-environment-admin responsibilities.
+Creating a `BYPASSRLS` role requires elevated authority, so on hosted
+PostgreSQL the roles, attributes, schema authority, and administrative
+membership remain environment-admin responsibilities, scripted by
+[`provisioning/supabase_roles.sql`](provisioning/supabase_roles.sql).
 
 ## Runtime grants and row-level security
 
@@ -130,17 +131,84 @@ enables `FORCE ROW LEVEL SECURITY` on every learner-owned table:
   public execution. Downgrade restores only the two recorded `PUBLIC EXECUTE`
   defaults and preserves unrelated default-ACL entries.
 
-### Supabase deployment prerequisite
+### Supabase deployment prerequisites
 
-M1 is not deployable on a hosted Supabase project until that project has
-provisioned the runtime roles and attributes above and demonstrated the
-ownership transfer of `maintenance_delete_account` to `app_maintenance`. The
-migration is provider-independent and deliberately verifies rather than
-provisions roles; it cannot create `BYPASSRLS` roles or role memberships.
-Future hosted migrations that create Embyr tables must also verify the actual
-Supabase default ACLs do not re-grant `anon`, `authenticated`, or `service_role`
-access. Migration 0012 does not speculate about unmeasured hosted table-default
-ACLs.
+Hosted Supabase provisioning is repository-owned and idempotent in
+[`provisioning/supabase_roles.sql`](provisioning/supabase_roles.sql); see
+[`provisioning/README.md`](provisioning/README.md). It is executed by the
+platform administrative `postgres` identity, which is reserved for provisioning
+and is never an Embyr runtime or migration identity.
+
+Alembic remains the schema source of truth and never creates cluster roles.
+`0012_rls_and_security` verifies the provisioned runtime roles and their
+attributes; `0013_default_acl_hardening` hardens `app_owner` default privileges.
+`app_owner` is the Alembic migration identity and owner of Embyr application
+objects. It is granted `USAGE, CREATE ON SCHEMA public WITH GRANT OPTION` and the
+minimum ownership-transfer membership `app_owner -> app_maintenance WITH SET
+TRUE` (that is, `grant app_maintenance to app_owner`) required by `0012`.
+
+Role passwords and connection strings are never committed; they are provisioned
+separately and stored only in secure environment/secret storage.
+
+Embyr clients never use direct PostgREST/GraphQL table access; FastAPI is the
+data boundary, so `public` is not exposed through the Supabase Data API.
+Database privileges and RLS remain mandatory regardless.
+
+Supabase's platform defaults grant client roles (`anon`, `authenticated`,
+`service_role`) access to new `public` objects. `0012` revokes client access on
+the Embyr objects that exist when it runs; `0013_default_acl_hardening` revokes
+the future default grants for `app_owner`-created tables, sequences, and
+functions and also strips the implicit `PUBLIC EXECUTE` default from future
+functions. Only `app_owner` authors Embyr schema; dashboard or manual schema
+authorship is prohibited.
+
+`vector` is installed in `public` on the hosted project and is owned by the
+platform. It is intentionally not relocated here; relocating it is a separate
+forward migration/platform decision.
+
+```sql
+select rolname, rolsuper, rolbypassrls, rolcanlogin, rolcreaterole,
+       rolcreatedb, rolreplication
+  from pg_roles
+ where rolname in ('app_owner', 'app_backend', 'app_worker', 'app_maintenance')
+ order by rolname;
+
+select member.rolname as member, granted.rolname as granted,
+       am.admin_option, am.inherit_option, am.set_option
+  from pg_auth_members am
+  join pg_roles member on member.oid = am.member
+  join pg_roles granted on granted.oid = am.roleid
+ where member.rolname in
+       ('app_owner', 'app_backend', 'app_worker', 'app_maintenance')
+ order by 1, 2;
+
+select has_schema_privilege('app_owner', 'public', 'usage')  as owner_usage,
+       has_schema_privilege('app_owner', 'public', 'create') as owner_create;
+```
+
+### Hosted development rebuild (Issue #33)
+
+The existing hosted development database predates the `app_owner` ownership
+model and is still at `0006_practical_artifacts` with `postgres`-owned objects
+and full client-role grants. The clean rebuild belongs to the hosted
+migration/RLS verification work (Issue #33), not to prerequisite provisioning:
+
+1. verify the database contains no Embyr/application data;
+2. remove `public` from the Data API exposed schemas;
+3. provision roles with `provisioning/supabase_roles.sql`;
+4. downgrade as the administrative identity **only** to `0001_foundation`;
+5. never invoke the frozen `0001_foundation` downgrade on Supabase: it attempts
+   to drop `vector` (owned by the platform) and `pgcrypto` (in the managed
+   `extensions` schema);
+6. explicitly drop only the four `0001` Embyr tables (`jobs`,
+   `idempotency_records`, `user_devices`, `app_users`) in dependency-safe
+   reverse order, without `CASCADE`;
+7. drop `public.alembic_version`;
+8. verify `vector` and `pgcrypto` remain installed and Supabase-managed schemas
+   are untouched;
+9. connect as `app_owner` and run `alembic upgrade head` (through
+   `0013_default_acl_hardening`);
+10. verify ownership, RLS, grants, and the maintenance function.
 
 ## Account deletion maintenance path
 
