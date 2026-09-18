@@ -666,25 +666,32 @@ def _seed_learner_with_other(connection):
     return canonical, user_a, user_b
 
 
+def _ensure_role(connection, role: str, *, bypassrls: bool = False) -> None:
+    exists = connection.execute(
+        text("select 1 from pg_roles where rolname = :role"), {"role": role}
+    ).scalar_one_or_none()
+    if exists is not None:
+        return
+    attributes = "nologin bypassrls" if bypassrls else "nologin"
+    connection.execute(text(f"create role {role} {attributes}"))
+
+
 def _setup_maintenance_roles(connection) -> None:
-    connection.execute(text(f"create role {MAINTENANCE_ROLE} nologin"))
-    connection.execute(text(f"create role {WORKER_ROLE} nologin"))
-    connection.execute(text(f"create role {ORDINARY_ROLE} nologin"))
+    # app_maintenance is externally provisioned (NOLOGIN + BYPASSRLS) by the
+    # test harness before migration 0012 runs; the other roles stay scoped to
+    # this test transaction.
+    _ensure_role(connection, MAINTENANCE_ROLE, bypassrls=True)
+    _ensure_role(connection, WORKER_ROLE)
+    _ensure_role(connection, ORDINARY_ROLE)
     connection.execute(
         text(
-            f"grant usage, create on schema public to {MAINTENANCE_ROLE};"
-            f"grant usage on schema public to {WORKER_ROLE}, {ORDINARY_ROLE}"
+            f"grant usage on schema public to "
+            f"{MAINTENANCE_ROLE}, {WORKER_ROLE}, {ORDINARY_ROLE}"
         )
     )
     connection.execute(
         text(
             f"grant select, insert, update, delete on all tables in schema public "
-            f"to {MAINTENANCE_ROLE}"
-        )
-    )
-    connection.execute(
-        text(
-            f"grant usage, select on all sequences in schema public "
             f"to {MAINTENANCE_ROLE}"
         )
     )
@@ -741,22 +748,25 @@ def test_maintenance_function_exists_and_is_hardened(migrated_connection):
     assert row.security_definer is True
     assert row.language == "plpgsql"
     assert any(str(item).startswith("search_path=") for item in (row.config or []))
-    assert row.owner != MAINTENANCE_ROLE, "0011a must not reassign ownership"
+    assert row.owner == MAINTENANCE_ROLE, "0012 transfers ownership to app_maintenance"
     assert row.public_can_execute is False, "PUBLIC must not hold EXECUTE"
 
 
-def test_0011a_does_not_create_runtime_roles(migrated_connection):
-    roles = {
-        row[0]
-        for row in migrated_connection.execute(
+def test_runtime_roles_are_externally_provisioned(migrated_connection):
+    rows = dict(
+        migrated_connection.execute(
             text(
-                "select rolname from pg_roles where rolname in "
+                "select rolname, rolbypassrls from pg_roles where rolname in "
                 "('app_maintenance', 'app_worker', 'app_backend')"
             )
-        )
-    }
+        ).all()
+    )
 
-    assert roles == set(), "0011a must not provision production roles"
+    assert rows == {
+        "app_backend": False,
+        "app_worker": True,
+        "app_maintenance": True,
+    }, "0012 verifies externally provisioned runtime roles; it does not create them"
 
 
 def test_ordinary_role_cannot_execute_maintenance_function(migrated_connection):
@@ -823,6 +833,10 @@ def test_ordinary_role_cannot_delete_immutable_history(migrated_connection):
         )
     )
 
+    # After 0012 the ordinary role has neither a policy nor a bypass, so RLS
+    # hides every row before the immutability trigger can fire. The invariant
+    # holds through row-level security; the trigger layer is covered by the
+    # grantee-with-bypass case in test_rls.py.
     for table in (
         "learning_events",
         "learning_evidence",
@@ -830,14 +844,14 @@ def test_ordinary_role_cannot_delete_immutable_history(migrated_connection):
         "assessment_responses",
         "artifacts",
     ):
-        with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
-            _as_role(migrated_connection, ORDINARY_ROLE)
-            migrated_connection.execute(
-                text(f"delete from {table} where user_id = :user_id"),
-                {"user_id": user_a},
-            )
-        assert error.value.orig.sqlstate == "55000", table
+        _as_role(migrated_connection, ORDINARY_ROLE)
+        deleted = migrated_connection.execute(
+            text(f"delete from {table} where user_id = :user_id"),
+            {"user_id": user_a},
+        ).rowcount
         _reset_role(migrated_connection)
+        assert deleted == 0, table
+        assert _count(migrated_connection, table, user_a) == 1, table
 
 
 def test_trusted_worker_has_no_direct_delete_privileges(migrated_connection):
@@ -1043,7 +1057,7 @@ def test_downgrade_restores_previous_trigger_and_removes_function(database_url):
                 occurred_at="2026-09-01T00:00:00+00:00",
                 schema_version=1,
             )
-            connection.execute(text(f"create role {MAINTENANCE_ROLE} nologin"))
+            _ensure_role(connection, MAINTENANCE_ROLE, bypassrls=True)
             connection.execute(
                 text(
                     f"grant select, delete on learning_events to {MAINTENANCE_ROLE}"
@@ -1070,4 +1084,4 @@ def test_downgrade_restores_previous_trigger_and_removes_function(database_url):
         assert _function_row(connection) is not None
         assert connection.execute(
             text("select version_num from alembic_version")
-        ).scalar_one() == "0011a_account_deletion"
+        ).scalar_one() == "0012_rls_and_security"
