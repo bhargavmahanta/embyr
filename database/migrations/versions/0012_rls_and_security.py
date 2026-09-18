@@ -330,6 +330,43 @@ def _activate_maintenance_function() -> None:
     # Ownership transfer makes current_user = 'app_maintenance' inside the
     # SECURITY DEFINER routine, satisfying the 0011a ledger guard. BYPASSRLS
     # and the SELECT/DELETE grants above let its ordered deletes run.
+    # Remove every explicit executor except the trusted worker before the
+    # transfer. The current owner retains its implicit owner privilege, and
+    # app_maintenance gains that privilege when ownership moves below.
+    op.execute(
+        f"""
+        do $$
+        declare
+            executor_role text;
+        begin
+            for executor_role in
+                select grantee.rolname
+                from pg_proc routine
+                join pg_namespace namespace
+                  on namespace.oid = routine.pronamespace
+                cross join lateral aclexplode(
+                    coalesce(
+                        routine.proacl,
+                        acldefault('f', routine.proowner)
+                    )
+                ) acl
+                join pg_roles grantee on grantee.oid = acl.grantee
+                where namespace.nspname = 'public'
+                  and routine.oid =
+                      '{MAINTENANCE_FUNCTION_ARGS}'::regprocedure
+                  and acl.privilege_type = 'EXECUTE'
+                  and acl.grantee <> routine.proowner
+                  and grantee.rolname <> '{WORKER_ROLE}'
+            loop
+                execute format(
+                    'revoke all on function {MAINTENANCE_FUNCTION_ARGS} from %I',
+                    executor_role
+                );
+            end loop;
+        end
+        $$
+        """
+    )
     op.execute(
         f"revoke all on function {MAINTENANCE_FUNCTION_ARGS} from public"
     )

@@ -819,6 +819,57 @@ def test_upgrade_revokes_preexisting_supabase_client_access(
         engine.dispose()
 
 
+def test_upgrade_revokes_preexisting_untrusted_function_executor(
+    database_url,
+    migrated_engine,
+):
+    del migrated_engine  # ensure the session-scoped migrated database exists
+    config = _alembic_config(database_url)
+    engine = create_engine(database_url)
+    untrusted_role = f"rls_untrusted_executor_{uuid4().hex}"
+    role_created = False
+
+    try:
+        command.downgrade(config, "0011a_account_deletion")
+        with engine.begin() as connection:
+            connection.execute(text(f"create role {untrusted_role} nologin"))
+            role_created = True
+            connection.execute(
+                text(
+                    "grant execute on function "
+                    f"{MAINTENANCE_FUNCTION}(uuid) to {untrusted_role}"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "select has_function_privilege("
+                    ":role, 'public.maintenance_delete_account(uuid)', "
+                    "'EXECUTE')"
+                ),
+                {"role": untrusted_role},
+            ).scalar_one() is False
+    finally:
+        with engine.begin() as connection:
+            if role_created:
+                connection.execute(
+                    text(
+                        "revoke all on function "
+                        f"{MAINTENANCE_FUNCTION}(uuid) from {untrusted_role}"
+                    )
+                )
+                connection.execute(text(f"drop role {untrusted_role}"))
+            current = connection.execute(
+                text("select version_num from alembic_version")
+            ).scalar_one()
+        if current != "0012_rls_and_security":
+            command.upgrade(config, "head")
+        engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("missing_role", "attributes"),
     (

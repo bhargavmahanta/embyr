@@ -102,14 +102,18 @@ enables `FORCE ROW LEVEL SECURITY` on every learner-owned table:
   analyses. Canonical ontology and practical-challenge tables are read-only.
 - `app_worker` holds `BYPASSRLS` and the DML needed for cross-user jobs,
   evaluation, and projections; immutable-source triggers remain enforced.
-- `app_owner` is `NOBYPASSRLS`. Although it owns the learner tables,
-  `FORCE ROW LEVEL SECURITY` still applies and no learner policy targets it,
-  so it cannot perform learner-table DML. Cross-user migration or seed DML
-  must use `app_worker` within its reviewed grants; per-user operations use
-  `app_backend` with transaction-local `app.user_id`.
+- `app_owner` is `NOBYPASSRLS`. Direct DML as `app_owner` remains subject to
+  `FORCE ROW LEVEL SECURITY`, and no learner policy targets it. It is still a
+  fully trusted, non-runtime administrative identity: it owns schema objects
+  and may hold the approved incoming membership in `app_maintenance` needed
+  for ownership transfer. Its credentials must never serve request or worker
+  traffic. Cross-user runtime DML uses `app_worker` within its reviewed grants;
+  per-user operations use `app_backend` with transaction-local `app.user_id`.
 - `app_maintenance` holds `SELECT` and `DELETE` on learner-owned tables and
-  owns the maintenance function. Only the trusted worker (`app_worker`) may
-  execute it; `PUBLIC` retains no `EXECUTE`.
+  owns the maintenance function. The migration removes every explicit
+  function executor except the trusted worker (`app_worker`); `PUBLIC` retains
+  no `EXECUTE`. The function owner retains PostgreSQL's implicit owner
+  privilege.
 - `app_users` is intentionally outside learner RLS because authentication must
   resolve the internal UUID from `(auth_provider, auth_subject)` before a
   per-user context exists. It is protected by grants only.
