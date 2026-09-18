@@ -31,7 +31,7 @@ RUNTIME_ROLES: dict[str, str] = {
 # runtime roles: migration ``0013_default_acl_hardening`` hardens
 # ``app_owner``'s default privileges but never creates cluster roles.
 OWNER_ROLE = "app_owner"
-OWNER_ROLE_ATTRIBUTES = "nologin nobypassrls"
+OWNER_ROLE_ATTRIBUTES = "login nobypassrls"
 
 
 def _psycopg_url(url: str) -> str:
@@ -91,6 +91,18 @@ def provision_runtime_roles(engine: Engine) -> None:
                     f"role {role!r} or allow creating it, because migration "
                     "0012 verifies the role instead of provisioning it"
                 ) from error
+        owner_attributes = connection.execute(
+            text(
+                "select rolcanlogin, rolbypassrls from pg_roles "
+                "where rolname = :role"
+            ),
+            {"role": OWNER_ROLE},
+        ).one()
+        if not owner_attributes.rolcanlogin or owner_attributes.rolbypassrls:
+            raise RuntimeError(
+                "the test database must expose app_owner as LOGIN NOBYPASSRLS "
+                "so the harness matches the provisioned migration identity"
+            )
         # Mirror the platform provisioning that grants app_owner the schema
         # authority and ownership-transfer membership migrations require.
         connection.execute(

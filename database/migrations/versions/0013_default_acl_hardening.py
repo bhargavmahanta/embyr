@@ -15,6 +15,11 @@ Embyr application schema. For objects ``app_owner`` creates in ``public``,
 future default privileges must not grant ``anon``, ``authenticated``, or
 ``service_role`` access to tables, sequences, or functions.
 
+PostgreSQL adds per-schema defaults to global defaults, so a global client-role
+default cannot be removed by a schema-scoped ``REVOKE``. Rather than silently
+leave such a grant in force, the migration rejects a global client-role default
+for ``app_owner`` and aborts, keeping its ``public`` scope honest.
+
 It records the prior ``app_owner`` schema-``public`` default-ACL state, revokes
 the client-role defaults, and — for Embyr objects ``app_owner`` already owns in
 ``public`` — revokes any client-role privileges. Downgrade restores the
@@ -234,6 +239,38 @@ def _read_marker(bind: sa.engine.Connection) -> dict:
     return state
 
 
+def _reject_global_client_defaults(bind: sa.engine.Connection) -> None:
+    """Refuse to proceed if a global client-role default would survive.
+
+    Per-schema default privileges are additive to global ones, so a global
+    client-role default for ``app_owner`` cannot be removed by the
+    schema-scoped revokes this migration performs. Fail loudly instead of
+    claiming a boundary that does not hold.
+    """
+    offending = bind.execute(
+        sa.text(
+            """
+            select distinct grantee.rolname
+            from pg_default_acl d
+            join pg_roles owner on owner.oid = d.defaclrole
+            cross join lateral aclexplode(d.defaclacl) acl
+            join pg_roles grantee on grantee.oid = acl.grantee
+            where owner.rolname = :owner
+              and d.defaclnamespace = 0
+              and grantee.rolname = any(:roles)
+            order by grantee.rolname
+            """
+        ),
+        {"owner": OBJECT_OWNER_ROLE, "roles": list(CLIENT_ROLES)},
+    ).scalars().all()
+    if offending:
+        raise RuntimeError(
+            "0013_default_acl_hardening cannot enforce the public default-ACL "
+            "boundary because global client-role defaults exist for app_owner: "
+            + ", ".join(offending)
+        )
+
+
 def _revoke_client_defaults(
     bind: sa.engine.Connection, roles: Sequence[str]
 ) -> None:
@@ -323,6 +360,7 @@ def upgrade() -> None:
         )
 
     roles = _existing_client_roles(bind)
+    _reject_global_client_defaults(bind)
     recorded = _record_defaults(bind, roles)
     _write_marker(bind, recorded)
 

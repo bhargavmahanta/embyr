@@ -144,8 +144,8 @@ Alembic remains the schema source of truth and never creates cluster roles.
 attributes; `0013_default_acl_hardening` hardens `app_owner` default privileges.
 `app_owner` is the Alembic migration identity and owner of Embyr application
 objects. It is granted `USAGE, CREATE ON SCHEMA public WITH GRANT OPTION` and the
-minimum ownership-transfer membership
-`app_maintenance -> app_owner WITH SET TRUE` required by `0012`.
+minimum ownership-transfer membership `app_owner -> app_maintenance WITH SET
+TRUE` (that is, `grant app_maintenance to app_owner`) required by `0012`.
 
 Role passwords and connection strings are never committed; they are provisioned
 separately and stored only in secure environment/secret storage.

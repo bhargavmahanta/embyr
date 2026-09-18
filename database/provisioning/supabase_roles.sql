@@ -12,6 +12,10 @@
 -- through the Dashboard SQL Editor, the Management API, or an admin ``psql``
 -- session. This script is idempotent and safe to re-run.
 --
+-- Requires PostgreSQL 16 or newer: step 4 uses the SET/INHERIT/ADMIN role-grant
+-- options introduced in PostgreSQL 16. Embyr development and hosted Supabase
+-- run PostgreSQL 16/17.
+--
 -- Credentials
 -- -----------
 -- This file intentionally contains NO passwords, connection strings, API keys,
