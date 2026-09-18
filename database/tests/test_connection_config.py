@@ -92,3 +92,41 @@ def test_required_url_form_enforces_tls(monkeypatch):
     engine = _engine(async_session_factory(SESSION_URL))
     _, connect_kwargs = engine.dialect.create_connect_args(engine.url)
     assert connect_kwargs.get("sslmode") == "require"
+
+
+def test_factory_rejects_explicit_url_without_sslmode(monkeypatch):
+    monkeypatch.delenv("EMBYR_DATABASE_URL", raising=False)
+    insecure = SESSION_URL.replace("?sslmode=require", "")
+    with pytest.raises(RuntimeError, match="must require TLS"):
+        async_session_factory(insecure)
+
+
+def test_factory_rejects_explicit_url_with_sslmode_disable(monkeypatch):
+    monkeypatch.delenv("EMBYR_DATABASE_URL", raising=False)
+    insecure = SESSION_URL.replace("sslmode=require", "sslmode=disable")
+    with pytest.raises(RuntimeError, match="must require TLS"):
+        async_session_factory(insecure)
+
+
+def test_factory_rejects_env_url_without_sslmode(monkeypatch):
+    monkeypatch.setenv(
+        "EMBYR_DATABASE_URL", SESSION_URL.replace("?sslmode=require", "")
+    )
+    with pytest.raises(RuntimeError, match="must require TLS"):
+        async_session_factory()
+
+
+def test_tls_rejection_does_not_echo_the_credential(monkeypatch):
+    monkeypatch.delenv("EMBYR_DATABASE_URL", raising=False)
+    insecure = SESSION_URL.replace("?sslmode=require", "")
+    with pytest.raises(RuntimeError) as error:
+        async_session_factory(insecure)
+    assert FAKE_PASSWORD not in str(error.value)
+
+
+def test_factory_accepts_sslmode_verify_full(monkeypatch):
+    monkeypatch.delenv("EMBYR_DATABASE_URL", raising=False)
+    verified = SESSION_URL.replace("sslmode=require", "sslmode=verify-full")
+    engine = _engine(async_session_factory(verified))
+    _, connect_kwargs = engine.dialect.create_connect_args(engine.url)
+    assert connect_kwargs.get("sslmode") == "verify-full"

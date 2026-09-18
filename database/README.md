@@ -60,7 +60,8 @@ example the FastAPI runtime connects as `app_backend.<project-ref>`. Hosted
 URLs must require TLS: include `sslmode=require`, or `sslmode=verify-full`
 together with the downloaded server certificate and `sslrootcert`. libpq
 defaults to `sslmode=prefer`, which can silently fall back to plaintext, so an
-explicit SSL mode is mandatory for the hosted connection.
+explicit SSL mode is mandatory for the hosted connection. The application
+session factory rejects a URL that omits `sslmode` or sets `sslmode=disable`.
 
 `EMBYR_DATABASE_URL` remains the single database variable, supplied per process
 for that process's least-privileged role:
