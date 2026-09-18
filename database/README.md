@@ -44,6 +44,56 @@ Run the database suite with:
 .venv\Scripts\python -m pytest database/tests -v
 ```
 
+### Hosted Supabase connection model
+
+The development Supabase project (`embyr-dev`) exposes PostgreSQL 17.6 through
+Supavisor. Embyr uses **Supavisor Session mode** (shared pooler, port `5432`)
+for Alembic, FastAPI, and the future worker:
+
+- the shared pooler is IPv4-reachable on every plan, so it works from
+  IPv4-only networks where the direct IPv6 endpoint is unreachable;
+- Session mode is session-stable and supports prepared statements, matching a
+  persistent backend and the transaction-local identity contract.
+
+Connect with the role-scoped pooler username `<role>.<project-ref>`; for
+example the FastAPI runtime connects as `app_backend.<project-ref>`. Hosted
+URLs must require TLS: include `sslmode=require`, or `sslmode=verify-full`
+together with the downloaded server certificate and `sslrootcert`. libpq
+defaults to `sslmode=prefer`, which can silently fall back to plaintext, so an
+explicit SSL mode is mandatory for the hosted connection. The application
+session factory rejects a URL that omits `sslmode` or sets `sslmode=disable`.
+
+`EMBYR_DATABASE_URL` remains the single database variable, supplied per process
+for that process's least-privileged role:
+
+| Process | Role |
+|---------|------|
+| Alembic migrations | `app_owner` |
+| FastAPI runtime | `app_backend` |
+| future worker | `app_worker` |
+
+The direct connection (`db.<project-ref>.supabase.co:5432`) is a supported
+fallback when the network reaches IPv6 or the project has the paid IPv4 add-on;
+it is not reachable from IPv4-only networks. **Supavisor Transaction mode
+(port `6543`) is not used**: it does not support prepared statements and does
+not guarantee session isolation. Empirically, on the hosted project a
+server-side prepared statement persisted on a pooled backend and a second
+client failed with `DuplicatePreparedStatement`, and a session-level
+`app.user_id` set by one client remained visible to another until explicitly
+discarded. Transaction mode also adds no benefit for a long-lived backend.
+
+Request identity is always written transaction-locally via
+`set_config('app.user_id', <uuid>, true)` (`backend/app/db/session.py`); session
+scope (`false`) and `SET app.user_id` are never used. Because the setting is
+transaction-local, it cannot survive the committing or rolling-back
+transaction, so a connection returned to the application pool is clean for the
+next request. The hosted project remains at `0006_practical_artifacts`; hosted
+RLS and the final migration state belong to Issue #33. Embyr roles cannot yet
+read `public.alembic_version` on the hosted project because existing objects
+remain owned by the platform `postgres` role until the #33 rebuild.
+Credentials and connection strings are never committed; they are supplied per
+process from secure environment or secret storage.
+
 Downgrades are destructive development verification only. Run `downgrade
 base` followed by `upgrade head` solely against a disposable test database.
 Production recovery uses backups and forward-fix migrations.
