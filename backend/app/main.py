@@ -10,12 +10,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import router
 from app.auth.verifier import SupabaseTokenVerifier
 from app.config import Settings
+from app.db.session import create_async_database_engine
 
 
 @asynccontextmanager
@@ -39,7 +40,7 @@ def create_app(
 
     engine = None
     if session_factory is None:
-        engine = create_async_engine(settings.database_url)
+        engine = create_async_database_engine(settings.database_url)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
     if verifier is None:
         verifier = SupabaseTokenVerifier(
