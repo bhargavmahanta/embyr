@@ -12,6 +12,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
@@ -88,6 +89,26 @@ def _set_backend_role(conn) -> None:
 
 @pytest.fixture
 def upload_env(migrated_engine, database_url):
+    env = _make_env(migrated_engine, database_url)
+    env.client = TestClient(env.app)
+    try:
+        with env.client:
+            yield env
+    finally:
+        _dispose_env(env)
+
+
+@pytest.fixture
+def upload_env_async(migrated_engine, database_url):
+    """App/engine harness without a sync TestClient for concurrent requests."""
+    env = _make_env(migrated_engine, database_url)
+    try:
+        yield env
+    finally:
+        _dispose_env(env)
+
+
+def _make_env(migrated_engine, database_url):
     with migrated_engine.begin() as conn:
         user_a = conn.execute(
             text(
@@ -118,10 +139,7 @@ def upload_env(migrated_engine, database_url):
         return ExternalIdentity("SUPABASE", SUBJECT_A)
 
     app.dependency_overrides[get_external_identity] = _identity
-    client = TestClient(app)
-
-    env = SimpleNamespace(
-        client=client,
+    return SimpleNamespace(
         app=app,
         storage=storage,
         engine=engine,
@@ -129,20 +147,16 @@ def upload_env(migrated_engine, database_url):
         user_a=user_a,
         user_b=user_b,
     )
-    try:
-        with client:
-            yield env
-    finally:
-        app.dependency_overrides.clear()
-        with migrated_engine.begin() as conn:
-            conn.execute(
-                text(
-                    "delete from public.app_users "
-                    "where auth_subject in (:a, :b)"
-                ),
-                {"a": SUBJECT_A, "b": SUBJECT_B},
-            )
-        asyncio.run(engine.dispose())
+
+
+def _dispose_env(env):
+    env.app.dependency_overrides.clear()
+    with env.migrated_engine.begin() as conn:
+        conn.execute(
+            text("delete from public.app_users where auth_subject in (:a, :b)"),
+            {"a": SUBJECT_A, "b": SUBJECT_B},
+        )
+    asyncio.run(env.engine.dispose())
 
 
 def _authorize(env, key="k1", body=None):
@@ -362,3 +376,121 @@ def test_status_response_has_no_object_key_or_capability(upload_env):
     assert "object_key" not in payload
     assert "signed_upload_url" not in payload
     assert "signed_upload_token" not in payload
+
+
+@pytest.mark.asyncio
+async def test_concurrent_authorization_is_idempotent(upload_env_async):
+    """Two simultaneous same-key authorizations converge on one durable upload.
+
+    The requests run on one event loop through separate ASGI/DB execution paths
+    and are released together by an ``asyncio.Barrier``, so the second request's
+    idempotency reservation genuinely races the first one's insert/commit.
+    """
+    env = upload_env_async
+    transport = httpx.ASGITransport(app=env.app)
+    barrier = asyncio.Barrier(2)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+
+        async def authorize():
+            await barrier.wait()
+            return await client.post(
+                "/api/v1/uploads",
+                json=BODY,
+                headers={"Idempotency-Key": "conc-1"},
+            )
+
+        first, second = await asyncio.gather(authorize(), authorize())
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    body_a, body_b = first.json(), second.json()
+    assert body_a["upload_id"] == body_b["upload_id"]
+    assert body_a["object_key"] == body_b["object_key"]
+
+    tokens = {body_a["signed_upload_token"], body_b["signed_upload_token"]}
+    assert tokens == {"t1", "t2"}, "each response must get a fresh capability"
+    assert len(env.storage.upload_calls) == 2
+    assert {key for key, _ in env.storage.upload_calls} == {body_a["object_key"]}
+
+    with env.migrated_engine.begin() as conn:
+        uploads = conn.execute(
+            text(
+                "select count(*) from public.upload_sessions where user_id = :u"
+            ),
+            {"u": env.user_a},
+        ).scalar_one()
+        idempotency = conn.execute(
+            text(
+                "select count(*) from public.idempotency_records "
+                "where user_id = :u and idempotency_key = 'conc-1'"
+            ),
+            {"u": env.user_a},
+        ).scalar_one()
+    assert uploads == 1, "concurrent authorization created a duplicate upload"
+    assert idempotency == 1, "concurrent authorization created a duplicate record"
+
+    stored = _stored_body(env, "conc-1")
+    assert "signed_upload_url" not in stored
+    assert "signed_upload_token" not in stored
+
+
+@pytest.mark.asyncio
+async def test_concurrent_completion_transitions_once(upload_env_async):
+    """Two simultaneous same-key completions settle on one lifecycle transition."""
+    env = upload_env_async
+    transport = httpx.ASGITransport(app=env.app)
+    barrier = asyncio.Barrier(2)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        authorized = await client.post(
+            "/api/v1/uploads", json=BODY, headers={"Idempotency-Key": "auth-c"}
+        )
+        assert authorized.status_code == 201, authorized.text
+        upload_id = authorized.json()["upload_id"]
+        env.storage.info_result = ObjectInfo(
+            object_key=authorized.json()["object_key"],
+            size=10,
+            content_type="image/jpeg",
+            etag="e",
+            bucket_id=BUCKET,
+            last_modified=None,
+        )
+
+        async def complete():
+            await barrier.wait()
+            return await client.post(
+                f"/api/v1/uploads/{upload_id}/complete",
+                headers={"Idempotency-Key": "complete-c"},
+            )
+
+        first, second = await asyncio.gather(complete(), complete())
+
+    assert first.status_code == 202, first.text
+    assert second.status_code == 202, second.text
+    assert first.json() == second.json()
+    assert first.json()["status"] == "UPLOADED_UNVALIDATED"
+
+    row = _upload_row(env, upload_id)
+    assert row.status == "UPLOADED_UNVALIDATED"
+    assert row.completed_at is not None
+    assert row.validated_at is None
+    assert row.rejected_at is None
+
+    with env.migrated_engine.begin() as conn:
+        media = conn.execute(
+            text("select count(*) from public.media_objects")
+        ).scalar_one()
+        idempotency = conn.execute(
+            text(
+                "select count(*) from public.idempotency_records "
+                "where user_id = :u and idempotency_key = 'complete-c'"
+            ),
+            {"u": env.user_a},
+        ).scalar_one()
+    assert media == 0
+    assert idempotency == 1
