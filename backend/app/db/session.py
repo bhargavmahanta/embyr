@@ -13,18 +13,25 @@ from sqlalchemy.ext.asyncio import (
 
 # TLS is mandatory for the application database connection. libpq defaults to
 # ``sslmode=prefer``, which can silently fall back to plaintext, so the URL must
-# select an SSL mode that actually requires encryption.
-_TLS_SSLMODES = frozenset({"require", "verify-ca", "verify-full"})
+# select an SSL mode that actually requires encryption. This is the single TLS
+# policy shared by every application engine (session factory and FastAPI app).
+TLS_REQUIRED_SSLMODES = frozenset({"require", "verify-ca", "verify-full"})
 
 
-def _require_tls(url: str) -> None:
+def require_database_tls(url: str) -> None:
     sslmode = (make_url(url).query.get("sslmode") or "").lower()
-    if sslmode not in _TLS_SSLMODES:
+    if sslmode not in TLS_REQUIRED_SSLMODES:
         raise RuntimeError(
             "EMBYR_DATABASE_URL must require TLS: set sslmode=require, or "
             "sslmode=verify-full with sslrootcert. Omitted or disabled SSL "
             "modes are not permitted."
         )
+
+
+def create_async_database_engine(database_url: str):
+    """Create the runtime engine, enforcing the mandatory TLS policy."""
+    require_database_tls(database_url)
+    return create_async_engine(database_url)
 
 
 def async_session_factory(
@@ -33,8 +40,7 @@ def async_session_factory(
     url = database_url or os.getenv("EMBYR_DATABASE_URL")
     if not url:
         raise RuntimeError("EMBYR_DATABASE_URL is required")
-    _require_tls(url)
-    engine = create_async_engine(url)
+    engine = create_async_database_engine(url)
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
