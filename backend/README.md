@@ -21,8 +21,10 @@ used.
 
 1. The client sends `Authorization: Bearer <supabase-access-token>`.
 2. The backend verifies the token **asymmetrically** (`ES256`/`RS256`) against
-   the project JWKS. It validates signature, `iss`, `aud`, `exp`, and the
-   presence of `sub`; `nbf` is honored when present. Any failure fails closed.
+   the project JWKS. It validates signature, `iss`, `aud`, `exp`, requires the
+   `sub` claim, and requires the Supabase `role` claim to be `authenticated`
+   (`anon` and `service_role` tokens are rejected); `nbf` is honored when
+   present. Any failure fails closed.
 3. The verified external subject is resolved as
    `auth_provider = 'SUPABASE'`, `auth_subject = sub` against `app_users`. The
    external subject is never an Embyr primary key.

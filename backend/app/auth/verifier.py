@@ -20,6 +20,11 @@ from app.auth.principal import (
 
 REQUIRED_CLAIMS = ("exp", "sub", "iss", "aud")
 
+# Supabase access tokens carry a ``role`` claim. Only ``authenticated`` is a
+# learner token; ``anon`` and ``service_role`` tokens must never establish an
+# Embyr principal. The claim is never translated into a PostgreSQL role.
+LEARNER_ROLE = "authenticated"
+
 
 class _SigningKey(Protocol):
     key: Any
@@ -67,8 +72,10 @@ class SupabaseTokenVerifier:
     def _signing_key(self, token: str) -> Any:
         try:
             return self._jwk_client.get_signing_key_from_jwt(token).key
-        except (jwt.PyJWKClientError, ValueError, OSError) as error:
-            # Missing, unreachable, or malformed JWKS must never authenticate.
+        except (jwt.InvalidTokenError, jwt.PyJWKClientError, ValueError, OSError) as error:
+            # The signing-key phase parses the unverified token header, so a
+            # malformed token (DecodeError) and any missing/unreachable/malformed
+            # JWKS must never authenticate.
             raise AuthError(AuthFailure.INVALID_TOKEN) from error
 
     def verify(self, token: str) -> ExternalIdentity:
@@ -91,5 +98,7 @@ class SupabaseTokenVerifier:
 
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject.strip():
+            raise AuthError(AuthFailure.INVALID_TOKEN)
+        if claims.get("role") != LEARNER_ROLE:
             raise AuthError(AuthFailure.INVALID_TOKEN)
         return ExternalIdentity(provider=SUPABASE_PROVIDER, subject=subject)

@@ -135,3 +135,43 @@ def test_unmapped_identity_is_401(auth_config, jwk_client, make_token):
         )
 
     _assert_auth_failure(response, AuthFailure.UNMAPPED_IDENTITY)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "drop"),
+    [
+        ({"role": "anon"}, ()),
+        ({"role": "service_role"}, ()),
+        ({}, ("role",)),
+    ],
+)
+def test_bootstrap_rejects_non_learner_role(
+    auth_config, jwk_client, make_token, overrides, drop
+):
+    token = make_token(overrides=overrides, drop=drop)
+
+    # _unused_session_factory raises if the database is touched, so a 401 here
+    # also proves no app_users row is provisioned for a rejected role.
+    with TestClient(_app(auth_config, jwk_client)) as client:
+        response = client.post(
+            "/api/v1/session/bootstrap",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    _assert_auth_failure(response, AuthFailure.INVALID_TOKEN)
+
+
+def test_malformed_token_through_real_jwk_client_is_401(
+    auth_config, local_jwks_client
+):
+    with TestClient(
+        _app(auth_config, local_jwks_client), raise_server_exceptions=False
+    ) as client:
+        response = client.post(
+            "/api/v1/session/bootstrap",
+            headers={"Authorization": "Bearer not-a-jwt"},
+        )
+
+    _assert_auth_failure(response, AuthFailure.INVALID_TOKEN)
+    assert "decodeerror" not in response.text.lower()
+    assert "traceback" not in response.text.lower()

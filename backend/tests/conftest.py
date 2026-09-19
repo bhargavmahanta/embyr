@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
+from jwt.algorithms import ECAlgorithm
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,46 @@ def jwk_client(verification_key):
     return _StaticJwkClient()
 
 
+class LocalJwksClient(jwt.PyJWKClient):
+    """A real ``PyJWKClient`` whose JWKS transport is served in-memory.
+
+    Token/header parsing and key matching stay genuine (no network); only the
+    JWKS retrieval is local.
+    """
+
+    def __init__(self, jwks_dict: dict) -> None:
+        super().__init__("http://localhost/jwks.json")
+        self._jwks_dict = jwks_dict
+
+    def fetch_data(self) -> dict:
+        return self._jwks_dict
+
+
+@pytest.fixture
+def local_jwks_client(verification_key):
+    jwk = dict(ECAlgorithm.to_jwk(verification_key, as_dict=True))
+    jwk.update({"kid": "test-key", "alg": "ES256", "use": "sig"})
+    return LocalJwksClient({"keys": [jwk]})
+
+
+@pytest.fixture
+def valid_token_with_kid(signing_key, auth_config):
+    now = dt.datetime.now(dt.timezone.utc)
+    return jwt.encode(
+        {
+            "sub": auth_config.subject,
+            "iss": auth_config.issuer,
+            "aud": auth_config.audience,
+            "role": "authenticated",
+            "iat": now,
+            "exp": now + dt.timedelta(minutes=5),
+        },
+        signing_key,
+        algorithm="ES256",
+        headers={"kid": "test-key"},
+    )
+
+
 @pytest.fixture
 def make_token(signing_key, auth_config):
     def _make(
@@ -65,6 +106,7 @@ def make_token(signing_key, auth_config):
             "sub": auth_config.subject,
             "iss": auth_config.issuer,
             "aud": auth_config.audience,
+            "role": "authenticated",
             "iat": now,
             "exp": now + dt.timedelta(minutes=5),
         }

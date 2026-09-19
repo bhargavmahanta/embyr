@@ -113,3 +113,85 @@ def test_malformed_token_is_rejected(jwk_client, auth_config):
         _verifier(jwk_client, auth_config).verify("not-a-jwt")
 
     assert error.value.failure is AuthFailure.INVALID_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Supabase learner role (Codex finding 1)
+# ---------------------------------------------------------------------------
+
+
+def test_authenticated_role_is_accepted(make_token, jwk_client, auth_config):
+    identity = _verifier(jwk_client, auth_config).verify(
+        make_token(overrides={"role": "authenticated"})
+    )
+
+    assert identity.subject == auth_config.subject
+
+
+@pytest.mark.parametrize("role", ["anon", "service_role"])
+def test_non_learner_role_is_rejected(make_token, jwk_client, auth_config, role):
+    token = make_token(overrides={"role": role})
+
+    with pytest.raises(AuthError) as error:
+        _verifier(jwk_client, auth_config).verify(token)
+
+    assert error.value.failure is AuthFailure.INVALID_TOKEN
+
+
+def test_missing_role_is_rejected(make_token, jwk_client, auth_config):
+    token = make_token(drop=("role",))
+
+    with pytest.raises(AuthError) as error:
+        _verifier(jwk_client, auth_config).verify(token)
+
+    assert error.value.failure is AuthFailure.INVALID_TOKEN
+
+
+def test_empty_role_is_rejected(make_token, jwk_client, auth_config):
+    token = make_token(overrides={"role": ""})
+
+    with pytest.raises(AuthError) as error:
+        _verifier(jwk_client, auth_config).verify(token)
+
+    assert error.value.failure is AuthFailure.INVALID_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Malformed tokens through the real PyJWKClient parsing path (Codex finding 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "not-a-jwt",
+        "only.two-segments",
+        "!!!.eyJ4IjoxfQ.c2ln",  # invalid base64url header
+        "ew.eyJ4IjoxfQ.c2ln",  # base64url "{" -> malformed JSON header
+    ],
+)
+def test_malformed_token_on_real_jwk_client_is_invalid_token(
+    local_jwks_client, auth_config, token
+):
+    verifier = SupabaseTokenVerifier(
+        issuer=auth_config.issuer,
+        audience=auth_config.audience,
+        jwk_client=local_jwks_client,
+    )
+
+    with pytest.raises(AuthError) as error:
+        verifier.verify(token)
+
+    assert error.value.failure is AuthFailure.INVALID_TOKEN
+
+
+def test_real_jwk_client_accepts_valid_token(
+    valid_token_with_kid, local_jwks_client, auth_config
+):
+    identity = SupabaseTokenVerifier(
+        issuer=auth_config.issuer,
+        audience=auth_config.audience,
+        jwk_client=local_jwks_client,
+    ).verify(valid_token_with_kid)
+
+    assert identity.subject == auth_config.subject
