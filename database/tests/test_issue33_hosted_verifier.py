@@ -11,13 +11,16 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from psycopg import sql
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ProgrammingError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = REPOSITORY_ROOT / "database" / "tools" / "issue33_hosted_verifier.py"
@@ -493,9 +496,9 @@ def test_fixture_identifiers_are_full_uuids(verifier):
 
 
 def test_fixture_cleanup_leaves_no_identifiers(migrated_engine, verifier):
-    verifier.seed_behavioral_fixtures(migrated_engine)
+    verifier.seed_behavioral_fixtures(migrated_engine, migrated_engine, migrated_engine)
     assert verifier.fixture_residue(migrated_engine) != [], "seed must create fixtures"
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     assert verifier.fixture_residue(migrated_engine) == []
 
 
@@ -503,7 +506,7 @@ def test_final_zero_data_gate_detects_residual_row(
     migrated_engine, verifier, clean_application_data
 ):
     # Clean state first.
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     assert verifier.application_row_violations(migrated_engine) == []
     with migrated_engine.begin() as conn:
         conn.execute(
@@ -535,7 +538,7 @@ def test_orphan_relationship_inventory_matches_database(
 
 
 def test_orphan_checker_clean(migrated_engine, verifier, clean_application_data):
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     assert verifier.orphan_violations(migrated_engine) == []
 
 
@@ -548,7 +551,7 @@ def test_orphan_checker_detects_injected_orphan(
     row can be created in a controlled disposable state; the whole transaction
     is rolled back, leaving no residue.
     """
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     with migrated_engine.connect() as conn:
         transaction = conn.begin()
         conn.execute(text("set local session_replication_role = replica"))
@@ -572,7 +575,7 @@ def test_orphan_checker_detects_injected_orphan(
 def test_clean_final_state_passes(
     migrated_engine, verifier, client_roles, clean_application_data
 ):
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     assert verifier.application_row_violations(migrated_engine) == []
     assert verifier.orphan_violations(migrated_engine) == []
     assert verifier.fixture_residue(migrated_engine) == []
@@ -724,7 +727,7 @@ def _count_jobs_for_other_user_as_backend(database_url: str) -> int:
 
 
 def test_rls_policy_contract_clean(migrated_engine, verifier, clean_application_data):
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     assert verifier.rls_violations(migrated_engine) == []
 
 
@@ -1017,7 +1020,7 @@ def test_post_upgrade_missing_client_role_detected(
 def test_post_upgrade_clean_with_required_client_roles(
     migrated_engine, verifier, client_roles, clean_application_data
 ):
-    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    verifier.cleanup_behavioral_fixtures(migrated_engine, migrated_engine)
     # The shared test harness applies migrations as ``postgres``, so object
     # ownership is checked only by the app_owner-owned four-mode rehearsal; the
     # remaining post-upgrade security checks must be clean here.
@@ -1134,3 +1137,177 @@ def test_membership_fixture_restore_round_trip(migrated_engine, verifier):
     finally:
         verifier.apply_owner_membership(migrated_engine, original)
     assert verifier.capture_owner_membership(migrated_engine) == original
+
+
+@pytest.fixture
+def hosted_behavioral_state(database_url, migrated_engine, verifier):
+    """Rebuild as app_owner and connect through hosted-like restricted roles."""
+    db_name = f"embyr_issue33_hosted_behavioral_{uuid4().hex[:8]}_test"
+    admin_role = f"issue33_admin_{uuid4().hex[:8]}"
+    password = "disposable_issue33_behavioral"
+    base_url = make_url(database_url).set(database=db_name)
+    admin_url = base_url.render_as_string(hide_password=False)
+
+    def role_url(role):
+        return base_url.set(username=role, password=password).render_as_string(
+            hide_password=False
+        )
+
+    role_states = {}
+    with psycopg.connect(_psycopg_url(database_url), autocommit=True) as conn:
+        with conn.cursor() as cur:
+            for role in ("app_owner", "app_backend", "app_worker"):
+                cur.execute(
+                    "select rolcanlogin, rolpassword from pg_authid "
+                    "where rolname = %s",
+                    (role,),
+                )
+                role_states[role] = cur.fetchone()
+    prior_membership = verifier.capture_owner_membership(migrated_engine)
+    created_role = False
+    created_db = False
+    try:
+        with psycopg.connect(_psycopg_url(database_url), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("create role {} login bypassrls password {}").format(
+                        sql.Identifier(admin_role), sql.Literal(password)
+                    )
+                )
+                created_role = True
+                for role in role_states:
+                    cur.execute(
+                        sql.SQL("alter role {} login password {}").format(
+                            sql.Identifier(role), sql.Literal(password)
+                        )
+                    )
+                cur.execute(sql.SQL("create database {}").format(sql.Identifier(db_name)))
+                created_db = True
+        verifier.apply_owner_membership(
+            migrated_engine,
+            verifier.MembershipState(exists=True, admin=False, inherit=False, set=True),
+        )
+        with psycopg.connect(_psycopg_url(admin_url), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("grant usage, create on schema public to app_owner with grant option")
+                cur.execute("create schema extensions")
+                cur.execute("create extension if not exists vector with schema public")
+                cur.execute("create extension if not exists pgcrypto with schema extensions")
+        command.upgrade(_alembic_config(role_url("app_owner")), "head")
+        yield {
+            "admin_url": role_url(admin_role),
+            "owner_url": role_url("app_owner"),
+            "backend_url": role_url("app_backend"),
+            "worker_url": role_url("app_worker"),
+            "admin_role": admin_role,
+            "superuser_url": admin_url,
+        }
+    finally:
+        with psycopg.connect(_psycopg_url(database_url), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                if created_db:
+                    cur.execute(
+                        sql.SQL("drop database {} with (force)").format(
+                            sql.Identifier(db_name)
+                        )
+                    )
+                if created_role:
+                    cur.execute(
+                        sql.SQL("drop role {}").format(sql.Identifier(admin_role))
+                    )
+                for role, (can_login, old_password) in role_states.items():
+                    cur.execute(
+                        sql.SQL("alter role {} with {} password {}").format(
+                            sql.Identifier(role),
+                            sql.SQL("login" if can_login else "nologin"),
+                            sql.Literal(old_password),
+                        )
+                    )
+        verifier.apply_owner_membership(migrated_engine, prior_membership)
+
+
+def test_behavioral_rejects_superuser_assumptions(
+    hosted_behavioral_state, verifier, monkeypatch
+):
+    state = hosted_behavioral_state
+    superuser = create_engine(state["superuser_url"])
+    owner = create_engine(state["owner_url"])
+    backend = create_engine(state["backend_url"])
+    worker = create_engine(state["worker_url"])
+    try:
+        with superuser.connect() as conn:
+            assert not conn.execute(
+                text("select has_function_privilege(:role, "
+                     "'public.maintenance_delete_account(uuid)', 'EXECUTE')"),
+                {"role": state["admin_role"]},
+            ).scalar_one()
+            assert conn.execute(
+                text("select has_function_privilege('app_worker', "
+                     "'public.maintenance_delete_account(uuid)', 'EXECUTE')")
+            ).scalar_one()
+            assert not conn.execute(
+                text("select has_table_privilege(:role, "
+                     "'public.learning_entities', 'INSERT')"),
+                {"role": state["admin_role"]},
+            ).scalar_one()
+            assert not conn.execute(
+                text("select has_table_privilege(:role, "
+                     "'public.learning_entities', 'DELETE')"),
+                {"role": state["admin_role"]},
+            ).scalar_one()
+            assert not conn.execute(
+                text("select has_table_privilege(:role, "
+                     "'public.learning_events', 'UPDATE WITH GRANT OPTION')"),
+                {"role": state["admin_role"]},
+            ).scalar_one()
+
+        # Existing fixtures force the CLI's pre-seed cleanup to use app_worker.
+        verifier.seed_behavioral_fixtures(owner, backend, worker)
+        assert verifier.fixture_residue(superuser) != []
+        monkeypatch.setenv(verifier.ADMIN_ENV, state["admin_url"])
+        monkeypatch.setenv(verifier.OWNER_ENV, state["owner_url"])
+        monkeypatch.setenv(verifier.BACKEND_ENV, state["backend_url"])
+        monkeypatch.setenv(verifier.WORKER_ENV, state["worker_url"])
+        assert verifier.main(["--behavioral"]) == 0
+        assert verifier.fixture_residue(superuser) == []
+        assert verifier.application_row_violations(superuser) == []
+        assert not verifier.worker_has_update(superuser)
+
+        with pytest.raises(RuntimeError, match="induced"):
+            with verifier.temporary_worker_update_grant(owner):
+                assert verifier.worker_has_update(superuser)
+                raise RuntimeError("induced failure after owner GRANT")
+        assert not verifier.worker_has_update(superuser)
+    finally:
+        owner.dispose()
+        backend.dispose()
+        worker.dispose()
+        superuser.dispose()
+
+
+def test_behavioral_cleans_partial_seed_after_backend_denial(
+    hosted_behavioral_state, verifier
+):
+    state = hosted_behavioral_state
+    owner = create_engine(state["owner_url"])
+    superuser = create_engine(state["superuser_url"])
+    try:
+        with owner.begin() as conn:
+            conn.execute(text("revoke insert on public.learner_preferences from app_backend"))
+        with pytest.raises(ProgrammingError) as failure:
+            verifier.run_behavioral(
+                state["admin_url"],
+                state["owner_url"],
+                state["backend_url"],
+                state["worker_url"],
+            )
+        assert failure.value.orig.sqlstate == "42501"
+        assert "learner_preferences" in str(failure.value.orig)
+        assert verifier.fixture_residue(superuser) == []
+        assert verifier.application_row_violations(superuser) == []
+        assert not verifier.worker_has_update(superuser)
+    finally:
+        with owner.begin() as conn:
+            conn.execute(text("grant insert on public.learner_preferences to app_backend"))
+        owner.dispose()
+        superuser.dispose()

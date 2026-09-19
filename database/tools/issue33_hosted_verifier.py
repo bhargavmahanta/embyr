@@ -12,7 +12,8 @@ Modes
                    ``BEGIN READ ONLY``).
 ``--post-upgrade`` catalog/security inspection of the rebuilt ``0013`` schema.
 ``--behavioral``   temporary fixtures and expected-SQLSTATE behavior; requires
-                   explicit Phase B authorization before running against hosted.
+                   admin, owner, backend, and worker identities, plus explicit
+                   Phase B authorization before running against hosted.
 ``--final``        post-cleanup zero-data, fixture-residue, orphan, and
                    platform-count assertions.
 
@@ -931,9 +932,13 @@ def fixture_residue(obj: Engine | Connection) -> list[Violation]:
     return violations
 
 
-def seed_behavioral_fixtures(obj: Engine | Connection) -> None:
-    cleanup_behavioral_fixtures(obj)
-    with _connect(obj) as conn:
+def seed_behavioral_fixtures(
+    owner_obj: Engine | Connection,
+    backend_obj: Engine | Connection,
+    worker_obj: Engine | Connection,
+) -> None:
+    cleanup_behavioral_fixtures(owner_obj, worker_obj)
+    with _connect(owner_obj) as conn:
         conn.execute(
             text(
                 "insert into public.learning_entities (canonical_key, entity_type, status) "
@@ -948,14 +953,19 @@ def seed_behavioral_fixtures(obj: Engine | Connection) -> None:
             ),
             {"a": USER_A_ID, "b": USER_B_ID},
         )
+        conn.commit()
+    with _connect(backend_obj) as conn:
+        conn.execute(
+            text("select set_config('app.user_id', :id, true)"),
+            {"id": USER_A_ID},
+        )
         conn.execute(
             text(
                 "insert into public.learner_preferences "
                 "(user_id, adventure_preference, preferred_effort, support_style) "
-                "values (:a, 'BALANCED', '15_20_MIN', 'SMALL_HINT'), "
-                "(:b, 'BALANCED', '15_20_MIN', 'SMALL_HINT')"
+                "values (:a, 'BALANCED', '15_20_MIN', 'SMALL_HINT')"
             ),
-            {"a": USER_A_ID, "b": USER_B_ID},
+            {"a": USER_A_ID},
         )
         conn.execute(
             text(
@@ -980,10 +990,24 @@ def seed_behavioral_fixtures(obj: Engine | Connection) -> None:
             ),
             {"a": USER_A_ID},
         )
+        conn.execute(
+            text("select set_config('app.user_id', :id, true)"),
+            {"id": USER_B_ID},
+        )
+        conn.execute(
+            text(
+                "insert into public.learner_preferences "
+                "(user_id, adventure_preference, preferred_effort, support_style) "
+                "values (:b, 'BALANCED', '15_20_MIN', 'SMALL_HINT')"
+            ),
+            {"b": USER_B_ID},
+        )
         conn.commit()
 
 
-def cleanup_behavioral_fixtures(obj: Engine | Connection) -> None:
+def cleanup_behavioral_fixtures(
+    owner_obj: Engine | Connection, worker_obj: Engine | Connection
+) -> None:
     """Remove fixtures through the maintenance path; safe when absent.
 
     ``learning_events`` is immutable to every identity except the
@@ -991,11 +1015,13 @@ def cleanup_behavioral_fixtures(obj: Engine | Connection) -> None:
     ledger is cleared through that SECURITY DEFINER routine rather than a raw
     DELETE.
     """
-    with _connect(obj) as conn:
+    with _connect(worker_obj) as conn:
         for user_id in (USER_A_ID, USER_B_ID):
             conn.execute(
                 text("select public.maintenance_delete_account(:id)"), {"id": user_id}
             )
+        conn.commit()
+    with _connect(owner_obj) as conn:
         conn.execute(
             text(
                 "delete from public.learning_entities where canonical_key = :key"
@@ -1853,12 +1879,15 @@ def run_post_upgrade(admin_url: str) -> Report:
 
 
 def run_behavioral(
-    admin_url: str, backend_url: str, worker_url: str
+    admin_url: str, owner_url: str, backend_url: str, worker_url: str
 ) -> Report:
     report = Report("behavioral")
-    engine = _engine(admin_url)
-    seed_behavioral_fixtures(engine)
+    admin_engine = _engine(admin_url)
+    owner_engine = _engine(owner_url)
+    backend_engine = _engine(backend_url)
+    worker_engine = _engine(worker_url)
     try:
+        seed_behavioral_fixtures(owner_engine, backend_engine, worker_engine)
         with psycopg.connect(_psycopg_url(backend_url)) as backend:
             verifier_expectations = (
                 ("42501", "insert into public.learner_preferences "
@@ -1889,8 +1918,8 @@ def run_behavioral(
                 )
             except VerifierError as exc:
                 report.violations.append(Violation("behavioral", str(exc)))
-        with temporary_worker_update_grant(engine):
-            if not worker_has_update(engine):
+        with temporary_worker_update_grant(owner_engine):
+            if not worker_has_update(admin_engine):
                 report.violations.append(
                     Violation("behavioral", "temporary worker UPDATE grant ineffective")
                 )
@@ -1903,12 +1932,16 @@ def run_behavioral(
                     )
                 except VerifierError as exc:
                     report.violations.append(Violation("behavioral", str(exc)))
-        if worker_has_update(engine):
+        if worker_has_update(admin_engine):
             report.violations.append(
                 Violation("behavioral", "worker UPDATE not revoked after cleanup")
             )
     finally:
-        cleanup_behavioral_fixtures(engine)
+        try:
+            cleanup_behavioral_fixtures(owner_engine, worker_engine)
+        finally:
+            for engine in (admin_engine, owner_engine, backend_engine, worker_engine):
+                engine.dispose()
     return report
 
 
@@ -1967,6 +2000,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.behavioral:
         report = run_behavioral(
             _require_env(ADMIN_ENV),
+            _require_env(OWNER_ENV),
             _require_env(BACKEND_ENV),
             _require_env(WORKER_ENV),
         )
