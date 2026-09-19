@@ -30,6 +30,7 @@ class Recorder:
         self.info_calls: list[str] = []
         self.download_calls: list[tuple] = []
         self.upload_error: Exception | None = None
+        self.upload_payload: dict | None = None
         self.info_error: Exception | None = None
         self.info_payload: dict = {
             "size": 10,
@@ -48,6 +49,8 @@ class _FakeBucket:
         self._recorder.upload_calls.append((path, options))
         if self._recorder.upload_error:
             raise self._recorder.upload_error
+        if self._recorder.upload_payload is not None:
+            return self._recorder.upload_payload
         return {
             "signed_url": f"https://storage.test/{path}?token=uploadtok",
             "signedUrl": f"https://storage.test/{path}?token=uploadtok",
@@ -202,6 +205,15 @@ async def test_create_download_capability_uses_ttl(monkeypatch):
 async def test_aclose_closes_session(monkeypatch):
     service, _ = _service(monkeypatch)
     await service.aclose()
+    assert service._client.session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_malformed_upload_capability_is_unavailable(monkeypatch):
+    service, recorder = _service(monkeypatch)
+    recorder.upload_payload = {"signedUrl": "https://x"}  # no signed_url/token
+    with pytest.raises(StorageUnavailable):
+        await service.create_upload_capability(KEY)
 
 
 def test_content_type_matching_is_parameter_and_case_insensitive():

@@ -133,10 +133,16 @@ class SupabaseStorageService:
             raise StorageUnavailable(
                 "storage upload capability creation failed"
             ) from error
+        signed_url = data.get("signed_url") or data.get("signedUrl")
+        token = data.get("token")
+        if not signed_url or not token:
+            raise StorageUnavailable(
+                "storage returned an incomplete signed upload capability"
+            )
         return UploadCapability(
             object_key=object_key,
-            signed_url=data["signed_url"],
-            token=data["token"],
+            signed_url=signed_url,
+            token=token,
             expires_in=SIGNED_UPLOAD_EXPIRES_IN,
         )
 

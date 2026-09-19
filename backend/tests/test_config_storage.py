@@ -89,3 +89,17 @@ def test_from_env_validates_derivable_origin():
         Settings.from_env(
             _env(EMBYR_SUPABASE_AUTH_ISSUER="https://embyr-dev.supabase.co")
         )
+
+
+def test_from_env_missing_bucket_is_configuration_error():
+    env = _env()
+    del env["EMBYR_SUPABASE_STORAGE_BUCKET"]
+    with pytest.raises(ConfigurationError):
+        Settings.from_env(env)
+
+
+def test_from_env_missing_secret_is_configuration_error():
+    env = _env()
+    del env["EMBYR_SUPABASE_STORAGE_SECRET_KEY"]
+    with pytest.raises(ConfigurationError):
+        Settings.from_env(env)

@@ -105,9 +105,17 @@ class Settings:
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
         source = env if env is not None else os.environ
 
-        bucket = source["EMBYR_SUPABASE_STORAGE_BUCKET"]
+        bucket = source.get("EMBYR_SUPABASE_STORAGE_BUCKET")
+        if not bucket:
+            raise ConfigurationError(
+                "EMBYR_SUPABASE_STORAGE_BUCKET is required"
+            )
         _validate_bucket_name(bucket)
-        secret_key = source["EMBYR_SUPABASE_STORAGE_SECRET_KEY"]
+        secret_key = source.get("EMBYR_SUPABASE_STORAGE_SECRET_KEY")
+        if not secret_key:
+            raise ConfigurationError(
+                "EMBYR_SUPABASE_STORAGE_SECRET_KEY is required"
+            )
         if not secret_key.startswith(MODERN_SECRET_KEY_PREFIX):
             raise ConfigurationError(
                 "EMBYR_SUPABASE_STORAGE_SECRET_KEY must be a modern Supabase "
