@@ -169,13 +169,20 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _complete_body(
-    upload_id: UUID, status: str, completed_at: datetime | None
+    upload_id: UUID,
+    status: str,
+    completed_at: datetime | None,
+    *,
+    code: str | None = None,
 ) -> dict:
-    return {
+    body = {
         "upload_id": str(upload_id),
         "status": status,
         "completed_at": _iso(completed_at),
     }
+    if code is not None:
+        body["code"] = code
+    return body
 
 
 def _complete_response(body: dict) -> UploadCompleteResponse:
@@ -184,6 +191,35 @@ def _complete_response(body: dict) -> UploadCompleteResponse:
         status=body["status"],
         completed_at=body["completed_at"],
     )
+
+
+_COMPLETE_ERRORS: dict[str, tuple[str, str]] = {
+    "UPLOAD_METADATA_MISMATCH": (
+        "Upload metadata mismatch",
+        "The uploaded object does not match the declared size or content type.",
+    ),
+    "INVALID_STATE_TRANSITION": (
+        "Invalid upload state",
+        "The upload session is terminal and cannot be completed.",
+    ),
+}
+
+
+def _complete_result(
+    response_status: int, body: dict
+) -> UploadCompleteResponse:
+    """Return the stored success, or re-raise the stored command failure.
+
+    A completion command that settled as an error must replay as the same
+    error, not as a fabricated success.
+    """
+    if response_status == 202:
+        return _complete_response(body)
+    code = body.get("code", "INVALID_STATE_TRANSITION")
+    title, detail = _COMPLETE_ERRORS.get(
+        code, ("Invalid upload state", "The upload session cannot be completed.")
+    )
+    raise AppError(code=code, status=response_status, title=title, detail=detail)
 
 
 def _storage_failure(error: Exception) -> AppError:
@@ -351,7 +387,7 @@ async def complete_upload(
             )
         if session.in_transaction():
             await session.commit()
-        return _complete_response(early.response_body)
+        return _complete_result(early.response_status, early.response_body)
 
     upload = await _load_upload(session, principal.user_id, upload_id)
     if upload is None:
@@ -395,7 +431,7 @@ async def complete_upload(
         fingerprint=fingerprint,
     )
     if reservation.replay:
-        if reservation.response_body is None:
+        if reservation.response_status is None or reservation.response_body is None:
             raise AppError(
                 code="INVALID_STATE_TRANSITION",
                 status=409,
@@ -403,7 +439,9 @@ async def complete_upload(
                 detail="The replayed completion command has no durable result.",
             )
         await session.commit()
-        return _complete_response(reservation.response_body)
+        return _complete_result(
+            reservation.response_status, reservation.response_body
+        )
 
     if locked.status in _ADVANCED_STATUSES:
         body = _complete_body(locked.id, locked.status, locked.completed_at)
@@ -420,7 +458,12 @@ async def complete_upload(
         return _complete_response(body)
 
     if locked.status == _STATUS_REJECTED:
-        body = _complete_body(locked.id, locked.status, locked.completed_at)
+        body = _complete_body(
+            locked.id,
+            locked.status,
+            locked.completed_at,
+            code="INVALID_STATE_TRANSITION",
+        )
         await store_idempotent_result(
             session,
             user_id=principal.user_id,
@@ -431,12 +474,7 @@ async def complete_upload(
             response_body=body,
         )
         await session.commit()
-        raise AppError(
-            code="INVALID_STATE_TRANSITION",
-            status=409,
-            title="Invalid upload state",
-            detail="The upload session is terminal and cannot be completed.",
-        )
+        return _complete_result(409, body)
 
     if info is not None and info.size == locked.size_bytes and content_types_match(
         locked.content_type, info.content_type
@@ -466,7 +504,12 @@ async def complete_upload(
             {"id": locked.id, "user_id": principal.user_id},
         )
     ).scalar_one()
-    body = _complete_body(locked.id, _STATUS_REJECTED, completed_at)
+    body = _complete_body(
+        locked.id,
+        _STATUS_REJECTED,
+        completed_at,
+        code="UPLOAD_METADATA_MISMATCH",
+    )
     await store_idempotent_result(
         session,
         user_id=principal.user_id,
@@ -477,13 +520,7 @@ async def complete_upload(
         response_body=body,
     )
     await session.commit()
-    raise AppError(
-        code="UPLOAD_METADATA_MISMATCH",
-        status=422,
-        title="Upload metadata mismatch",
-        detail="The uploaded object does not match the declared size or "
-        "content type.",
-    )
+    return _complete_result(422, body)
 
 
 @router.get("/uploads/{upload_id}", response_model=UploadStatusResponse)

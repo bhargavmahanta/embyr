@@ -323,6 +323,25 @@ def test_complete_content_type_mismatch_rejects_upload(upload_env):
     assert _upload_row(upload_env, body["upload_id"]).status == "REJECTED"
 
 
+def test_complete_metadata_mismatch_replay_preserves_error(upload_env):
+    body = _authorize(upload_env).json()
+    upload_env.storage.info_result = ObjectInfo(
+        object_key=body["object_key"],
+        size=999,
+        content_type="image/jpeg",
+        etag="e",
+        bucket_id=BUCKET,
+        last_modified=None,
+    )
+    first = _complete(upload_env, body["upload_id"], key="mm")
+    assert first.status_code == 422
+    assert first.json()["code"] == "UPLOAD_METADATA_MISMATCH"
+
+    replay = _complete(upload_env, body["upload_id"], key="mm")
+    assert replay.status_code == 422
+    assert replay.json()["code"] == "UPLOAD_METADATA_MISMATCH"
+
+
 def test_complete_absent_object_is_retryable(upload_env):
     body = _authorize(upload_env).json()
     upload_env.storage.info_error = StorageObjectMissing("absent")
