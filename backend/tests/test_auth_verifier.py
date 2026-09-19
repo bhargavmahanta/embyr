@@ -195,3 +195,31 @@ def test_real_jwk_client_accepts_valid_token(
     ).verify(valid_token_with_kid)
 
     assert identity.subject == auth_config.subject
+
+
+def test_default_jwk_client_applies_cache_and_cooldown_policy(auth_config):
+    verifier = SupabaseTokenVerifier(
+        issuer=auth_config.issuer,
+        audience=auth_config.audience,
+        jwks_url="https://example.invalid/auth/v1/.well-known/jwks.json",
+    )
+    client = verifier._jwk_client
+
+    assert getattr(client, "jwk_set_cache", None) is not None
+    assert getattr(client, "timeout", None) == 5
+    assert getattr(client, "cooldown_duration", None) == 30
+
+
+def test_pyjwt_floor_includes_the_jwks_cache_fix():
+    import pathlib
+    import tomllib
+
+    project = pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml"
+    dependencies = tomllib.loads(project.read_text())["project"]["dependencies"]
+    requirement = next(
+        dep for dep in dependencies if dep.replace("_", "").lower().startswith("pyjwt")
+    )
+
+    # 2.14.0 introduced the atomic refresh cooldown and success-only JWKS cache
+    # retention; a lower floor would silently reintroduce cache wipe/refetch.
+    assert requirement == "pyjwt[crypto]>=2.14,<3"

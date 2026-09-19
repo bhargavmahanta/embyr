@@ -25,6 +25,15 @@ REQUIRED_CLAIMS = ("exp", "sub", "iss", "aud")
 # Embyr principal. The claim is never translated into a PostgreSQL role.
 LEARNER_ROLE = "authenticated"
 
+# JWKS cache/key-rotation policy. PyJWT 2.14+ caches the key set, gates forced
+# refreshes behind an atomic cooldown lock, and retains the last known-good key
+# set when a refresh fails. The floor is pinned in ``pyproject.toml`` because
+# earlier releases force-refreshed on every lookup and wiped the cache on a
+# failed fetch.
+JWKS_CACHE_LIFESPAN_SECONDS = 300
+JWKS_REFRESH_COOLDOWN_SECONDS = 30
+JWKS_FETCH_TIMEOUT_SECONDS = 5
+
 
 class _SigningKey(Protocol):
     key: Any
@@ -63,7 +72,13 @@ class SupabaseTokenVerifier:
                 raise ValueError(
                     "SupabaseTokenVerifier requires a jwk_client or jwks_url"
                 )
-            jwk_client = jwt.PyJWKClient(jwks_url)
+            jwk_client = jwt.PyJWKClient(
+                jwks_url,
+                cache_jwk_set=True,
+                lifespan=JWKS_CACHE_LIFESPAN_SECONDS,
+                timeout=JWKS_FETCH_TIMEOUT_SECONDS,
+                cooldown_duration=JWKS_REFRESH_COOLDOWN_SECONDS,
+            )
         self._issuer = issuer
         self._audience = audience
         self._algorithms = list(algorithms)
