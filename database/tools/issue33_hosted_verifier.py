@@ -166,97 +166,196 @@ PG17_TABLE_PRIVILEGES: tuple[str, ...] = (
 
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account(uuid)"
 
-# The complete foreign-key constraint inventory of the rebuilt schema, derived
-# from frozen migrations 0001-0011. The orphan checker asserts the database
-# matches this set before running per-relationship orphan detection.
-EXPECTED_FOREIGN_KEYS: tuple[str, ...] = (
-    "fk_account_operation_requests_idempotency_owner",
-    "fk_account_operation_requests_user_id_app_users",
-    "fk_artifact_analyses_artifact_owner",
-    "fk_artifacts_exploration_challenge_owner_version",
-    "fk_artifacts_media_owner",
-    "fk_artifacts_reflection_owner_exploration",
-    "fk_assessment_interactions_objective_id_learning_objectives",
-    "fk_assessment_interactions_session_owner",
-    "fk_assessment_responses_interaction_owner_session",
-    "fk_assessment_sessions_exploration_owner_version",
-    "fk_assessment_support_requests_interaction_owner_session",
-    "fk_claims_entity_id_learning_entities",
-    "fk_curiosity_stories_user_id_app_users",
-    "fk_entity_domains_domain_id_learning_entities",
-    "fk_entity_domains_entity_id_learning_entities",
-    "fk_entity_embeddings_entity_version",
-    "fk_evaluation_runs_response_owner",
-    "fk_evaluation_runs_superseded_owner_response",
-    "fk_explicit_interest_preferences_entity_id_learning_entities",
-    "fk_explicit_interest_preferences_user_id_app_users",
-    "fk_explorations_entity_version",
-    "fk_explorations_practical_challenge_version",
-    "fk_explorations_recommendation_owner",
-    "fk_explorations_user_id_app_users",
-    "fk_idempotency_records_user_id_app_users",
-    "fk_jobs_user_id_app_users",
-    "fk_learner_challenge_state_area_id_learning_entities",
-    "fk_learner_challenge_state_user_id_app_users",
-    "fk_learner_confidence_state_entity_id_learning_entities",
-    "fk_learner_confidence_state_user_id_app_users",
-    "fk_learner_interest_state_entity_id_learning_entities",
-    "fk_learner_interest_state_user_id_app_users",
-    "fk_learner_objective_state_objective_id_learning_objectives",
-    "fk_learner_objective_state_user_id_app_users",
-    "fk_learner_preferences_user_id_app_users",
-    "fk_learner_retention_state_entity_id_learning_entities",
-    "fk_learner_retention_state_user_id_app_users",
-    "fk_learner_worlds_user_id_app_users",
-    "fk_learning_entities_current_version",
-    "fk_learning_entity_versions_entity_id_learning_entities",
-    "fk_learning_events_artifact_owner",
-    "fk_learning_events_assessment_session_owner",
-    "fk_learning_events_command_id_idempotency_records",
-    "fk_learning_events_device_owner",
-    "fk_learning_events_entity_id_learning_entities",
-    "fk_learning_events_exploration_owner",
-    "fk_learning_events_user_id_app_users",
-    "fk_learning_evidence_evaluation_owner_source",
-    "fk_learning_evidence_objective_entity",
-    "fk_learning_evidence_user_id_app_users",
-    "fk_learning_objectives_entity_version",
-    "fk_media_objects_upload_owner",
-    "fk_misconceptions_entity_id_learning_entities",
-    "fk_misconceptions_objective_id_learning_objectives",
-    "fk_ontology_edges_source_entity_id_learning_entities",
-    "fk_ontology_edges_target_entity_id_learning_entities",
-    "fk_practical_challenge_versions_challenge_entity",
-    "fk_practical_challenge_versions_entity_version",
-    "fk_practical_challenges_entity_id_learning_entities",
-    "fk_recommendations_challenge_id_practical_challenges",
-    "fk_recommendations_entity_version",
-    "fk_recommendations_user_id_app_users",
-    "fk_reflections_exploration_owner_entity",
-    "fk_state_evidence_links_event_owner",
-    "fk_state_evidence_links_evidence_owner",
-    "fk_state_evidence_links_user_id_app_users",
-    "fk_upload_sessions_user_id_app_users",
-    "fk_user_devices_user_id_app_users",
-    "fk_user_motivations_user_id_app_users",
-    "fk_world_artifacts_artifact_owner",
-    "fk_world_artifacts_region_owner",
-    "fk_world_artifacts_user_id_app_users",
-    "fk_world_artifacts_world_owner",
-    "fk_world_changes_user_id_app_users",
-    "fk_world_changes_world_owner",
-    "fk_world_connections_ontology_edge_id_ontology_edges",
-    "fk_world_connections_source_node_owner",
-    "fk_world_connections_target_node_owner",
-    "fk_world_connections_user_id_app_users",
-    "fk_world_connections_world_owner",
-    "fk_world_nodes_entity_id_learning_entities",
-    "fk_world_nodes_region_owner",
-    "fk_world_nodes_user_id_app_users",
-    "fk_world_nodes_world_owner",
-    "fk_world_regions_primary_domain_id_learning_entities",
-    "fk_world_regions_user_id_app_users",
-    "fk_world_regions_world_owner",
+# ---------------------------------------------------------------------------
+# Finding 1: exact preflight starting-state contract
+# ---------------------------------------------------------------------------
+
+PREFLIGHT_REVISION = "0006_practical_artifacts"
+FINAL_REVISION = "0013_default_acl_hardening"
+
+
+@dataclass(frozen=True)
+class ExtensionSpec:
+    name: str
+    schema: str
+
+
+EXPECTED_EXTENSIONS: tuple[ExtensionSpec, ...] = (
+    ExtensionSpec("vector", "public"),
+    ExtensionSpec("pgcrypto", "extensions"),
+)
+
+
+@dataclass(frozen=True)
+class RoleSpec:
+    name: str
+    login: bool
+    superuser: bool
+    bypassrls: bool
+    createrole: bool
+    createdb: bool
+    replication: bool
+
+
+EXPECTED_ROLES: tuple[RoleSpec, ...] = (
+    RoleSpec("app_owner", True, False, False, False, False, False),
+    RoleSpec("app_backend", True, False, False, False, False, False),
+    RoleSpec("app_worker", True, False, True, False, False, False),
+    RoleSpec("app_maintenance", False, False, True, False, False, False),
+)
+
+RUNTIME_ROLES: tuple[str, ...] = ("app_backend", "app_worker", "app_maintenance")
+
+
+@dataclass(frozen=True)
+class MembershipSpec:
+    member: str
+    granted: str
+    admin: bool
+    inherit: bool
+    set: bool
+
+
+EXPECTED_OWNER_MEMBERSHIP = MembershipSpec(
+    "app_owner", "app_maintenance", admin=False, inherit=False, set=True
+)
+
+# ---------------------------------------------------------------------------
+# Finding 2: exact RLS policy contract (derived from frozen 0012)
+# ---------------------------------------------------------------------------
+
+EXPECTED_POLICY_ROLES: tuple[str, ...] = ("app_backend",)
+EXPECTED_POLICY_COMMAND = "ALL"
+# Exact pg_get_expr rendering of 0012's predicate for polqual/polwithcheck on
+# PostgreSQL 16 and 17. ``_normalize_predicate`` removes only whitespace and the
+# semantically-irrelevant ``::text`` annotations before comparison.
+EXPECTED_POLICY_PREDICATE = (
+    "(user_id = (NULLIF(current_setting('app.user_id'::text, true), "
+    "''::text))::uuid)"
+)
+
+# ---------------------------------------------------------------------------
+# Finding 4: exact foreign-key contract (derived from frozen 0001-0011a)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ForeignKeySpec:
+    """One frozen foreign-key relationship.
+
+    ``child_schema``/``parent_schema`` are always ``public``, ``on_update`` is
+    always ``NO ACTION``, ``match_type`` is always ``SIMPLE``, and every
+    constraint is NOT DEFERRABLE on the frozen schema. Those invariants are the
+    documented defaults below, so each entry still states the full tuple.
+    """
+
+    name: str
+    child_table: str
+    child_columns: tuple[str, ...]
+    parent_table: str
+    parent_columns: tuple[str, ...]
+    on_delete: str
+    child_schema: str = "public"
+    parent_schema: str = "public"
+    on_update: str = "NO ACTION"
+    match_type: str = "SIMPLE"
+    deferrable: bool = False
+    deferred: bool = False
+
+
+EXPECTED_FOREIGN_KEY_CONTRACT: tuple[ForeignKeySpec, ...] = (
+    ForeignKeySpec('fk_account_operation_requests_idempotency_owner', 'account_operation_requests', ("user_id", "idempotency_record_id"), 'idempotency_records', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_account_operation_requests_user_id_app_users', 'account_operation_requests', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_artifact_analyses_artifact_owner', 'artifact_analyses', ("user_id", "artifact_id"), 'artifacts', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_artifacts_exploration_challenge_owner_version', 'artifacts', ("user_id", "exploration_id", "practical_challenge_id", "practical_challenge_version_id"), 'explorations', ("user_id", "id", "practical_challenge_id", "practical_challenge_version_id"), 'NO ACTION'),
+    ForeignKeySpec('fk_artifacts_media_owner', 'artifacts', ("user_id", "media_object_id"), 'media_objects', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_artifacts_reflection_owner_exploration', 'artifacts', ("user_id", "exploration_id", "reflection_id"), 'reflections', ("user_id", "exploration_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_assessment_interactions_objective_id_learning_objectives', 'assessment_interactions', ("objective_id",), 'learning_objectives', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_assessment_interactions_session_owner', 'assessment_interactions', ("user_id", "assessment_session_id"), 'assessment_sessions', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_assessment_responses_interaction_owner_session', 'assessment_responses', ("user_id", "assessment_session_id", "interaction_id"), 'assessment_interactions', ("user_id", "assessment_session_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_assessment_sessions_exploration_owner_version', 'assessment_sessions', ("user_id", "exploration_id", "entity_version"), 'explorations', ("user_id", "id", "entity_version"), 'CASCADE'),
+    ForeignKeySpec('fk_assessment_support_requests_interaction_owner_session', 'assessment_support_requests', ("user_id", "assessment_session_id", "interaction_id"), 'assessment_interactions', ("user_id", "assessment_session_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_claims_entity_id_learning_entities', 'claims', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_curiosity_stories_user_id_app_users', 'curiosity_stories', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_entity_domains_domain_id_learning_entities', 'entity_domains', ("domain_id",), 'learning_entities', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_entity_domains_entity_id_learning_entities', 'entity_domains', ("entity_id",), 'learning_entities', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_entity_embeddings_entity_version', 'entity_embeddings', ("entity_id", "entity_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_evaluation_runs_response_owner', 'evaluation_runs', ("user_id", "response_id"), 'assessment_responses', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_evaluation_runs_superseded_owner_response', 'evaluation_runs', ("user_id", "supersedes_id", "response_id"), 'evaluation_runs', ("user_id", "id", "response_id"), 'NO ACTION'),
+    ForeignKeySpec('fk_explicit_interest_preferences_entity_id_learning_entities', 'explicit_interest_preferences', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_explicit_interest_preferences_user_id_app_users', 'explicit_interest_preferences', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_explorations_entity_version', 'explorations', ("entity_id", "entity_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_explorations_practical_challenge_version', 'explorations', ("practical_challenge_id", "practical_challenge_version_id"), 'practical_challenge_versions', ("challenge_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_explorations_recommendation_owner', 'explorations', ("user_id", "recommendation_id"), 'recommendations', ("user_id", "id"), 'SET NULL'),
+    ForeignKeySpec('fk_explorations_user_id_app_users', 'explorations', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_idempotency_records_user_id_app_users', 'idempotency_records', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_jobs_user_id_app_users', 'jobs', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_challenge_state_area_id_learning_entities', 'learner_challenge_state', ("area_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learner_challenge_state_user_id_app_users', 'learner_challenge_state', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_confidence_state_entity_id_learning_entities', 'learner_confidence_state', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learner_confidence_state_user_id_app_users', 'learner_confidence_state', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_interest_state_entity_id_learning_entities', 'learner_interest_state', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learner_interest_state_user_id_app_users', 'learner_interest_state', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_objective_state_objective_id_learning_objectives', 'learner_objective_state', ("objective_id",), 'learning_objectives', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learner_objective_state_user_id_app_users', 'learner_objective_state', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_preferences_user_id_app_users', 'learner_preferences', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_retention_state_entity_id_learning_entities', 'learner_retention_state', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learner_retention_state_user_id_app_users', 'learner_retention_state', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learner_worlds_user_id_app_users', 'learner_worlds', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learning_entities_current_version', 'learning_entities', ("id", "current_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_entity_versions_entity_id_learning_entities', 'learning_entity_versions', ("entity_id",), 'learning_entities', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learning_events_artifact_owner', 'learning_events', ("user_id", "artifact_id"), 'artifacts', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_events_assessment_session_owner', 'learning_events', ("user_id", "assessment_session_id"), 'assessment_sessions', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_events_command_id_idempotency_records', 'learning_events', ("command_id",), 'idempotency_records', ("id",), 'SET NULL'),
+    ForeignKeySpec('fk_learning_events_device_owner', 'learning_events', ("device_id", "user_id"), 'user_devices', ("id", "user_id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_events_entity_id_learning_entities', 'learning_events', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_events_exploration_owner', 'learning_events', ("user_id", "exploration_id"), 'explorations', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_events_user_id_app_users', 'learning_events', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learning_evidence_evaluation_owner_source', 'learning_evidence', ("user_id", "evaluation_run_id", "source_id"), 'evaluation_runs', ("user_id", "id", "response_id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_evidence_objective_entity', 'learning_evidence', ("entity_id", "objective_id"), 'learning_objectives', ("entity_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_learning_evidence_user_id_app_users', 'learning_evidence', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_learning_objectives_entity_version', 'learning_objectives', ("entity_id", "entity_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_media_objects_upload_owner', 'media_objects', ("user_id", "upload_id"), 'upload_sessions', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_misconceptions_entity_id_learning_entities', 'misconceptions', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_misconceptions_objective_id_learning_objectives', 'misconceptions', ("objective_id",), 'learning_objectives', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_ontology_edges_source_entity_id_learning_entities', 'ontology_edges', ("source_entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_ontology_edges_target_entity_id_learning_entities', 'ontology_edges', ("target_entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_practical_challenge_versions_challenge_entity', 'practical_challenge_versions', ("challenge_id", "entity_id"), 'practical_challenges', ("id", "entity_id"), 'NO ACTION'),
+    ForeignKeySpec('fk_practical_challenge_versions_entity_version', 'practical_challenge_versions', ("entity_id", "entity_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_practical_challenges_entity_id_learning_entities', 'practical_challenges', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_recommendations_challenge_id_practical_challenges', 'recommendations', ("challenge_id",), 'practical_challenges', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_recommendations_entity_version', 'recommendations', ("entity_id", "entity_version"), 'learning_entity_versions', ("entity_id", "version"), 'NO ACTION'),
+    ForeignKeySpec('fk_recommendations_user_id_app_users', 'recommendations', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_reflections_exploration_owner_entity', 'reflections', ("user_id", "exploration_id", "entity_id"), 'explorations', ("user_id", "id", "entity_id"), 'CASCADE'),
+    ForeignKeySpec('fk_state_evidence_links_event_owner', 'state_evidence_links', ("user_id", "learning_event_id"), 'learning_events', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_state_evidence_links_evidence_owner', 'state_evidence_links', ("user_id", "learning_evidence_id"), 'learning_evidence', ("user_id", "id"), 'NO ACTION'),
+    ForeignKeySpec('fk_state_evidence_links_user_id_app_users', 'state_evidence_links', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_upload_sessions_user_id_app_users', 'upload_sessions', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_user_devices_user_id_app_users', 'user_devices', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_user_motivations_user_id_app_users', 'user_motivations', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_artifacts_artifact_owner', 'world_artifacts', ("user_id", "artifact_id"), 'artifacts', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_artifacts_region_owner', 'world_artifacts', ("user_id", "region_id"), 'world_regions', ("user_id", "id"), 'SET NULL'),
+    ForeignKeySpec('fk_world_artifacts_user_id_app_users', 'world_artifacts', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_artifacts_world_owner', 'world_artifacts', ("user_id", "world_id"), 'learner_worlds', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_changes_user_id_app_users', 'world_changes', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_changes_world_owner', 'world_changes', ("user_id", "world_id"), 'learner_worlds', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_connections_ontology_edge_id_ontology_edges', 'world_connections', ("ontology_edge_id",), 'ontology_edges', ("id",), 'SET NULL'),
+    ForeignKeySpec('fk_world_connections_source_node_owner', 'world_connections', ("user_id", "source_world_node_id"), 'world_nodes', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_connections_target_node_owner', 'world_connections', ("user_id", "target_world_node_id"), 'world_nodes', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_connections_user_id_app_users', 'world_connections', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_connections_world_owner', 'world_connections', ("user_id", "world_id"), 'learner_worlds', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_nodes_entity_id_learning_entities', 'world_nodes', ("entity_id",), 'learning_entities', ("id",), 'NO ACTION'),
+    ForeignKeySpec('fk_world_nodes_region_owner', 'world_nodes', ("user_id", "region_id"), 'world_regions', ("user_id", "id"), 'SET NULL'),
+    ForeignKeySpec('fk_world_nodes_user_id_app_users', 'world_nodes', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_nodes_world_owner', 'world_nodes', ("user_id", "world_id"), 'learner_worlds', ("user_id", "id"), 'CASCADE'),
+    ForeignKeySpec('fk_world_regions_primary_domain_id_learning_entities', 'world_regions', ("primary_domain_id",), 'learning_entities', ("id",), 'SET NULL'),
+    ForeignKeySpec('fk_world_regions_user_id_app_users', 'world_regions', ("user_id",), 'app_users', ("id",), 'CASCADE'),
+    ForeignKeySpec('fk_world_regions_world_owner', 'world_regions', ("user_id", "world_id"), 'learner_worlds', ("user_id", "id"), 'CASCADE'),
+
+)
+
+EXPECTED_FOREIGN_KEYS: tuple[str, ...] = tuple(
+    spec.name for spec in EXPECTED_FOREIGN_KEY_CONTRACT
 )
 
 # Complete fixture identifiers (full valid UUIDs / keys). Cleanup refers to the
@@ -315,6 +414,9 @@ class Violation:
     privilege: str | None = None
     child_table: str | None = None
     count: int | None = None
+    field: str | None = None
+    expected: str | None = None
+    actual: str | None = None
 
     def __str__(self) -> str:  # pragma: no cover - presentation helper
         return f"[{self.kind}] {self.detail}"
@@ -504,16 +606,45 @@ def client_privilege_violations(obj: Engine | Connection) -> list[Violation]:
 # ---------------------------------------------------------------------------
 
 
+def _effective_grant_principals(
+    conn: Connection,
+    grants: Sequence,
+    existing_roles: Sequence[str],
+) -> list[tuple[str, str, str]]:
+    """Resolve each ``(grantee_oid, grantee_name, privilege)`` grant to callers.
+
+    A grant to ``PUBLIC`` (grantee OID 0) reaches every principal; a grant to a
+    named role reaches that role and every client role that can use it through
+    role membership (``pg_has_role(..., 'USAGE')``), so an intermediary helper
+    role cannot launder privileges past the checker.
+    """
+    effective: list[tuple[str, str, str]] = []
+    for grantee_oid, grantee_name, privilege in grants:
+        if grantee_oid == 0:
+            effective.append(("PUBLIC", grantee_name, privilege))
+            for client in existing_roles:
+                effective.append((client, grantee_name, privilege))
+            continue
+        for client in existing_roles:
+            inherited = conn.execute(
+                text("select pg_has_role(:client, :grantee, 'USAGE')"),
+                {"client": client, "grantee": grantee_name},
+            ).scalar_one()
+            if inherited:
+                effective.append((client, grantee_name, privilege))
+    return effective
+
+
 def function_default_acl_violations(obj: Engine | Connection) -> list[Violation]:
     """Unsafe future default privileges for app_owner.
 
     Handles the global function default specially: when no explicit
     ``pg_default_acl`` row exists, PostgreSQL's built-in
-    ``acldefault('f', owner_oid)`` still grants ``PUBLIC EXECUTE``. Absence of a
-    row must therefore not be read as absence of PUBLIC EXECUTE.
+    ``acldefault('f', owner_oid)`` still grants ``PUBLIC EXECUTE``. It also
+    resolves *effective* reachability: a grant to an intermediary role that a
+    client can ``USAGE`` is reported against that client.
     """
     violations: list[Violation] = []
-    roles = list(CLIENT_ROLES)
     with _connect(obj) as conn:
         owner_oid = conn.execute(
             text("select oid from pg_roles where rolname = 'app_owner'")
@@ -522,6 +653,15 @@ def function_default_acl_violations(obj: Engine | Connection) -> list[Violation]
             return [
                 Violation("missing_role", "app_owner role is absent")
             ]
+        existing_roles = [
+            role
+            for role in CLIENT_ROLES
+            if conn.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": role},
+            ).scalar_one_or_none()
+            is not None
+        ]
 
         # Global function defaults (explicit row coalesced with built-in).
         global_grants = conn.execute(
@@ -542,18 +682,21 @@ def function_default_acl_violations(obj: Engine | Connection) -> list[Violation]
                 ) acl
                 left join pg_roles g on g.oid = acl.grantee
                 where acl.privilege_type = 'EXECUTE'
-                  and (acl.grantee = 0 or g.rolname = any(:roles))
                 """
             ),
-            {"owner": owner_oid, "roles": roles},
+            {"owner": owner_oid},
         ).all()
-        for _grantee, grantee_name, privilege in global_grants:
+        for principal, grantee_name, privilege in _effective_grant_principals(
+            conn, global_grants, existing_roles
+        ):
             violations.append(
                 Violation(
                     "default_acl_function_global",
-                    f"global function default grants {privilege} to {grantee_name}",
-                    role=grantee_name,
+                    f"global function default grants {privilege} to "
+                    f"{grantee_name}, effectively reachable by {principal}",
+                    role=principal,
                     privilege=privilege,
+                    actual=grantee_name,
                 )
             )
 
@@ -561,7 +704,7 @@ def function_default_acl_violations(obj: Engine | Connection) -> list[Violation]
         schema_grants = conn.execute(
             text(
                 """
-                select coalesce(g.rolname, 'PUBLIC') as grantee_name,
+                select acl.grantee, coalesce(g.rolname, 'PUBLIC') as grantee_name,
                        acl.privilege_type
                 from pg_default_acl d
                 cross join lateral aclexplode(d.defaclacl) acl
@@ -571,52 +714,69 @@ def function_default_acl_violations(obj: Engine | Connection) -> list[Violation]
                   and d.defaclobjtype = 'f'
                   and n.nspname = 'public'
                   and acl.privilege_type = 'EXECUTE'
-                  and (acl.grantee = 0 or g.rolname = any(:roles))
                 """
             ),
-            {"owner": owner_oid, "roles": roles},
+            {"owner": owner_oid},
         ).all()
-        for grantee_name, privilege in schema_grants:
+        for principal, grantee_name, privilege in _effective_grant_principals(
+            conn, schema_grants, existing_roles
+        ):
             violations.append(
                 Violation(
                     "default_acl_function_schema",
-                    f"public-schema function default grants {privilege} to {grantee_name}",
-                    role=grantee_name,
+                    f"public-schema function default grants {privilege} to "
+                    f"{grantee_name}, effectively reachable by {principal}",
+                    role=principal,
                     privilege=privilege,
+                    actual=grantee_name,
                 )
             )
 
-        # table and sequence defaults for PUBLIC and client roles.
+        # table and sequence defaults, resolved for effective client reach.
         object_grants = conn.execute(
             text(
                 """
-                select d.defaclobjtype, coalesce(g.rolname, 'PUBLIC') as grantee_name,
+                select d.defaclobjtype, acl.grantee,
+                       coalesce(g.rolname, 'PUBLIC') as grantee_name,
                        acl.privilege_type
                 from pg_default_acl d
                 cross join lateral aclexplode(d.defaclacl) acl
                 left join pg_roles g on g.oid = acl.grantee
                 where d.defaclrole = :owner
                   and d.defaclobjtype in ('r', 'S')
-                  and (acl.grantee = 0 or g.rolname = any(:roles))
                 """
             ),
-            {"owner": owner_oid, "roles": roles},
+            {"owner": owner_oid},
         ).all()
-        for objtype, grantee_name, privilege in object_grants:
-            violations.append(
-                Violation(
-                    "default_acl_object",
-                    f"{objtype} default grants {privilege} to {grantee_name}",
-                    role=grantee_name,
-                    privilege=privilege,
-                )
+        by_objtype: dict[str, list] = {}
+        for row in object_grants:
+            by_objtype.setdefault(row.defaclobjtype, []).append(
+                (row.grantee, row.grantee_name, row.privilege_type)
             )
+        for objtype, rows in by_objtype.items():
+            for principal, grantee_name, privilege in _effective_grant_principals(
+                conn, rows, existing_roles
+            ):
+                violations.append(
+                    Violation(
+                        "default_acl_object",
+                        f"{objtype} default grants {privilege} to {grantee_name}, "
+                        f"effectively reachable by {principal}",
+                        role=principal,
+                        privilege=privilege,
+                        actual=grantee_name,
+                    )
+                )
     return violations
 
 
 # ---------------------------------------------------------------------------
 # Finding 2B: committed expected-SQLSTATE harness
 # ---------------------------------------------------------------------------
+
+
+class _UnexpectedSuccess(Exception):
+    """Internal marker forcing the helper's transaction scope to roll back."""
 
 
 def expect_sqlstate(
@@ -627,27 +787,31 @@ def expect_sqlstate(
 ) -> None:
     """Assert ``sql`` raises exactly ``expected_sqlstate``; leave conn reusable.
 
-    Begins an isolated transaction, executes, fails on unexpected success,
-    compares the exact SQLSTATE, and rolls back the failed transaction so the
-    connection can be used for the next case.
+    The operation is bounded by its own transaction scope. psycopg3's
+    ``connection.transaction()`` opens a real transaction when none is active
+    and a SAVEPOINT when the caller already has one, so caller work that
+    precedes the helper is never rolled back. Raising from inside the block
+    forces that scope to roll back for every outcome, including unexpected
+    success, while leaving any outer transaction usable.
     """
     if connection.autocommit:
         raise VerifierError("expect_sqlstate requires a non-autocommit connection")
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params or ())
+        with connection.transaction():
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params or ())
+            raise _UnexpectedSuccess
+    except _UnexpectedSuccess as exc:
+        raise VerifierError(
+            f"expected SQLSTATE {expected_sqlstate} but operation succeeded"
+        ) from exc
     except psycopg.Error as exc:
         actual = exc.sqlstate
-        connection.rollback()
         if actual != expected_sqlstate:
             raise VerifierError(
                 f"expected SQLSTATE {expected_sqlstate}, got {actual}: {exc}"
             ) from exc
         return
-    connection.rollback()
-    raise VerifierError(
-        f"expected SQLSTATE {expected_sqlstate} but operation succeeded"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -824,19 +988,113 @@ def database_foreign_keys(obj: Engine | Connection) -> set[str]:
         }
 
 
+_FK_ON_UPDATE = {
+    "a": "NO ACTION",
+    "r": "RESTRICT",
+    "c": "CASCADE",
+    "n": "SET NULL",
+    "d": "SET DEFAULT",
+}
+_FK_ON_DELETE = _FK_ON_UPDATE
+_FK_MATCH = {"f": "FULL", "p": "PARTIAL", "s": "SIMPLE"}
+
+
+def database_foreign_key_contract(
+    obj: Engine | Connection,
+) -> dict[str, ForeignKeySpec]:
+    """Full ordered foreign-key tuples from the live catalog."""
+    with _connect(obj) as conn:
+        rows = conn.execute(
+            text(
+                """
+                select con.conname,
+                       ns.nspname as child_schema,
+                       child.relname as child_table,
+                       (
+                         select array_agg(a.attname order by u.ord)
+                         from unnest(con.conkey) with ordinality u(attnum, ord)
+                         join pg_attribute a
+                           on a.attrelid = con.conrelid and a.attnum = u.attnum
+                       ) as child_columns,
+                       pns.nspname as parent_schema,
+                       parent.relname as parent_table,
+                       (
+                         select array_agg(a.attname order by u.ord)
+                         from unnest(con.confkey) with ordinality u(attnum, ord)
+                         join pg_attribute a
+                           on a.attrelid = con.confrelid and a.attnum = u.attnum
+                       ) as parent_columns,
+                       con.confupdtype, con.confdeltype, con.confmatchtype,
+                       con.condeferrable, con.condeferred
+                from pg_constraint con
+                join pg_class child on child.oid = con.conrelid
+                join pg_namespace ns on ns.oid = child.relnamespace
+                join pg_class parent on parent.oid = con.confrelid
+                join pg_namespace pns on pns.oid = parent.relnamespace
+                where con.contype = 'f' and ns.nspname = 'public'
+                order by con.conname
+                """
+            )
+        ).all()
+    return {
+        row.conname: ForeignKeySpec(
+            name=row.conname,
+            child_schema=row.child_schema,
+            child_table=row.child_table,
+            child_columns=tuple(row.child_columns),
+            parent_schema=row.parent_schema,
+            parent_table=row.parent_table,
+            parent_columns=tuple(row.parent_columns),
+            on_update=_FK_ON_UPDATE[row.confupdtype],
+            on_delete=_FK_ON_DELETE[row.confdeltype],
+            match_type=_FK_MATCH[row.confmatchtype],
+            deferrable=bool(row.condeferrable),
+            deferred=bool(row.condeferred),
+        )
+        for row in rows
+    }
+
+
 def foreign_key_violations(obj: Engine | Connection) -> list[Violation]:
+    """Compare the live foreign-key contract, field by field, to the freeze."""
     violations: list[Violation] = []
-    actual = database_foreign_keys(obj)
-    expected = set(EXPECTED_FOREIGN_KEYS)
-    for name in sorted(expected - actual):
+    actual = database_foreign_key_contract(obj)
+    expected = {spec.name: spec for spec in EXPECTED_FOREIGN_KEY_CONTRACT}
+    for name in sorted(set(expected) - set(actual)):
         violations.append(
             Violation("missing_foreign_key", f"expected FK {name} absent", table=name)
         )
-    for name in sorted(actual - expected):
+    for name in sorted(set(actual) - set(expected)):
         violations.append(
             Violation("unexpected_foreign_key", f"unexpected FK {name}", table=name)
         )
+    for name in sorted(set(actual) & set(expected)):
+        want = expected[name]
+        got = actual[name]
+        for spec_field in ForeignKeySpec.__dataclass_fields__:
+            want_value = getattr(want, spec_field)
+            got_value = getattr(got, spec_field)
+            if want_value != got_value:
+                violations.append(
+                    Violation(
+                        "foreign_key_definition",
+                        f"{name}: {spec_field} mismatch",
+                        table=name,
+                        field=spec_field,
+                        expected=str(want_value),
+                        actual=str(got_value),
+                    )
+                )
     return violations
+
+
+def final_foreign_key_violations(obj: Engine | Connection) -> list[Violation]:
+    """FK semantic contract first; orphan detection only if it holds."""
+    violations = foreign_key_violations(obj)
+    if violations:
+        return violations
+    return orphan_violations(obj)
+
 
 
 def _foreign_key_definitions(conn: Connection):
@@ -914,8 +1172,21 @@ def orphan_violations(obj: Engine | Connection) -> list[Violation]:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_predicate(expression: str | None) -> str | None:
+    """Drop only formatting and the semantically-irrelevant ``::text`` casts.
+
+    Parentheses are preserved, so structural differences (for example a
+    permissive ``true`` or a missing ``NULLIF``) can never compare equal.
+    """
+    if expression is None:
+        return None
+    normalized = expression.lower().replace("::text", "")
+    return "".join(normalized.split())
+
+
 def rls_violations(obj: Engine | Connection) -> list[Violation]:
     violations: list[Violation] = []
+    expected_predicate = _normalize_predicate(EXPECTED_POLICY_PREDICATE)
     with _connect(obj) as conn:
         rows = {
             row.relname: (row.relrowsecurity, row.relforcerowsecurity)
@@ -942,23 +1213,84 @@ def rls_violations(obj: Engine | Connection) -> list[Violation]:
                         table=table,
                     )
                 )
-        policy_count = conn.execute(
+
+        policies_by_table: dict[str, list] = {}
+        for policy in conn.execute(
             text(
                 """
-                select count(*) from pg_policies
-                where schemaname = 'public' and roles = '{app_backend}'
-                  and cmd = 'ALL'
+                select tablename, policyname, cmd, roles, qual, with_check
+                from pg_policies
+                where schemaname = 'public' and tablename = any(:tables)
                 """
-            )
-        ).scalar_one()
-        if policy_count != len(RLS_LEARNER_TABLES):
-            violations.append(
-                Violation(
-                    "policy_count",
-                    f"expected {len(RLS_LEARNER_TABLES)} app_backend policies, "
-                    f"found {policy_count}",
+            ),
+            {"tables": list(RLS_LEARNER_TABLES)},
+        ).all():
+            policies_by_table.setdefault(policy.tablename, []).append(policy)
+
+        for table in RLS_LEARNER_TABLES:
+            expected_name = f"{table}_user_policy"
+            table_policies = policies_by_table.get(table, [])
+            names = sorted(policy.policyname for policy in table_policies)
+            if names != [expected_name]:
+                violations.append(
+                    Violation(
+                        "policy_inventory",
+                        f"{table} policies = {names}, expected ['{expected_name}']",
+                        table=table,
+                        field="policyname",
+                        expected=str([expected_name]),
+                        actual=str(names),
+                    )
                 )
+            match = next(
+                (
+                    policy
+                    for policy in table_policies
+                    if policy.policyname == expected_name
+                ),
+                None,
             )
+            if match is None:
+                continue
+            if match.cmd != EXPECTED_POLICY_COMMAND:
+                violations.append(
+                    Violation(
+                        "policy_command",
+                        f"{table}.{expected_name}: cmd = {match.cmd}",
+                        table=table,
+                        field="cmd",
+                        expected=EXPECTED_POLICY_COMMAND,
+                        actual=match.cmd,
+                    )
+                )
+            actual_roles = sorted(match.roles or [])
+            if actual_roles != sorted(EXPECTED_POLICY_ROLES):
+                violations.append(
+                    Violation(
+                        "policy_roles",
+                        f"{table}.{expected_name}: roles = {actual_roles}",
+                        table=table,
+                        field="roles",
+                        expected=str(sorted(EXPECTED_POLICY_ROLES)),
+                        actual=str(actual_roles),
+                    )
+                )
+            for field_name, actual_expr in (
+                ("qual", match.qual),
+                ("with_check", match.with_check),
+            ):
+                if _normalize_predicate(actual_expr) != expected_predicate:
+                    violations.append(
+                        Violation(
+                            "policy_predicate",
+                            f"{table}.{expected_name}: {field_name} predicate "
+                            f"mismatch",
+                            table=table,
+                            field=field_name,
+                            expected=EXPECTED_POLICY_PREDICATE,
+                            actual=actual_expr,
+                        )
+                    )
     return violations
 
 
@@ -991,7 +1323,16 @@ def maintenance_function_violations(obj: Engine | Connection) -> list[Violation]
             violations.append(
                 Violation("function_search_path", f"search_path = {row.config}")
             )
-        for role in ("public", *CLIENT_ROLES, "app_backend"):
+        existing_clients = [
+            role
+            for role in CLIENT_ROLES
+            if conn.execute(
+                text("select 1 from pg_roles where rolname = :role"),
+                {"role": role},
+            ).scalar_one_or_none()
+            is not None
+        ]
+        for role in ("public", *existing_clients, "app_backend"):
             granted = conn.execute(
                 text("select has_function_privilege(:role, :fn, 'EXECUTE')"),
                 {"role": role, "fn": MAINTENANCE_FUNCTION},
@@ -1104,9 +1445,201 @@ def owner_readonly_preflight(owner_url: str) -> list[Violation]:
     return violations
 
 
+def preflight_revision_violations(obj: Engine | Connection) -> list[Violation]:
+    """The legacy starting state must be exactly ``0006_practical_artifacts``."""
+    with _connect(obj) as conn:
+        revision = conn.execute(
+            text("select version_num from public.alembic_version")
+        ).scalar_one_or_none()
+    if revision != PREFLIGHT_REVISION:
+        return [
+            Violation(
+                "preflight_revision",
+                f"revision is {revision}, expected {PREFLIGHT_REVISION}",
+                field="alembic_version.version_num",
+                expected=PREFLIGHT_REVISION,
+                actual=str(revision),
+            )
+        ]
+    return []
+
+
+def preflight_extension_violations(obj: Engine | Connection) -> list[Violation]:
+    violations: list[Violation] = []
+    with _connect(obj) as conn:
+        present = {
+            row.extname: row.schema
+            for row in conn.execute(
+                text(
+                    "select e.extname, n.nspname as schema "
+                    "from pg_extension e "
+                    "join pg_namespace n on n.oid = e.extnamespace"
+                )
+            )
+        }
+    for spec in EXPECTED_EXTENSIONS:
+        actual = present.get(spec.name)
+        if actual is None:
+            violations.append(
+                Violation(
+                    "preflight_extension",
+                    f"extension {spec.name} absent, expected schema {spec.schema}",
+                    table=spec.name,
+                    field="presence",
+                    expected="present",
+                    actual="absent",
+                )
+            )
+        elif actual != spec.schema:
+            violations.append(
+                Violation(
+                    "preflight_extension",
+                    f"extension {spec.name} in schema {actual}, "
+                    f"expected {spec.schema}",
+                    table=spec.name,
+                    field="schema",
+                    expected=spec.schema,
+                    actual=actual,
+                )
+            )
+    return violations
+
+
+def preflight_role_violations(obj: Engine | Connection) -> list[Violation]:
+    """Complete frozen role topology, attributes, and membership model."""
+    violations: list[Violation] = []
+    role_names = [spec.name for spec in EXPECTED_ROLES]
+    with _connect(obj) as conn:
+        rows = {
+            row.rolname: row
+            for row in conn.execute(
+                text(
+                    "select rolname, rolcanlogin, rolsuper, rolbypassrls, "
+                    "rolcreaterole, rolcreatedb, rolreplication "
+                    "from pg_roles where rolname = any(:roles)"
+                ),
+                {"roles": role_names},
+            )
+        }
+        for spec in EXPECTED_ROLES:
+            row = rows.get(spec.name)
+            if row is None:
+                violations.append(
+                    Violation(
+                        "preflight_role",
+                        f"role {spec.name} absent",
+                        role=spec.name,
+                        field="presence",
+                        expected="present",
+                        actual="absent",
+                    )
+                )
+                continue
+            expected_attributes = {
+                "rolcanlogin": spec.login,
+                "rolsuper": spec.superuser,
+                "rolbypassrls": spec.bypassrls,
+                "rolcreaterole": spec.createrole,
+                "rolcreatedb": spec.createdb,
+                "rolreplication": spec.replication,
+            }
+            for attribute, want in expected_attributes.items():
+                got = bool(getattr(row, attribute))
+                if got != want:
+                    violations.append(
+                        Violation(
+                            "preflight_role_attribute",
+                            f"role {spec.name}.{attribute} = {got}, "
+                            f"expected {want}",
+                            role=spec.name,
+                            field=attribute,
+                            expected=str(want),
+                            actual=str(got),
+                        )
+                    )
+
+        memberships = conn.execute(
+            text(
+                """
+                select m.rolname as member, g.rolname as granted,
+                       am.admin_option, am.inherit_option, am.set_option
+                from pg_auth_members am
+                join pg_roles m on m.oid = am.member
+                join pg_roles g on g.oid = am.roleid
+                where m.rolname = any(:roles)
+                """
+            ),
+            {"roles": role_names},
+        ).all()
+
+        expected_edge = EXPECTED_OWNER_MEMBERSHIP
+        owner_edges = [
+            row for row in memberships if row.member == expected_edge.member
+        ]
+        if not any(
+            row.granted == expected_edge.granted
+            and bool(row.admin_option) == expected_edge.admin
+            and bool(row.inherit_option) == expected_edge.inherit
+            and bool(row.set_option) == expected_edge.set
+            for row in owner_edges
+        ):
+            description = ", ".join(
+                f"{row.granted}(admin={row.admin_option},"
+                f"inherit={row.inherit_option},set={row.set_option})"
+                for row in owner_edges
+            ) or "absent"
+            violations.append(
+                Violation(
+                    "preflight_membership",
+                    f"app_owner membership is [{description}], expected "
+                    "app_maintenance(admin=False,inherit=False,set=True)",
+                    role="app_owner",
+                    field="membership",
+                    expected="app_owner -> app_maintenance set=True",
+                    actual=description,
+                )
+            )
+        for row in owner_edges:
+            if row.granted != expected_edge.granted:
+                violations.append(
+                    Violation(
+                        "preflight_membership",
+                        f"unexpected app_owner membership to {row.granted}",
+                        role="app_owner",
+                        field="membership",
+                        expected="app_owner -> app_maintenance only",
+                        actual=f"app_owner -> {row.granted}",
+                    )
+                )
+        for row in memberships:
+            if row.member in RUNTIME_ROLES:
+                violations.append(
+                    Violation(
+                        "preflight_membership",
+                        f"runtime role {row.member} is a member of "
+                        f"{row.granted}",
+                        role=row.member,
+                        field="membership",
+                        expected="no outbound memberships",
+                        actual=f"{row.member} -> {row.granted}",
+                    )
+                )
+    return violations
+
+
+def preflight_exact_state_violations(obj: Engine | Connection) -> list[Violation]:
+    """Exact expected preflight contract: revision, extensions, role topology."""
+    return [
+        *preflight_revision_violations(obj),
+        *preflight_extension_violations(obj),
+        *preflight_role_violations(obj),
+    ]
+
+
 def run_preflight(admin_url: str, owner_url: str) -> Report:
     report = Report("preflight")
     engine = _engine(admin_url)
+    report.violations += preflight_exact_state_violations(engine)
     report.violations += inventory_violations(engine, LEGACY_0006_APPLICATION_TABLES)
     report.violations += exact_row_count_violations(
         engine, LEGACY_0006_APPLICATION_TABLES
@@ -1192,14 +1725,13 @@ def run_final(admin_url: str) -> Report:
     engine = _engine(admin_url)
     report.violations += application_row_violations(engine)
     report.violations += fixture_residue(engine)
-    report.violations += foreign_key_violations(engine)
-    report.violations += orphan_violations(engine)
+    report.violations += final_foreign_key_violations(engine)
     report.violations += platform_count_violations(engine)
     with _connect(engine) as conn:
         revision = conn.execute(
             text("select version_num from public.alembic_version")
         ).scalar_one_or_none()
-    if revision != "0013_default_acl_hardening":
+    if revision != FINAL_REVISION:
         report.violations.append(
             Violation("revision", f"final revision is {revision}")
         )

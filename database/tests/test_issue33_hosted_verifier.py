@@ -15,10 +15,13 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = REPOSITORY_ROOT / "database" / "tools" / "issue33_hosted_verifier.py"
+ALEMBIC_INI = REPOSITORY_ROOT / "database" / "alembic.ini"
 
 
 def _load_verifier():
@@ -79,6 +82,105 @@ def client_roles(database_url):
         for role in created:
             conn.execute(text(f"drop role if exists {role}"))
     engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Issue #33 hardening pass 2 fixtures (Findings 1-5)
+# ---------------------------------------------------------------------------
+
+LEGACY_REVISION = "0006_practical_artifacts"
+LEGACY_DB_NAME = "embyr_p33_legacy_test"
+# The frozen hosted role contract (provisioning/supabase_roles.sql). The shared
+# test harness provisions runtime roles NOLOGIN for convenience, so the legacy
+# fixture converges them and the teardown restores the harness state.
+LEGACY_ROLE_ATTRIBUTES = {
+    "app_backend": "login nobypassrls nocreaterole nocreatedb noreplication",
+    "app_worker": "login bypassrls nocreaterole nocreatedb noreplication",
+    "app_maintenance": "nologin bypassrls nocreaterole nocreatedb noreplication",
+    "app_owner": "login nosuperuser nobypassrls nocreaterole nocreatedb "
+    "noreplication",
+}
+HARNESS_ROLE_ATTRIBUTES = {
+    "app_backend": "nologin nobypassrls",
+    "app_worker": "nologin bypassrls",
+    "app_maintenance": "nologin bypassrls",
+    "app_owner": "login nobypassrls",
+}
+LEGACY_ROLE_COLUMNS = (
+    "rolcanlogin",
+    "rolsuper",
+    "rolbypassrls",
+    "rolcreaterole",
+    "rolcreatedb",
+    "rolreplication",
+)
+
+
+def _restore_role_attributes(engine) -> None:
+    with engine.begin() as conn:
+        for role, attributes in HARNESS_ROLE_ATTRIBUTES.items():
+            exists = conn.execute(
+                text("select 1 from pg_roles where rolname = :role"), {"role": role}
+            ).scalar_one_or_none()
+            if exists is not None:
+                conn.execute(text(f"alter role {role} with {attributes}"))
+
+
+POLICY_USER_A = "33333333-3333-3333-3333-333333333333"
+POLICY_USER_B = "44444444-4444-4444-4444-444444444444"
+
+
+def _alembic_config(url: str) -> Config:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    return config
+
+
+@pytest.fixture(scope="module")
+def legacy_engine(database_url):
+    """A disposable database migrated to the legacy ``0006`` hosted state.
+
+    Preflight is a gate on the *starting* state, so exercising it requires a
+    database genuinely at ``0006_practical_artifacts`` with the frozen hosted
+    extension layout (``vector`` in ``public``, ``pgcrypto`` in ``extensions``).
+    """
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    base = database_url.rsplit("/", 1)[0]
+    legacy_url = f"{base}/{LEGACY_DB_NAME}"
+    with admin.connect() as conn:
+        conn.execute(text(f"drop database if exists {LEGACY_DB_NAME} with (force)"))
+        conn.execute(text(f"create database {LEGACY_DB_NAME}"))
+    engine = create_engine(legacy_url)
+    with engine.begin() as conn:
+        for role, attributes in LEGACY_ROLE_ATTRIBUTES.items():
+            exists = conn.execute(
+                text("select 1 from pg_roles where rolname = :role"), {"role": role}
+            ).scalar_one_or_none()
+            if exists is None:
+                conn.execute(text(f"create role {role} {attributes}"))
+            else:
+                conn.execute(text(f"alter role {role} with {attributes}"))
+        conn.execute(
+            text(
+                "grant usage, create on schema public to app_owner "
+                "with grant option"
+            )
+        )
+        conn.execute(text("grant app_maintenance to app_owner with set true"))
+    command.upgrade(_alembic_config(legacy_url), LEGACY_REVISION)
+    with engine.begin() as conn:
+        conn.execute(text("create schema if not exists extensions"))
+        conn.execute(text("alter extension pgcrypto set schema extensions"))
+    try:
+        yield engine
+    finally:
+        _restore_role_attributes(engine)
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(
+                text(f"drop database if exists {LEGACY_DB_NAME} with (force)")
+            )
+        admin.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -395,3 +497,400 @@ def test_clean_final_state_passes(
     assert verifier.application_row_violations(migrated_engine) == []
     assert verifier.orphan_violations(migrated_engine) == []
     assert verifier.fixture_residue(migrated_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: preflight must reject unsafe starting state
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_exact_state_clean(legacy_engine, verifier):
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_revision_mismatch_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(
+            text(
+                "update public.alembic_version "
+                "set version_num = '0005_assessment_evidence'"
+            )
+        )
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any(v.kind == "preflight_revision" for v in violations), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(
+                text("update public.alembic_version set version_num = :rev"),
+                {"rev": LEGACY_REVISION},
+            )
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_backend_bypassrls_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(text("alter role app_backend bypassrls"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any(
+            v.role == "app_backend" and "bypassrls" in v.detail.lower()
+            for v in violations
+        ), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(text("alter role app_backend nobypassrls"))
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_worker_bypassrls_false_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(text("alter role app_worker nobypassrls"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any(v.role == "app_worker" for v in violations), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(text("alter role app_worker bypassrls"))
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_missing_pgcrypto_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(text("drop extension pgcrypto"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any("pgcrypto" in v.detail for v in violations), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(text("create extension pgcrypto schema extensions"))
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_extension_schema_mismatch_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(text("alter extension vector set schema extensions"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any("vector" in v.detail for v in violations), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(text("alter extension vector set schema public"))
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+def test_preflight_membership_revoked_detected(legacy_engine, verifier):
+    with legacy_engine.begin() as conn:
+        conn.execute(text("revoke app_maintenance from app_owner"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any(v.kind == "preflight_membership" for v in violations), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "grant app_maintenance to app_owner "
+                    "with set true, inherit false, admin false"
+                )
+            )
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Finding 2: freeze full RLS policy semantics
+# ---------------------------------------------------------------------------
+
+
+def _jobs_policy_definition(migrated_engine) -> dict:
+    with migrated_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                select pg_get_expr(p.polqual, p.polrelid) as qual,
+                       pg_get_expr(p.polwithcheck, p.polrelid) as with_check,
+                       p.polcmd,
+                       (select array_agg(r.rolname)
+                          from pg_roles r where r.oid = any(p.polroles)) as roles
+                from pg_policy p
+                join pg_class c on c.oid = p.polrelid
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public' and c.relname = 'jobs'
+                  and p.polname = 'jobs_user_policy'
+                """
+            )
+        ).one()
+    return {
+        "qual": row.qual,
+        "with_check": row.with_check,
+        "roles": list(row.roles),
+    }
+
+
+def _count_jobs_for_other_user_as_backend(database_url: str) -> int:
+    with psycopg.connect(_psycopg_url(database_url)) as conn:
+        with conn.cursor() as cur:
+            cur.execute("set local role app_backend")
+        with conn.cursor() as cur:
+            cur.execute(
+                "select set_config('app.user_id', %s, true)", (POLICY_USER_A,)
+            )
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from public.jobs where user_id = %s",
+                (POLICY_USER_B,),
+            )
+            count = cur.fetchone()[0]
+        conn.rollback()
+    return count
+
+
+def test_rls_policy_contract_clean(migrated_engine, verifier, clean_application_data):
+    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    assert verifier.rls_violations(migrated_engine) == []
+
+
+def test_rls_detects_permissive_same_name_policy(
+    database_url, migrated_engine, verifier, clean_application_data
+):
+    """A same-name permissive policy must fail and admit cross-user rows."""
+    original = _jobs_policy_definition(migrated_engine)
+    with migrated_engine.begin() as conn:
+        conn.execute(text("insert into public.app_users (id, auth_provider, auth_subject) values (:a, 'test', 'p33-policy-a'), (:b, 'test', 'p33-policy-b')"), {"a": POLICY_USER_A, "b": POLICY_USER_B})
+        conn.execute(text("insert into public.jobs (user_id, job_type, status) values (:b, 'EVALUATION', 'PENDING')"), {"b": POLICY_USER_B})
+    with migrated_engine.begin() as conn:
+        conn.execute(text("drop policy jobs_user_policy on public.jobs"))
+        conn.execute(
+            text(
+                "create policy jobs_user_policy on public.jobs "
+                "to app_backend using (true) with check (true)"
+            )
+        )
+    try:
+        assert _count_jobs_for_other_user_as_backend(database_url) == 1
+        violations = verifier.rls_violations(migrated_engine)
+        assert any(v.table == "jobs" for v in violations), violations
+        assert any(v.field == "qual" for v in violations), violations
+    finally:
+        roles = ", ".join(original["roles"])
+        with migrated_engine.begin() as conn:
+            conn.execute(text("drop policy jobs_user_policy on public.jobs"))
+            conn.execute(
+                text(
+                    f"create policy jobs_user_policy on public.jobs to {roles} "
+                    f"using ({original['qual']}) "
+                    f"with check ({original['with_check']})"
+                )
+            )
+        with migrated_engine.begin() as conn:
+            conn.execute(text("delete from public.jobs where user_id = :b"), {"b": POLICY_USER_B})
+            conn.execute(text("delete from public.app_users where id in (:a, :b)"), {"a": POLICY_USER_A, "b": POLICY_USER_B})
+    assert verifier.rls_violations(migrated_engine) == []
+    assert _count_jobs_for_other_user_as_backend(database_url) == 0
+
+
+# ---------------------------------------------------------------------------
+# Finding 3: default ACL must account for inherited privileges
+# ---------------------------------------------------------------------------
+
+
+def test_default_acl_detects_inherited_client_execute(
+    migrated_engine, verifier, client_roles
+):
+    helper = "p33_dacl_helper"
+    with migrated_engine.begin() as conn:
+        conn.execute(text(f"drop role if exists {helper}"))
+        conn.execute(text(f"create role {helper} nologin"))
+        conn.execute(text(f"grant {helper} to anon with inherit true, set false"))
+        conn.execute(
+            text(
+                "alter default privileges for role app_owner in schema public "
+                f"grant execute on functions to {helper}"
+            )
+        )
+    with migrated_engine.begin() as conn:
+        conn.execute(text("set local role app_owner"))
+        conn.execute(
+            text(
+                "create function public.p33_future_fn() returns int "
+                "language sql as 'select 1'"
+            )
+        )
+    try:
+        with migrated_engine.connect() as conn:
+            effective = conn.execute(
+                text(
+                    "select has_function_privilege("
+                    "'anon', 'public.p33_future_fn()', 'EXECUTE')"
+                )
+            ).scalar_one()
+        assert effective is True
+        violations = verifier.function_default_acl_violations(migrated_engine)
+        assert any(v.role == "anon" for v in violations), violations
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(text("drop function if exists public.p33_future_fn()"))
+            conn.execute(
+                text(
+                    "alter default privileges for role app_owner in schema public "
+                    f"revoke execute on functions from {helper}"
+                )
+            )
+            conn.execute(text(f"revoke {helper} from anon"))
+            conn.execute(text(f"drop role if exists {helper}"))
+    assert verifier.function_default_acl_violations(migrated_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Finding 4: freeze FK semantics, not just FK names
+# ---------------------------------------------------------------------------
+
+
+def test_foreign_key_contract_matches_database(
+    migrated_engine, verifier, clean_application_data
+):
+    actual = verifier.database_foreign_key_contract(migrated_engine)
+    expected = {spec.name: spec for spec in verifier.EXPECTED_FOREIGN_KEY_CONTRACT}
+    assert len(expected) == len(verifier.EXPECTED_FOREIGN_KEY_CONTRACT)
+    assert actual == expected
+
+
+def test_foreign_key_contract_detects_same_name_drift(
+    migrated_engine, verifier, clean_application_data
+):
+    with migrated_engine.connect() as conn:
+        definition = conn.execute(
+            text(
+                "select pg_get_constraintdef(oid) from pg_constraint "
+                "where conname = 'fk_jobs_user_id_app_users'"
+            )
+        ).scalar_one()
+    with migrated_engine.begin() as conn:
+        conn.execute(
+            text("alter table public.jobs drop constraint fk_jobs_user_id_app_users")
+        )
+        conn.execute(
+            text(
+                "alter table public.jobs add constraint fk_jobs_user_id_app_users "
+                "foreign key (id) references public.app_users (id)"
+            )
+        )
+    try:
+        violations = verifier.foreign_key_violations(migrated_engine)
+        drifted = [v for v in violations if v.table == "fk_jobs_user_id_app_users"]
+        assert drifted, violations
+        assert any(v.field for v in drifted), drifted
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "alter table public.jobs "
+                    "drop constraint fk_jobs_user_id_app_users"
+                )
+            )
+            conn.execute(
+                text(
+                    "alter table public.jobs add constraint "
+                    f"fk_jobs_user_id_app_users {definition}"
+                )
+            )
+    assert verifier.foreign_key_violations(migrated_engine) == []
+
+
+def test_final_skips_orphan_checker_when_fk_contract_fails(
+    monkeypatch, migrated_engine, verifier, clean_application_data
+):
+    def _explode(obj):  # pragma: no cover - must never run
+        raise AssertionError("orphan checker ran before FK contract passed")
+
+    monkeypatch.setattr(verifier, "orphan_violations", _explode)
+    with migrated_engine.begin() as conn:
+        conn.execute(
+            text("alter table public.jobs drop constraint fk_jobs_user_id_app_users")
+        )
+        conn.execute(
+            text(
+                "alter table public.jobs add constraint fk_jobs_user_id_app_users "
+                "foreign key (id) references public.app_users (id)"
+            )
+        )
+    try:
+        assert verifier.final_foreign_key_violations(migrated_engine)
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "alter table public.jobs "
+                    "drop constraint fk_jobs_user_id_app_users"
+                )
+            )
+            conn.execute(
+                text(
+                    "alter table public.jobs add constraint "
+                    "fk_jobs_user_id_app_users foreign key (user_id) "
+                    "references public.app_users (id) on delete cascade"
+                )
+            )
+    assert verifier.foreign_key_violations(migrated_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Finding 5: expect_sqlstate must not roll back caller work
+# ---------------------------------------------------------------------------
+
+
+def _sentinel_survives(verifier, database_url, expected, sql, should_raise):
+    with psycopg.connect(_psycopg_url(database_url)) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into public.app_users (id, auth_provider, auth_subject) "
+                "values (gen_random_uuid(), 'test', 'p33-sqlstate-sentinel')"
+            )
+        if should_raise:
+            with pytest.raises(verifier.VerifierError):
+                verifier.expect_sqlstate(conn, expected, sql)
+        else:
+            verifier.expect_sqlstate(conn, expected, sql)
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) from public.app_users "
+                "where auth_subject = 'p33-sqlstate-sentinel'"
+            )
+            assert cur.fetchone()[0] == 1, "helper destroyed caller sentinel"
+            cur.execute("select 1")
+            assert cur.fetchone()[0] == 1, "connection unusable after helper"
+        conn.rollback()
+
+
+def test_expect_sqlstate_preserves_caller_on_expected_state(
+    database_url, verifier
+):
+    _sentinel_survives(
+        verifier, database_url, "22P02", "select 'not-a-uuid'::uuid", False
+    )
+
+
+def test_expect_sqlstate_preserves_caller_on_wrong_state(
+    database_url, verifier
+):
+    _sentinel_survives(
+        verifier, database_url, "99999", "select 'not-a-uuid'::uuid", True
+    )
+
+
+def test_expect_sqlstate_preserves_caller_on_unexpected_success(
+    database_url, verifier
+):
+    _sentinel_survives(verifier, database_url, "22P02", "select 1", True)
+
+
+def test_expect_sqlstate_isolates_without_outer_transaction(
+    database_url, verifier
+):
+    from psycopg import pq
+
+    with psycopg.connect(_psycopg_url(database_url)) as conn:
+        verifier.expect_sqlstate(conn, "22P02", "select 'not-a-uuid'::uuid")
+        assert conn.info.transaction_status == pq.TransactionStatus.IDLE
+        with conn.cursor() as cur:
+            cur.execute("select 1")
+            assert cur.fetchone()[0] == 1
