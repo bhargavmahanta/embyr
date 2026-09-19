@@ -202,7 +202,11 @@ the account-deletion/orphan-cleanup ordering contract.
 - Hosted verification must avoid unintended application, Auth, or database
   mutations. The M2 hosted verifier
   ([`database/tools/issue33_hosted_verifier.py`](../../database/tools/issue33_hosted_verifier.py))
-  is a read-only/inspection harness, not an automated reset tool.
+  does not perform the destructive rebuild. Its `--preflight` and
+  `--post-upgrade` modes are inspection-oriented, while its `--behavioral`
+  mode is intentionally mutating: it creates temporary verification fixtures
+  and temporarily grants/revokes `UPDATE` privileges while exercising worker
+  behavior, then cleans up the temporary state.
 - Developer tests must not be casually pointed at hosted production-like state.
   Until a disposable-target guard exists, the current safe practice is:
   - leave `EMBYR_TEST_DATABASE_URL` unset so tests start an isolated

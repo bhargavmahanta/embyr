@@ -93,8 +93,11 @@ transaction, so a connection returned to the application pool is clean for the
 next request. The hosted migration and RLS rebuild for the development project
 was the scope of the hosted verification work (Issue #33). The reviewed,
 repository-owned procedure for it is preserved in
-[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py); it is a
-read-only/inspection harness and does not perform the destructive rebuild. The
+[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py); the
+verifier does not perform the destructive rebuild. Its `--preflight` and
+`--post-upgrade` modes are inspection-oriented; its `--behavioral` mode is
+intentionally mutating, creating temporary verification fixtures and
+temporarily granting/revoking `UPDATE` privileges before cleaning them up. The
 hosted migration/RLS state must be re-verified through that procedure before it
 is relied upon, and must not be inferred from the Supabase Dashboard.
 Credentials and connection strings are never committed; they are supplied per
@@ -249,10 +252,14 @@ the start of the M2 hosted verification it was at `0006_practical_artifacts`
 with `postgres`-owned objects and full client-role grants. The clean rebuild was
 the hosted migration/RLS verification work (Issue #33), not prerequisite
 provisioning. Its reviewed procedure is preserved in
-[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py), a
-read-only/inspection harness that never performs the destructive rebuild.
-Re-run its read-only preflight/post-upgrade modes before relying on the hosted
-state:
+[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py).
+
+The numbered rebuild procedure below is a **manual, mutating** operation and is
+not executed by the verifier. Only the verifier's `--preflight` and
+`--post-upgrade` modes are inspection-oriented; its `--behavioral` mode is
+intentionally mutating, creating temporary verification fixtures and
+temporarily granting/revoking `UPDATE` privileges before cleaning them up.
+Re-run the inspection-oriented modes before relying on the hosted state:
 
 1. verify the database contains no Embyr/application data;
 2. remove `public` from the Data API exposed schemas;
