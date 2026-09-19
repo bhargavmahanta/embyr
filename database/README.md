@@ -6,6 +6,9 @@ tests.
 Once a migration reaches `main`, it is immutable. Corrections require a new
 migration.
 
+For the end-to-end development setup, see
+[`docs/development/supabase-workflow.md`](../docs/development/supabase-workflow.md).
+
 ## Tooling
 
 M1 uses Python 3.12+, SQLAlchemy 2.x, Alembic, psycopg 3, pgvector, pytest, and
@@ -87,10 +90,13 @@ Request identity is always written transaction-locally via
 scope (`false`) and `SET app.user_id` are never used. Because the setting is
 transaction-local, it cannot survive the committing or rolling-back
 transaction, so a connection returned to the application pool is clean for the
-next request. The hosted project remains at `0006_practical_artifacts`; hosted
-RLS and the final migration state belong to Issue #33. Embyr roles cannot yet
-read `public.alembic_version` on the hosted project because existing objects
-remain owned by the platform `postgres` role until the #33 rebuild.
+next request. The hosted migration and RLS rebuild for the development project
+was the scope of the hosted verification work (Issue #33). The reviewed,
+repository-owned procedure for it is preserved in
+[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py); it is a
+read-only/inspection harness and does not perform the destructive rebuild. The
+hosted migration/RLS state must be re-verified through that procedure before it
+is relied upon, and must not be inferred from the Supabase Dashboard.
 Credentials and connection strings are never committed; they are supplied per
 process from secure environment or secret storage.
 
@@ -238,10 +244,15 @@ select has_schema_privilege('app_owner', 'public', 'usage')  as owner_usage,
 
 ### Hosted development rebuild (Issue #33)
 
-The existing hosted development database predates the `app_owner` ownership
-model and is still at `0006_practical_artifacts` with `postgres`-owned objects
-and full client-role grants. The clean rebuild belongs to the hosted
-migration/RLS verification work (Issue #33), not to prerequisite provisioning:
+The hosted development database predated the `app_owner` ownership model: at
+the start of the M2 hosted verification it was at `0006_practical_artifacts`
+with `postgres`-owned objects and full client-role grants. The clean rebuild was
+the hosted migration/RLS verification work (Issue #33), not prerequisite
+provisioning. Its reviewed procedure is preserved in
+[`tools/issue33_hosted_verifier.py`](tools/issue33_hosted_verifier.py), a
+read-only/inspection harness that never performs the destructive rebuild.
+Re-run its read-only preflight/post-upgrade modes before relying on the hosted
+state:
 
 1. verify the database contains no Embyr/application data;
 2. remove `public` from the Data API exposed schemas;
