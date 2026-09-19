@@ -137,12 +137,15 @@ def _alembic_config(url: str) -> Config:
 
 
 @pytest.fixture(scope="module")
-def legacy_engine(database_url):
+def legacy_engine(database_url, verifier, client_roles):
     """A disposable database migrated to the legacy ``0006`` hosted state.
 
     Preflight is a gate on the *starting* state, so exercising it requires a
     database genuinely at ``0006_practical_artifacts`` with the frozen hosted
     extension layout (``vector`` in ``public``, ``pgcrypto`` in ``extensions``).
+    The fixture explicitly converges the ``app_owner -> app_maintenance``
+    membership to the frozen ``ADMIN=false / INHERIT=false / SET=true`` state
+    and restores whatever existed before it ran.
     """
     admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
     base = database_url.rsplit("/", 1)[0]
@@ -151,6 +154,7 @@ def legacy_engine(database_url):
         conn.execute(text(f"drop database if exists {LEGACY_DB_NAME} with (force)"))
         conn.execute(text(f"create database {LEGACY_DB_NAME}"))
     engine = create_engine(legacy_url)
+    prior_membership = verifier.capture_owner_membership(engine)
     with engine.begin() as conn:
         for role, attributes in LEGACY_ROLE_ATTRIBUTES.items():
             exists = conn.execute(
@@ -166,7 +170,9 @@ def legacy_engine(database_url):
                 "with grant option"
             )
         )
-        conn.execute(text("grant app_maintenance to app_owner with set true"))
+    verifier.apply_owner_membership(
+        engine, verifier.MembershipState(exists=True, admin=False, inherit=False, set=True)
+    )
     command.upgrade(_alembic_config(legacy_url), LEGACY_REVISION)
     with engine.begin() as conn:
         conn.execute(text("create schema if not exists extensions"))
@@ -174,6 +180,7 @@ def legacy_engine(database_url):
     try:
         yield engine
     finally:
+        verifier.apply_owner_membership(engine, prior_membership)
         _restore_role_attributes(engine)
         engine.dispose()
         with admin.connect() as conn:
@@ -894,3 +901,164 @@ def test_expect_sqlstate_isolates_without_outer_transaction(
         with conn.cursor() as cur:
             cur.execute("select 1")
             assert cur.fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Pass 3 Finding 1: required hosted client roles must exist
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("role", ("anon", "authenticated", "service_role"))
+def test_preflight_missing_client_role_detected(legacy_engine, verifier, role):
+    with legacy_engine.begin() as conn:
+        conn.execute(text(f"drop role {role}"))
+    try:
+        violations = verifier.preflight_exact_state_violations(legacy_engine)
+        assert any(
+            v.kind == "missing_client_role" and v.role == role
+            for v in violations
+        ), violations
+    finally:
+        with legacy_engine.begin() as conn:
+            conn.execute(text(f"create role {role} nologin"))
+    assert verifier.preflight_exact_state_violations(legacy_engine) == []
+
+
+@pytest.mark.parametrize("role", ("anon", "authenticated", "service_role"))
+def test_post_upgrade_missing_client_role_detected(
+    migrated_engine, verifier, client_roles, role
+):
+    with migrated_engine.begin() as conn:
+        conn.execute(text(f"drop role {role}"))
+    try:
+        violations = verifier.post_upgrade_violations(migrated_engine)
+        assert any(
+            v.kind == "missing_client_role" and v.role == role
+            for v in violations
+        ), violations
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(text(f"create role {role} nologin"))
+    assert verifier.missing_client_role_violations(migrated_engine) == []
+
+
+def test_post_upgrade_clean_with_required_client_roles(
+    migrated_engine, verifier, client_roles, clean_application_data
+):
+    verifier.cleanup_behavioral_fixtures(migrated_engine)
+    # The shared test harness applies migrations as ``postgres``, so object
+    # ownership is checked only by the app_owner-owned four-mode rehearsal; the
+    # remaining post-upgrade security checks must be clean here.
+    assert verifier.missing_client_role_violations(migrated_engine) == []
+    assert verifier.rls_violations(migrated_engine) == []
+    assert verifier.maintenance_function_violations(migrated_engine) == []
+    assert verifier.client_privilege_violations(migrated_engine) == []
+    assert verifier.function_default_acl_violations(migrated_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Pass 3 Finding 2: policy normalization must preserve quoted literals
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_predicate_preserves_quoted_literal_contents(verifier):
+    expected = (
+        "(user_id = (NULLIF(current_setting('app.user_id'::text, true), "
+        "''::text))::uuid)"
+    )
+    tampered = (
+        "(user_id = (NULLIF(current_setting('app.user_id'::text, true), "
+        "'::text'::text))::uuid)"
+    )
+    assert verifier._normalize_predicate(expected) != verifier._normalize_predicate(
+        tampered
+    )
+
+
+def test_normalize_predicate_only_strips_catalog_casts_outside_literals(verifier):
+    canonical = (
+        "(user_id = (NULLIF(current_setting('app.user_id'::text, true), "
+        "''::text))::uuid)"
+    )
+    without_cast = (
+        "(user_id = (NULLIF(current_setting('app.user_id', true), ''))::uuid)"
+    )
+    assert verifier._normalize_predicate(canonical) == verifier._normalize_predicate(
+        without_cast
+    )
+    # whitespace-only differences are harmless
+    spaced = (
+        "( user_id  =  ( NULLIF( current_setting('app.user_id'::text, true),  "
+        "''::text ) )::uuid )"
+    )
+    assert verifier._normalize_predicate(canonical) == verifier._normalize_predicate(
+        spaced
+    )
+    # literal contents are never rewritten
+    literal = "select '::text'"
+    assert "::text" in verifier._normalize_predicate(literal)
+
+
+def test_rls_detects_changed_policy_literal(
+    migrated_engine, verifier, clean_application_data
+):
+    original = _jobs_policy_definition(migrated_engine)
+    tampered_predicate = (
+        "user_id = (NULLIF(current_setting('app.user_id'::text, true), "
+        "'::text'::text))::uuid"
+    )
+    with migrated_engine.begin() as conn:
+        conn.execute(text("drop policy jobs_user_policy on public.jobs"))
+        conn.execute(
+            text(
+                "create policy jobs_user_policy on public.jobs to app_backend "
+                f"using ({tampered_predicate}) with check ({tampered_predicate})"
+            )
+        )
+    try:
+        violations = verifier.rls_violations(migrated_engine)
+        assert any(v.table == "jobs" and v.field == "qual" for v in violations), (
+            violations
+        )
+    finally:
+        roles = ", ".join(original["roles"])
+        with migrated_engine.begin() as conn:
+            conn.execute(text("drop policy jobs_user_policy on public.jobs"))
+            conn.execute(
+                text(
+                    f"create policy jobs_user_policy on public.jobs to {roles} "
+                    f"using ({original['qual']}) "
+                    f"with check ({original['with_check']})"
+                )
+            )
+    assert verifier.rls_violations(migrated_engine) == []
+
+
+# ---------------------------------------------------------------------------
+# Pass 3 Finding 3: membership fixture must establish full frozen state
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_fixture_membership_state(legacy_engine, verifier):
+    assert verifier.capture_owner_membership(legacy_engine) == (
+        verifier.MembershipState(exists=True, admin=False, inherit=False, set=True)
+    )
+
+
+def test_membership_fixture_restore_round_trip(migrated_engine, verifier):
+    original = verifier.capture_owner_membership(migrated_engine)
+    target = verifier.MembershipState(
+        exists=True, admin=False, inherit=False, set=True
+    )
+    try:
+        verifier.apply_owner_membership(migrated_engine, target)
+        assert verifier.capture_owner_membership(migrated_engine) == target
+        verifier.apply_owner_membership(
+            migrated_engine, verifier.MembershipState(exists=False)
+        )
+        assert verifier.capture_owner_membership(migrated_engine) == (
+            verifier.MembershipState(exists=False)
+        )
+    finally:
+        verifier.apply_owner_membership(migrated_engine, original)
+    assert verifier.capture_owner_membership(migrated_engine) == original

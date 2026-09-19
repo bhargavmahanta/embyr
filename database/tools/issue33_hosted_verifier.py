@@ -152,6 +152,10 @@ RLS_LEARNER_TABLES: tuple[str, ...] = (
 
 CLIENT_ROLES: tuple[str, ...] = ("anon", "authenticated", "service_role")
 
+# Supabase always provisions these roles. Hosted verification must fail closed
+# when any of them is absent rather than silently skipping its privilege checks.
+REQUIRED_CLIENT_ROLES: tuple[str, ...] = CLIENT_ROLES
+
 # Every table privilege ``has_table_privilege`` supports on PostgreSQL 17.
 PG17_TABLE_PRIVILEGES: tuple[str, ...] = (
     "SELECT",
@@ -228,7 +232,8 @@ EXPECTED_POLICY_ROLES: tuple[str, ...] = ("app_backend",)
 EXPECTED_POLICY_COMMAND = "ALL"
 # Exact pg_get_expr rendering of 0012's predicate for polqual/polwithcheck on
 # PostgreSQL 16 and 17. ``_normalize_predicate`` removes only whitespace and the
-# semantically-irrelevant ``::text`` annotations before comparison.
+# semantically-irrelevant ``::text`` annotations, and only outside quoted
+# literals/identifiers, before comparison.
 EXPECTED_POLICY_PREDICATE = (
     "(user_id = (NULLIF(current_setting('app.user_id'::text, true), "
     "''::text))::uuid)"
@@ -544,6 +549,30 @@ def existing_client_roles(obj: Engine | Connection) -> list[str]:
             )
         }
     return [role for role in CLIENT_ROLES if role in present]
+
+
+def missing_client_role_violations(obj: Engine | Connection) -> list[Violation]:
+    """Every required Supabase client role must exist for hosted verification."""
+    with _connect(obj) as conn:
+        present = {
+            row[0]
+            for row in conn.execute(
+                text("select rolname from pg_roles where rolname = any(:roles)"),
+                {"roles": list(REQUIRED_CLIENT_ROLES)},
+            )
+        }
+    return [
+        Violation(
+            "missing_client_role",
+            f"missing required role: {role}",
+            role=role,
+            field="presence",
+            expected="present",
+            actual="absent",
+        )
+        for role in REQUIRED_CLIENT_ROLES
+        if role not in present
+    ]
 
 
 def client_privilege_violations(obj: Engine | Connection) -> list[Violation]:
@@ -1173,15 +1202,87 @@ def orphan_violations(obj: Engine | Connection) -> list[Violation]:
 
 
 def _normalize_predicate(expression: str | None) -> str | None:
-    """Drop only formatting and the semantically-irrelevant ``::text`` casts.
+    """Canonicalize a ``pg_get_expr`` predicate without touching literals.
 
-    Parentheses are preserved, so structural differences (for example a
-    permissive ``true`` or a missing ``NULLIF``) can never compare equal.
+    Outside quoted strings/identifiers the scanner removes whitespace and the
+    catalog-added ``::text`` casts only. The exact bytes inside single-quoted
+    strings (including ``''`` escapes), double-quoted identifiers, and
+    dollar-quoted strings are copied verbatim. Parentheses are preserved, so a
+    changed literal such as ``''`` -> ``'::text'`` can never compare equal.
     """
     if expression is None:
         return None
-    normalized = expression.lower().replace("::text", "")
-    return "".join(normalized.split())
+    out: list[str] = []
+    index = 0
+    length = len(expression)
+    dollar_tag: str | None = None
+    in_single = False
+    in_double = False
+    while index < length:
+        char = expression[index]
+        if dollar_tag is not None:
+            if expression.startswith(dollar_tag, index):
+                out.append(dollar_tag)
+                index += len(dollar_tag)
+                dollar_tag = None
+            else:
+                out.append(char)
+                index += 1
+            continue
+        if in_single:
+            out.append(char)
+            if char == "'":
+                if index + 1 < length and expression[index + 1] == "'":
+                    out.append("'")
+                    index += 2
+                    continue
+                in_single = False
+            index += 1
+            continue
+        if in_double:
+            out.append(char)
+            if char == '"':
+                if index + 1 < length and expression[index + 1] == '"':
+                    out.append('"')
+                    index += 2
+                    continue
+                in_double = False
+            index += 1
+            continue
+        if char == "'":
+            in_single = True
+            out.append(char)
+            index += 1
+            continue
+        if char == '"':
+            in_double = True
+            out.append(char)
+            index += 1
+            continue
+        if char == "$":
+            tag_end = expression.find("$", index + 1)
+            if tag_end != -1:
+                tag_body = expression[index + 1 : tag_end]
+                if all(part.isalnum() or part == "_" for part in tag_body):
+                    dollar_tag = expression[index : tag_end + 1]
+                    out.append(dollar_tag)
+                    index = tag_end + 1
+                    continue
+            out.append(char)
+            index += 1
+            continue
+        if char.isspace():
+            index += 1
+            continue
+        if expression.startswith("::text", index) and (
+            index + 6 >= length
+            or not (expression[index + 6].isalnum() or expression[index + 6] == "_")
+        ):
+            index += 6
+            continue
+        out.append(char.lower())
+        index += 1
+    return "".join(out)
 
 
 def rls_violations(obj: Engine | Connection) -> list[Violation]:
@@ -1627,12 +1728,72 @@ def preflight_role_violations(obj: Engine | Connection) -> list[Violation]:
     return violations
 
 
+@dataclass(frozen=True)
+class MembershipState:
+    """The full frozen option state of one role membership edge."""
+
+    exists: bool
+    admin: bool = False
+    inherit: bool = False
+    set: bool = False
+
+
+def capture_owner_membership(obj: Engine | Connection) -> MembershipState:
+    """Read the exact current ``app_owner -> app_maintenance`` option state."""
+    with _connect(obj) as conn:
+        row = conn.execute(
+            text(
+                """
+                select am.admin_option, am.inherit_option, am.set_option
+                from pg_auth_members am
+                join pg_roles m on m.oid = am.member
+                join pg_roles g on g.oid = am.roleid
+                where m.rolname = :member and g.rolname = :granted
+                """
+            ),
+            {
+                "member": EXPECTED_OWNER_MEMBERSHIP.member,
+                "granted": EXPECTED_OWNER_MEMBERSHIP.granted,
+            },
+        ).one_or_none()
+    if row is None:
+        return MembershipState(exists=False)
+    return MembershipState(
+        exists=True,
+        admin=bool(row.admin_option),
+        inherit=bool(row.inherit_option),
+        set=bool(row.set_option),
+    )
+
+
+def apply_owner_membership(
+    obj: Engine | Connection, state: MembershipState
+) -> None:
+    """Converge ``app_owner -> app_maintenance`` to an explicit option state."""
+    member = EXPECTED_OWNER_MEMBERSHIP.member
+    granted = EXPECTED_OWNER_MEMBERSHIP.granted
+    with _connect(obj) as conn:
+        if state.exists:
+            conn.execute(
+                text(
+                    f"grant {granted} to {member} with "
+                    f"admin {str(state.admin).lower()}, "
+                    f"inherit {str(state.inherit).lower()}, "
+                    f"set {str(state.set).lower()}"
+                )
+            )
+        else:
+            conn.execute(text(f"revoke {granted} from {member}"))
+        conn.commit()
+
+
 def preflight_exact_state_violations(obj: Engine | Connection) -> list[Violation]:
     """Exact expected preflight contract: revision, extensions, role topology."""
     return [
         *preflight_revision_violations(obj),
         *preflight_extension_violations(obj),
         *preflight_role_violations(obj),
+        *missing_client_role_violations(obj),
     ]
 
 
@@ -1649,14 +1810,21 @@ def run_preflight(admin_url: str, owner_url: str) -> Report:
     return report
 
 
+def post_upgrade_violations(obj: Engine | Connection) -> list[Violation]:
+    """Catalog/security checks for the rebuilt schema; client roles are required."""
+    return [
+        *missing_client_role_violations(obj),
+        *ownership_violations(obj),
+        *rls_violations(obj),
+        *maintenance_function_violations(obj),
+        *client_privilege_violations(obj),
+        *function_default_acl_violations(obj),
+    ]
+
+
 def run_post_upgrade(admin_url: str) -> Report:
     report = Report("post-upgrade")
-    engine = _engine(admin_url)
-    report.violations += ownership_violations(engine)
-    report.violations += rls_violations(engine)
-    report.violations += maintenance_function_violations(engine)
-    report.violations += client_privilege_violations(engine)
-    report.violations += function_default_acl_violations(engine)
+    report.violations += post_upgrade_violations(_engine(admin_url))
     return report
 
 
