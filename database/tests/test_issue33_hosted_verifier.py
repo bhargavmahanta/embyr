@@ -241,6 +241,52 @@ def test_all_eight_pg17_table_privileges_enumerated(verifier):
     assert len(verifier.PG17_TABLE_PRIVILEGES) == 8
 
 
+def test_pg16_table_privileges_are_seven_without_maintain(verifier):
+    expected = {
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+    }
+    assert set(verifier.PG16_TABLE_PRIVILEGES) == expected
+    assert "MAINTAIN" not in verifier.PG16_TABLE_PRIVILEGES
+    assert verifier.PG16_TABLE_PRIVILEGES == verifier.PG17_TABLE_PRIVILEGES[:-1]
+
+
+def test_supported_table_privileges_pg16_branch(
+    monkeypatch, migrated_engine, verifier
+):
+    monkeypatch.setattr(verifier, "server_version_num", lambda obj: 160010)
+    selected = verifier.supported_table_privileges(migrated_engine)
+    assert selected == verifier.PG16_TABLE_PRIVILEGES
+    assert "MAINTAIN" not in selected
+
+
+def test_supported_table_privileges_pg17_branch(
+    monkeypatch, migrated_engine, verifier
+):
+    monkeypatch.setattr(verifier, "server_version_num", lambda obj: 170006)
+    selected = verifier.supported_table_privileges(migrated_engine)
+    assert selected == verifier.PG17_TABLE_PRIVILEGES
+    assert "MAINTAIN" in selected
+
+
+def test_supported_table_privileges_matches_live_server(
+    migrated_engine, verifier
+):
+    version = verifier.server_version_num(migrated_engine)
+    selected = verifier.supported_table_privileges(migrated_engine)
+    if version >= 170000:
+        assert selected == verifier.PG17_TABLE_PRIVILEGES
+        assert "MAINTAIN" in selected
+    else:
+        assert selected == verifier.PG16_TABLE_PRIVILEGES
+        assert "MAINTAIN" not in selected
+
+
 # ---------------------------------------------------------------------------
 # 6-7: client privilege matrix detection
 # ---------------------------------------------------------------------------
@@ -285,6 +331,32 @@ def test_client_privilege_matrix_detects_injected_non_select(
                     "revoke insert, trigger on public.learner_preferences "
                     "from authenticated"
                 )
+            )
+    assert verifier.client_privilege_violations(migrated_engine) == []
+
+
+def test_client_privilege_matrix_detects_injected_maintain(
+    migrated_engine, verifier, client_roles
+):
+    """PG17 genuinely exercises MAINTAIN; PG16 cannot issue the query."""
+    if verifier.server_version_num(migrated_engine) < 170000:
+        pytest.skip("MAINTAIN is a PostgreSQL 17 privilege")
+    with migrated_engine.begin() as conn:
+        conn.execute(
+            text("grant maintain on public.learner_preferences to anon")
+        )
+    try:
+        violations = verifier.client_privilege_violations(migrated_engine)
+        assert any(
+            v.role == "anon"
+            and v.table == "learner_preferences"
+            and v.privilege == "MAINTAIN"
+            for v in violations
+        ), violations
+    finally:
+        with migrated_engine.begin() as conn:
+            conn.execute(
+                text("revoke maintain on public.learner_preferences from anon")
             )
     assert verifier.client_privilege_violations(migrated_engine) == []
 

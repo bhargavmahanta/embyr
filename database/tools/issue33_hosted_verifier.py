@@ -156,8 +156,12 @@ CLIENT_ROLES: tuple[str, ...] = ("anon", "authenticated", "service_role")
 # when any of them is absent rather than silently skipping its privilege checks.
 REQUIRED_CLIENT_ROLES: tuple[str, ...] = CLIENT_ROLES
 
-# Every table privilege ``has_table_privilege`` supports on PostgreSQL 17.
-PG17_TABLE_PRIVILEGES: tuple[str, ...] = (
+# Table privileges ``has_table_privilege`` supports, split by server major
+# version. The authoritative hosted contract is PostgreSQL 17 (8 privileges);
+# the repository's default Testcontainers baseline is PostgreSQL 16, whose
+# ``has_table_privilege`` rejects the PG17-only ``MAINTAIN`` privilege, so the
+# enumeration must branch explicitly on the live server version.
+PG16_TABLE_PRIVILEGES: tuple[str, ...] = (
     "SELECT",
     "INSERT",
     "UPDATE",
@@ -165,8 +169,9 @@ PG17_TABLE_PRIVILEGES: tuple[str, ...] = (
     "TRUNCATE",
     "REFERENCES",
     "TRIGGER",
-    "MAINTAIN",
 )
+
+PG17_TABLE_PRIVILEGES: tuple[str, ...] = (*PG16_TABLE_PRIVILEGES, "MAINTAIN")
 
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account(uuid)"
 
@@ -575,10 +580,29 @@ def missing_client_role_violations(obj: Engine | Connection) -> list[Violation]:
     ]
 
 
+def server_version_num(obj: Engine | Connection) -> int:
+    """The live server version as an integer (e.g. ``170006`` or ``160010``)."""
+    with _connect(obj) as conn:
+        return int(conn.execute(text("show server_version_num")).scalar_one())
+
+
+def supported_table_privileges(obj: Engine | Connection) -> tuple[str, ...]:
+    """Explicit server-version branch for the table privilege enumeration.
+
+    PostgreSQL 17 is the authoritative hosted contract (including ``MAINTAIN``);
+    PostgreSQL 16 rejects ``has_table_privilege(..., 'MAINTAIN')``, so it uses
+    the seven-privilege set. The branch is explicit and never swallows errors.
+    """
+    if server_version_num(obj) >= 170000:
+        return PG17_TABLE_PRIVILEGES
+    return PG16_TABLE_PRIVILEGES
+
+
 def client_privilege_violations(obj: Engine | Connection) -> list[Violation]:
     """Every effective table privilege for every existing client role."""
     violations: list[Violation] = []
     with _connect(obj) as conn:
+        privileges = supported_table_privileges(conn)
         roles = [
             row[0]
             for row in conn.execute(
@@ -593,7 +617,7 @@ def client_privilege_violations(obj: Engine | Connection) -> list[Violation]:
             if exists is None:
                 continue
             for role in roles:
-                for privilege in PG17_TABLE_PRIVILEGES:
+                for privilege in privileges:
                     granted = conn.execute(
                         text(
                             "select has_table_privilege(:role, :table, :privilege)"
