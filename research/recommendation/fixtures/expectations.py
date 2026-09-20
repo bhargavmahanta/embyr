@@ -17,7 +17,7 @@ one.
 
 from __future__ import annotations
 
-from research.recommendation.fixtures.scenarios import SCENARIO_TARGETS
+from research.recommendation.fixtures.scenarios import SCENARIOS, SCENARIO_TARGETS
 
 OFFLINE_INVARIANT = "IN-9"
 ENGINE_STAGES = "#46-#49"
@@ -33,6 +33,23 @@ def _target(scenario_id: str, name: str) -> dict:
 
 def _tiebreak_key(target: dict) -> str:
     return f"{target['entity_type']}:{target['entity_id']}:{target['entity_version']}"
+
+
+def _prerequisite_objective_id(scenario_id: str, target_name: str) -> str:
+    """Return the declared ``objective_id`` for a target's REQUIRES prerequisite.
+
+    The objective whose learner state gates the prerequisite is explicit in v2;
+    this exposes it as a behavioral oracle without duplicating the fixture.
+    """
+    target = _target(scenario_id, target_name)
+    key = (target["entity_id"], target["entity_version"])
+    for entity in SCENARIOS[scenario_id]["ontology_snapshot"]["entities"]:
+        if (entity["entity_id"], entity["entity_version"]) != key:
+            continue
+        for relationship in entity["relationships"]:
+            if relationship["relationship_type"] == "REQUIRES":
+                return relationship["objective_id"]
+    raise KeyError(f"scenario {scenario_id!r} target {target_name!r} has no REQUIRES edge")
 
 
 def _hard(scenario_id: str, name: str | None = None, **fields) -> dict:
@@ -153,6 +170,9 @@ EXPECTATIONS: dict[str, dict] = {
                 eligibility_state=I,
                 exclusion_reasons=["PREREQUISITE_UNMET"],
                 prerequisite_state="UNSATISFIED",
+                prerequisite_objective_id=_prerequisite_objective_id(
+                    "scn-F-prereq-unmet-001", "target"
+                ),
             ),
             _hard("scn-F-prereq-unmet-001", "control", eligibility_state=E),
         ],
@@ -170,6 +190,9 @@ EXPECTATIONS: dict[str, dict] = {
                 eligibility_state=E,
                 prerequisite_state="SATISFIED",
                 explanation_codes_include=["PREREQUISITES_SATISFIED"],
+                prerequisite_objective_id=_prerequisite_objective_id(
+                    "scn-G-prereq-satisfied-001", "target"
+                ),
             ),
             _hard("scn-G-prereq-satisfied-001", "control", eligibility_state=E),
         ],
@@ -188,6 +211,9 @@ EXPECTATIONS: dict[str, dict] = {
                 exclusion_reasons=["INSUFFICIENT_STATE"],
                 prerequisite_state="UNKNOWN",
                 must_not_exclude_as=["PREREQUISITE_UNMET"],
+                prerequisite_objective_id=_prerequisite_objective_id(
+                    "scn-H-prereq-unknown-001", "target"
+                ),
             ),
             _hard("scn-H-prereq-unknown-001", "control", eligibility_state=E),
         ],
@@ -346,7 +372,7 @@ EXPECTATIONS: dict[str, dict] = {
         ["A", "F"],
         ["IN-1", "IN-2", "IN-3", "IN-4", "IN-6"],
         [
-            _hard("scn-X1-more-unmet-prereq-001", "target", eligibility_state=I, exclusion_reasons=["PREREQUISITE_UNMET"], prerequisite_state="UNSATISFIED"),
+            _hard("scn-X1-more-unmet-prereq-001", "target", eligibility_state=I, exclusion_reasons=["PREREQUISITE_UNMET"], prerequisite_state="UNSATISFIED", prerequisite_objective_id=_prerequisite_objective_id("scn-X1-more-unmet-prereq-001", "target")),
             _hard("scn-X1-more-unmet-prereq-001", "control", eligibility_state=E, explanation_codes_include=["EXPLICIT_INTEREST_MATCH"]),
             _hard("scn-X1-more-unmet-prereq-001", explicit_more_cannot_bypass_hard_prerequisite=True),
         ],
@@ -423,8 +449,8 @@ EXPECTATIONS: dict[str, dict] = {
         [
             _hard("scn-X7-multi-exclusion-empty-001", "paused", eligibility_state=I, exclusion_reasons=["EXPLICITLY_PAUSED"]),
             _hard("scn-X7-multi-exclusion-empty-001", "disliked", eligibility_state=I, exclusion_reasons=["NOT_INTERESTED"]),
-            _hard("scn-X7-multi-exclusion-empty-001", "dependent", eligibility_state=I, exclusion_reasons=["PREREQUISITE_UNMET"]),
-            _hard("scn-X7-multi-exclusion-empty-001", "unknown_dependent", eligibility_state=I, exclusion_reasons=["INSUFFICIENT_STATE"]),
+            _hard("scn-X7-multi-exclusion-empty-001", "dependent", eligibility_state=I, exclusion_reasons=["PREREQUISITE_UNMET"], prerequisite_objective_id=_prerequisite_objective_id("scn-X7-multi-exclusion-empty-001", "dependent")),
+            _hard("scn-X7-multi-exclusion-empty-001", "unknown_dependent", eligibility_state=I, exclusion_reasons=["INSUFFICIENT_STATE"], prerequisite_objective_id=_prerequisite_objective_id("scn-X7-multi-exclusion-empty-001", "unknown_dependent")),
             _hard("scn-X7-multi-exclusion-empty-001", empty_result_is_valid=True),
         ],
         [],

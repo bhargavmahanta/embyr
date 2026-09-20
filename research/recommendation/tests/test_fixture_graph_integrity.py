@@ -41,7 +41,7 @@ def test_scenario_ids_are_unique_and_complete():
 def test_scenario_shape(scenario_id):
     snapshot = SCENARIOS[scenario_id]
     assert snapshot["scenario_id"] == scenario_id
-    assert snapshot["contract_version"] == "m3-simulation/v1"
+    assert snapshot["contract_version"] == "m3-simulation/v2"
     assert snapshot["learner"]["synthetic"] is True
     assert snapshot["simulation_config"]["unknown_prerequisite_policy"] == "CONSERVATIVE_INELIGIBLE"
 

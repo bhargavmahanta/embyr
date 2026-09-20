@@ -76,10 +76,49 @@ def test_contract_freezes_interest_state_type_fields():
     assert frozen_fields == INTEREST_STATE_FIELDS
 
 
-def test_contract_version_unchanged():
-    assert 'contract_version = "m3-simulation/v1"' in _contract_text()
+def test_contract_version_is_v2():
+    assert 'contract_version = "m3-simulation/v2"' in _contract_text()
     for scenario_id, simulation_input in SCENARIOS.items():
-        assert simulation_input["contract_version"] == "m3-simulation/v1", scenario_id
+        assert simulation_input["contract_version"] == "m3-simulation/v2", scenario_id
+
+
+def _iter_candidates(value):
+    if isinstance(value, dict):
+        if isinstance(value.get("source_paths"), list) and "target_entity_id" in value:
+            yield value
+        for child in value.values():
+            yield from _iter_candidates(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_candidates(child)
+
+
+def test_contract_examples_are_v2():
+    examples = [json.loads(raw) for raw in _json_examples(_contract_text())]
+    versions = [ex["contract_version"] for ex in examples if "contract_version" in ex]
+    assert versions, "expected versioned worked examples"
+    assert all(version == "m3-simulation/v2" for version in versions)
+
+
+def test_contract_examples_have_no_zero_source_candidate():
+    for example in (json.loads(raw) for raw in _json_examples(_contract_text())):
+        for candidate in _iter_candidates(example):
+            assert candidate["source_paths"], "zero-source candidate in contract example"
+
+
+def test_minimal_input_example_has_generation_context():
+    example = json.loads(_json_examples(_contract_text())[0])
+    assert "generation_context" in example
+    assert example["generation_context"]["anchor_entities"] == [
+        {"entity_id": "20000000-0000-4000-8000-000000000001", "entity_version": 1}
+    ]
+
+
+def test_every_fixture_has_generation_context():
+    for scenario_id, simulation_input in SCENARIOS.items():
+        generation_context = simulation_input["generation_context"]
+        assert set(generation_context) == {"anchor_entities"}, scenario_id
+        assert isinstance(generation_context["anchor_entities"], list), scenario_id
 
 
 def test_every_fixture_has_interest_states():

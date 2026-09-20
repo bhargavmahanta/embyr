@@ -42,6 +42,10 @@ def sort_interest_states(states: list[dict]) -> list[dict]:
     return sorted(states, key=lambda item: (item["entity_id"], item["entity_version"]))
 
 
+def sort_anchor_entities(anchors: list[dict]) -> list[dict]:
+    return sorted(anchors, key=lambda item: (item["entity_id"], item["entity_version"]))
+
+
 def sort_explorations(explorations: list[dict]) -> list[dict]:
     return sorted(explorations, key=lambda item: item["exploration_id"])
 

@@ -25,6 +25,7 @@ semantic is altered.
 from __future__ import annotations
 
 from .canonical import (
+    sort_anchor_entities,
     sort_domain_ids,
     sort_entities,
     sort_explicit_preferences,
@@ -37,7 +38,7 @@ from .canonical import (
 from .semantic import EMBEDDING_MODEL, VECTOR_DIMENSION, semantic_vector
 from .timestamps import sim_time
 
-CONTRACT_VERSION = "m3-simulation/v1"
+CONTRACT_VERSION = "m3-simulation/v2"
 CONFIG_VERSION = "m3-sim-config/v1"
 UNKNOWN_PREREQUISITE_POLICY = "CONSERVATIVE_INELIGIBLE"
 INTEREST_MODEL_VERSION = "fixture-interest-state/v1"
@@ -106,24 +107,48 @@ def learner(learner_id: str) -> dict:
     return {"learner_id": learner_id, "synthetic": True}
 
 
+def entity_ref(entity_id: str, entity_version: int) -> dict:
+    return {"entity_id": entity_id, "entity_version": int(entity_version)}
+
+
+def candidate_generation_context(anchor_entities: list[dict] | tuple[dict, ...]) -> dict:
+    """Simulation query context: explicit GRAPH/SEMANTIC anchors.
+
+    Anchors are query-context declarations, never learner-state facts. They are
+    unique by ``(entity_id, entity_version)`` and canonically sorted.
+    """
+    anchors = list(anchor_entities)
+    keys = [(anchor["entity_id"], anchor["entity_version"]) for anchor in anchors]
+    if len(keys) != len(set(keys)):
+        raise ValueError("anchor_entities must be unique by (entity_id, entity_version)")
+    return {"anchor_entities": sort_anchor_entities(anchors)}
+
+
 def relationship(
     relationship_type: str,
     target_entity_id: str,
     target_entity_version: int,
     requirement: str | None = None,
+    objective_id: str | None = None,
 ) -> dict:
     if relationship_type not in RELATIONSHIP_TYPES:
         raise ValueError(f"unknown relationship_type: {relationship_type!r}")
     if relationship_type == "REQUIRES":
         if requirement not in PREREQUISITE_REQUIREMENTS:
             raise ValueError("REQUIRES relationships need a HARD or SOFT requirement")
-    elif requirement is not None:
-        raise ValueError("requirement is only valid for REQUIRES relationships")
+        if not objective_id:
+            raise ValueError("REQUIRES relationships need an objective_id")
+    else:
+        if requirement is not None:
+            raise ValueError("requirement is only valid for REQUIRES relationships")
+        if objective_id is not None:
+            raise ValueError("objective_id is only valid for REQUIRES relationships")
     return {
         "relationship_type": relationship_type,
         "target_entity_id": target_entity_id,
         "target_entity_version": target_entity_version,
         "requirement": requirement,
+        "objective_id": objective_id,
     }
 
 
@@ -313,6 +338,7 @@ def simulation_input(
     scenario_id: str,
     learner_ref: dict,
     ontology_snapshot: dict,
+    generation_context: dict,
     learner_state_snapshot: dict,
     preference_snapshot: dict,
     exploration_history: dict,
@@ -324,6 +350,7 @@ def simulation_input(
         "scenario_id": scenario_id,
         "learner": learner_ref,
         "ontology_snapshot": ontology_snapshot,
+        "generation_context": generation_context,
         "learner_state_snapshot": learner_state_snapshot,
         "preference_snapshot": preference_snapshot,
         "exploration_history": exploration_history,

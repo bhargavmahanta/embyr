@@ -41,6 +41,9 @@ one from scratch; `SCENARIO_TARGETS` exposes each scenario's named targets as
   **not** a production embedding dimension.
 - **Canonicalization** (`canonical.py`): contract §4 array ordering plus
   `canonical_json` and `input_fingerprint`.
+- **Generation context** (`generation_context.anchor_entities`): explicit
+  simulation query anchors, sorted by `(entity_id, entity_version)`; part of the
+  `SimulationInput` fingerprint.
 
 ## Learner-signal domains stay separate
 
@@ -90,8 +93,27 @@ structurally by `tests/test_fixture_offline.py`.
    separate. #45 fixture construction exposed the omission, the contract was
    amended (see the §25 erratum), and `interest_states` is now a **required**
    field of the frozen snapshot. It is the simulation analogue of the LLD §27
-   `learner_interest_state` domain. `contract_version` remains
-   `m3-simulation/v1`; only the input representation was repaired.
+   `learner_interest_state` domain. This repair is preserved in
+   `m3-simulation/v2`.
+5. **Generation context is explicit (v2).** Every `SimulationInput` carries a
+   required `generation_context.anchor_entities` list: explicit simulation query
+   context for GRAPH/SEMANTIC generation. Anchors are never derived from
+   learner-state, inferred-interest, preference, or exploration domains, are
+   unique by `(entity_id, entity_version)`, resolve in the ontology snapshot, and
+   are canonically sorted. Scenario E deliberately uses `[]`; every other
+   scenario anchors on its scenario-local `seed`.
+6. **`REQUIRES` declares its objective (v2).** A `REQUIRES` relationship carries
+   both `requirement` (HARD/SOFT) and `objective_id`, and readiness is looked up
+   by `objective_id` AND prerequisite entity identity. Frozen mapping:
+   `UNDERSTOOD`/`RETAINED` → `SATISFIED`, no matching state → `UNKNOWN`, other
+   frozen objective states → `UNSATISFIED`; no numeric threshold decides it.
+7. **Anchors are never self-nominated (v2).** GRAPH and SEMANTIC exclude the
+   anchor itself; `RELATED_TO` is the only graph-nominating relation, `REQUIRES`
+   is readiness-only, and `PART_OF`/`BUILDS_ON` are non-nominating in M3.
+8. **The v2 contract's zero-source example is repaired.** The §24.7
+   `INSUFFICIENT_STATE` candidate now carries an `EXPLICIT_INTEREST` (`MORE`)
+   source path and an UNKNOWN hard prerequisite, demonstrating that a positive
+   preference does not bypass a hard readiness constraint.
 
 ## Validation
 
@@ -103,5 +125,6 @@ python -m pytest research/recommendation/tests
 
 The suite covers id/timestamp determinism, canonical bytes and fingerprint
 stability, graph/reference integrity, frozen-vocabulary validity, semantic
-dimension and ordering, expectation coverage (A-T 20/20, IN-* union 10/10), and
-offline/no-hosted-identifier constraints.
+dimension and ordering, `m3-simulation/v2` generation-context and
+`objective_id` migration integrity, expectation coverage (A-T 20/20, IN-* union
+10/10), and offline/no-hosted-identifier constraints.
