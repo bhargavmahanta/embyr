@@ -47,7 +47,14 @@ def make_input(
     objective_states=(),
     explorations=(),
     interest_states=(),
+    challenge=None,
+    feature_weights=None,
+    rerank=None,
+    top_k=5,
 ) -> dict:
+    challenge_state = (
+        None if challenge is None else b.challenge_state(challenge[0], challenge[1])
+    )
     return b.simulation_input(
         scenario_id="scn-unit-test",
         learner_ref=b.learner(LEARNER_ID),
@@ -59,11 +66,14 @@ def make_input(
             "unit-state",
             objective_states=list(objective_states),
             interest_states=list(interest_states),
+            challenge_state=challenge_state,
         ),
         preference_snapshot=b.preference_snapshot("unit-prefs", list(preferences)),
         exploration_history=b.exploration_history("unit-hist", list(explorations)),
         semantic_space=b.semantic_space("unit-sem", list(vectors)),
-        simulation_config=b.simulation_config(top_k=5),
+        simulation_config=b.simulation_config(
+            top_k=top_k, feature_weights=feature_weights, rerank=rerank
+        ),
     )
 
 
