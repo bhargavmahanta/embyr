@@ -24,6 +24,8 @@ semantic is altered.
 
 from __future__ import annotations
 
+import math
+
 from .canonical import (
     sort_anchor_entities,
     sort_domain_ids,
@@ -38,7 +40,7 @@ from .canonical import (
 from .semantic import EMBEDDING_MODEL, VECTOR_DIMENSION, semantic_vector
 from .timestamps import sim_time
 
-CONTRACT_VERSION = "m3-simulation/v2"
+CONTRACT_VERSION = "m3-simulation/v3"
 CONFIG_VERSION = "m3-sim-config/v1"
 UNKNOWN_PREREQUISITE_POLICY = "CONSERVATIVE_INELIGIBLE"
 INTEREST_MODEL_VERSION = "fixture-interest-state/v1"
@@ -89,6 +91,7 @@ EXPLANATION_CODES = (
     "DIVERSITY_ADJUSTMENT",
     "EXPLICIT_PREFERENCE_OVERRIDES_INFERRED",
 )
+#: v3 scoring features (§11.1). Exactly these eight, in canonical order.
 FEATURES = (
     "readiness",
     "difficulty_fit",
@@ -98,9 +101,21 @@ FEATURES = (
     "semantic_similarity",
     "continuation_value",
     "revisit_value",
-    "novelty",
-    "diversity_context",
 )
+
+#: Aliases used by the v3 scoring contract.
+SCORING_FEATURES = FEATURES
+#: Deferred beyond M3 v3; not a scoring feature.
+DEFERRED_FEATURES = ("novelty",)
+#: Trace-only; not a scoring feature or weight key.
+TRACE_ONLY_FEATURES = ("diversity_context",)
+
+#: Frozen rerank strategy vocabulary (§13.1).
+RERANK_STRATEGIES = ("DOMAIN_COVERAGE",)
+#: #47-owned ScoreTrace reason codes (§11.3).
+SCORING_REASON_CODES = ("EXPLICIT_INFERRED_CONFLICT_SUPPRESSED",)
+#: #47-owned RerankTrace reason codes (§13.3).
+DIVERSITY_REASON_CODES = ("DOMAIN_COVERAGE_ADJUSTMENT",)
 
 
 def learner(learner_id: str) -> dict:
@@ -332,6 +347,24 @@ def semantic_space(snapshot_version: str, vectors: list[dict]) -> dict:
     }
 
 
+def rerank_config(strategy: str = "DOMAIN_COVERAGE", *, diversity_weight: float) -> dict:
+    """Build a v3 RerankConfig (frozen DOMAIN_COVERAGE strategy, §13.1)."""
+    if strategy not in RERANK_STRATEGIES:
+        raise ValueError(f"unknown rerank strategy: {strategy!r}")
+    if not math.isfinite(diversity_weight) or diversity_weight < 0:
+        raise ValueError("diversity_weight must be finite and >= 0")
+    return {"strategy": strategy, "diversity_weight": float(diversity_weight)}
+
+
+def validate_feature_weights(feature_weights: dict[str, float]) -> dict:
+    for key, value in feature_weights.items():
+        if key not in FEATURES:
+            raise ValueError(f"unknown feature weight key: {key!r}")
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"feature weight {key!r} must be finite and >= 0")
+    return {key: float(value) for key, value in feature_weights.items()}
+
+
 def simulation_config(
     *,
     top_k: int = 5,
@@ -342,10 +375,21 @@ def simulation_config(
 ) -> dict:
     if unknown_prerequisite_policy != UNKNOWN_PREREQUISITE_POLICY:
         raise ValueError("unknown_prerequisite_policy is frozen to CONSERVATIVE_INELIGIBLE")
+    if rerank is not None:
+        if rerank.get("strategy") not in RERANK_STRATEGIES:
+            raise ValueError(f"unknown rerank strategy: {rerank.get('strategy')!r}")
+        diversity_weight = rerank.get("diversity_weight")
+        if (
+            not isinstance(diversity_weight, (int, float))
+            or isinstance(diversity_weight, bool)
+            or not math.isfinite(diversity_weight)
+            or diversity_weight < 0
+        ):
+            raise ValueError("rerank.diversity_weight must be finite and >= 0")
     return {
         "config_version": config_version,
         "top_k": int(top_k),
-        "feature_weights": dict(feature_weights or {}),
+        "feature_weights": validate_feature_weights(dict(feature_weights or {})),
         "rerank": rerank,
         "unknown_prerequisite_policy": unknown_prerequisite_policy,
     }

@@ -64,6 +64,8 @@ class _Builder:
         self._explorations: list[dict] = []
         self._anchors: list[dict] = []
         self._challenge: dict | None = None
+        self._feature_weights: dict[str, float] = {}
+        self._rerank: dict | None = None
         self._objective_counter = 0
         self._exploration_counter = 0
         self.targets: dict[str, dict] = {}
@@ -218,6 +220,14 @@ class _Builder:
     def challenge(self, area_id: str, ability: float) -> None:
         self._challenge = b.challenge_state(area_id, ability)
 
+    # -- v3 scoring / rerank configuration ----------------------------------
+    def feature_weights(self, **weights: float) -> None:
+        """Configure only the feature weights this scenario exercises (§32)."""
+        self._feature_weights = b.validate_feature_weights(dict(weights))
+
+    def rerank(self, *, diversity_weight: float, strategy: str = "DOMAIN_COVERAGE") -> None:
+        self._rerank = b.rerank_config(strategy, diversity_weight=diversity_weight)
+
     def vector(self, entity_id: str, vector: str | list[float]) -> None:
         resolved = named_vector(vector) if isinstance(vector, str) else list(vector)
         self._vectors.append(b.semantic_vector(entity_id, 1, resolved))
@@ -268,7 +278,11 @@ class _Builder:
             semantic_space=b.semantic_space(
                 f"{self.scenario_id}-semantic", self._vectors
             ),
-            simulation_config=b.simulation_config(top_k=top_k),
+            simulation_config=b.simulation_config(
+                top_k=top_k,
+                feature_weights=self._feature_weights,
+                rerank=self._rerank,
+            ),
         )
 
 
@@ -293,6 +307,7 @@ def _scenario_a() -> _Builder:
     s.preference(control, "NEUTRAL")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(explicit_interest=1.0)
     return s
 
 
@@ -312,6 +327,7 @@ def _scenario_b() -> _Builder:
     s.preference(control, "NEUTRAL")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(explicit_interest=1.0)
     return s
 
 
@@ -368,6 +384,7 @@ def _scenario_e() -> _Builder:
     s.preference(more_target, "MORE")
     s.preference(less_target, "LESS")
     s.challenge(domain, 0.5)
+    s.feature_weights(explicit_interest=1.0, inferred_interest=1.0)
     return s
 
 
@@ -400,7 +417,9 @@ def _scenario_f() -> _Builder:
 
 
 def _scenario_g() -> _Builder:
-    return _prerequisite_scenario("scn-G-prereq-satisfied-001", "UNDERSTOOD", 0.9)
+    s = _prerequisite_scenario("scn-G-prereq-satisfied-001", "UNDERSTOOD", 0.9)
+    s.feature_weights(readiness=1.0)
+    return s
 
 
 def _scenario_h() -> _Builder:
@@ -422,6 +441,7 @@ def _difficulty_scenario(scenario_id: str) -> _Builder:
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(difficulty_fit=1.0)
     return s
 
 
@@ -450,6 +470,7 @@ def _scenario_l() -> _Builder:
     s.vector(far, "far")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(semantic_similarity=1.0)
     return s
 
 
@@ -467,6 +488,7 @@ def _scenario_m() -> _Builder:
     s.vector(seed, "seed")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(graph_proximity=1.0)
     return s
 
 
@@ -485,6 +507,7 @@ def _scenario_n() -> _Builder:
     s.exploration(seed, "ACTIVE", "DIRECT_INTEREST", start=0)
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(continuation_value=1.0)
     return s
 
 
@@ -501,6 +524,7 @@ def _scenario_o() -> _Builder:
     s.exploration(target, "COMPLETED", "DIRECT_INTEREST", start=0, returned=30, completed=60)
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.feature_weights(revisit_value=1.0)
     return s
 
 
@@ -520,6 +544,8 @@ def _scenario_p() -> _Builder:
     s.vector(spread, "mid")
     s.anchor_seed()
     s.challenge(domain_a, 0.5)
+    s.feature_weights(semantic_similarity=1.0)
+    s.rerank(diversity_weight=1.0)
     return s
 
 
@@ -665,6 +691,7 @@ def _scenario_x4() -> _Builder:
     s.vector(ineligible, "near")
     s.anchor_seed()
     s.challenge(domain, 0.5)
+    s.rerank(diversity_weight=1.0)
     return s
 
 
@@ -684,6 +711,8 @@ def _scenario_x5() -> _Builder:
     s.vector(spread, "mid")
     s.anchor_seed()
     s.challenge(domain_a, 0.5)
+    s.feature_weights(semantic_similarity=1.0)
+    s.rerank(diversity_weight=1.0)
     return s
 
 

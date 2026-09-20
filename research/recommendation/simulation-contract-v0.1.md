@@ -7,7 +7,7 @@ evaluation rubric that M3 recommendation-simulation work builds against. It is a
 simulation-only contract and does not describe, extend, or modify production
 recommendation persistence.
 
-`contract_version = "m3-simulation/v2"`
+`contract_version = "m3-simulation/v3"`
 
 Changes to this contract after Issue #44 require evidence from implementation,
 security, performance, cost, or product constraints.
@@ -141,7 +141,7 @@ must never require real Auth users or hosted identifiers.
 
 ```text
 SimulationInput
-- contract_version            string        # "m3-simulation/v2"
+- contract_version            string        # "m3-simulation/v3"
 - scenario_id                 string
 - learner                     LearnerRef
 - ontology_snapshot           OntologySnapshot
@@ -162,14 +162,25 @@ LearnerRef
 ```text
 SimulationConfig
 - config_version              string
-- top_k                       integer       # final recommendation count target
-- feature_weights             map<string, number>   # optional; simulation-only
-- rerank                      RerankConfig          # optional; algorithm-neutral
+- top_k                       integer       # final recommendation count target; applied by #49
+- feature_weights             map<string, number>   # optional; simulation-only; recognized keys are the eight scoring features (§11.1)
+- rerank                      RerankConfig|null     # optional; algorithm-neutral (§13.1)
 - unknown_prerequisite_policy string                # MUST be "CONSERVATIVE_INELIGIBLE"
 ```
 
 `feature_weights` values are simulation configuration. They are never learner
 truth and are never presented as a learner attribute.
+
+`feature_weights` rules (frozen for v3):
+
+- the mapping may be empty;
+- recognized keys are exactly the eight scoring features in §11.1; any other key
+  is a structural input validation failure;
+- a missing feature key means weight `0.0`;
+- every weight must be finite (`-inf`, `inf`, `NaN` are invalid) and `>= 0.0`;
+- weights are not required to sum to `1.0`;
+- there is no module-private or global default recommendation profile. `{}` plus
+  the `0.0` default is the only implicit behavior.
 
 ```text
 CandidateGenerationContext
@@ -255,16 +266,16 @@ ExplorationRecord
 
 ```text
 RerankConfig
-- strategy                    string        # named deterministic strategy; MMR not required
-- parameters                  map<string, number>   # optional; simulation-only
-- top_k                       integer|null
+- strategy                    string        # frozen vocabulary: "DOMAIN_COVERAGE"
+- diversity_weight            number        # required; finite and >= 0.0
 ```
 
 These referenced types are frozen for M3. Their fields are required unless
 marked optional, their enum values reuse the frozen API and LLD vocabularies,
 and their arrays follow the canonical ordering in §4. `RerankConfig.strategy`
-names a deterministic strategy; it does not freeze MMR or any specific
-algorithm.
+selects one v3 deterministic strategy (`DOMAIN_COVERAGE`, §13.1); MMR is
+deliberately not used in v3. `SimulationConfig.rerank == null` means reranking
+is a strict no-op (§13.2).
 
 `LearnerStateSnapshot.interest_states` is the simulation analogue of the LLD §27
 `learner_interest_state` domain: derived/inferred learner-interest state. It
@@ -648,7 +659,9 @@ hard readiness constraint (§8.1).
 Scoring is interpretable and operates only on eligible candidates. Features are
 named and inspectable.
 
-Feature vocabulary (a candidate need not have every feature):
+### 11.1 Frozen scoring features and additive aggregation
+
+The v3 scoring features are exactly these eight, and no others:
 
 ```text
 readiness
@@ -659,18 +672,163 @@ graph_proximity
 semantic_similarity
 continuation_value
 revisit_value
-novelty
-diversity_context
 ```
+
+`novelty` is **deferred beyond M3 v3** and MUST NOT be part of pre-rerank
+scoring. `diversity_context` is **trace-only** and MUST NOT be a scoring feature,
+a `feature_weights` key, or a `pre_rerank_score` term; diversity is represented
+by `RerankTrace.diversity_adjustment` (§13). A candidate's `feature_values` may
+omit a feature only when its raw signal is absent; the eight features remain the
+complete scoring vocabulary.
+
+Aggregation is frozen and exactly recomputable:
+
+```text
+component_scores[feature] = configured_weights[feature] * effective_feature_value[feature]
+pre_rerank_score          = SUM(component_scores[feature]) for the eight features
+```
+
+`effective_feature_value[feature]` equals `feature_values[feature]` for every
+feature except `inferred_interest` under explicit/inferred conflict (§11.3).
+
+### 11.2 Frozen feature computations
+
+All numeric inputs and outputs are finite real numbers. No feature may be
+computed from wall-clock time, randomness, network, or an external model.
+
+Readiness (candidate-level, derived from §7 `PrerequisiteEvaluation[]`):
+
+```text
+if prerequisite_evaluations == []:
+    readiness = 0.0
+else:
+    readiness = count(state == SATISFIED) / count(prerequisite_evaluations)
+```
+
+This counts HARD and SOFT evaluations. #46 eligibility remains authoritative: an
+eligible candidate has no UNSATISFIED/UNKNOWN HARD prerequisite, but MAY have
+SOFT UNSATISFIED/UNKNOWN prerequisites, which lower `readiness` without
+excluding. No mastery probability, universal learner score, or numeric
+understanding threshold is introduced.
+
+Explicit interest (raw feature value from the explicit preference):
+
+```text
+MORE             -> +1.0
+NEUTRAL          ->  0.0
+no preference    ->  0.0
+LESS             -> -1.0
+```
+
+`PAUSED` and `NOT_INTERESTED` are already hard-excluded by #46 and never reach
+scoring. Encountering either on an eligible candidate is an invariant violation,
+not a scoring value.
+
+Inferred interest (raw feature value), using only `recent_affinity` and
+`long_term_affinity` from the matching `LearnerInterestStateSnapshot`:
+
+```text
+inferred_interest = (recent_affinity + long_term_affinity) / 2.0
+no matching interest state -> 0.0
+```
+
+`recent_affinity` and `long_term_affinity` are constrained to `[-1.0, 1.0]` in
+v3. `user_initiated_strength`, `algorithm_exposure_strength`, and
+`voluntary_revisit_count` remain learner-state context for future models; they
+MUST NOT enter the v3 scoring formula and MUST NOT be removed.
+
+Graph proximity (candidate-level, from GRAPH source paths):
+
+```text
+path_proximity   = 1.0 / hop_distance          # hop_distance must be >= 1
+graph_proximity  = max(path_proximity over all GRAPH source paths)
+no GRAPH path    -> 0.0
+```
+
+`canonical_path` is validated against `hop_distance` but is not scored
+separately.
+
+Semantic similarity (candidate-level, from SEMANTIC source paths):
+
+```text
+semantic_similarity = max(cosine_similarity over all SEMANTIC source paths)
+no SEMANTIC path    -> 0.0
+```
+
+The raw cosine scale `[-1.0, 1.0]` is preserved. Negatives MUST NOT be clamped,
+the value MUST NOT be rescaled to `[0, 1]`, and multiple anchors MUST NOT be
+averaged.
+
+Continuation value (from HISTORY_CONTINUATION source paths):
+
+```text
+continuation_value = 1.0 if at least one HISTORY_CONTINUATION source path exists else 0.0
+```
+
+Path counts, recency, `learning_intent`, and timestamps MUST NOT be used for v3
+scoring; they remain provenance.
+
+Revisit value (from REVISIT source paths):
+
+```text
+revisit_value = 1.0 if at least one REVISIT source path exists else 0.0
+```
+
+`completed_at`, elapsed time, retention decay, objective state, and revisit count
+MUST NOT be used for v3 scoring. There is no universal revisit-wins rule; its
+importance is controlled only by `configured_weights.revisit_value`.
+
+`difficulty_fit` is frozen in §12.
+
+### 11.3 Explicit-over-inferred conflict and effective inferred value
+
+Raw features are always preserved in `feature_values`. A conflict exists iff:
+
+```text
+explicit_interest > 0 and inferred_interest < 0
+OR
+explicit_interest < 0 and inferred_interest > 0
+```
+
+When a conflict exists, the effective inferred contribution value is `0.0`
+while `feature_values.inferred_interest` remains the raw value:
+
+```text
+effective_feature_value[inferred_interest] = 0.0
+component_scores[inferred_interest]         = configured_weights[inferred_interest] * 0.0
+```
+
+The explicit contribution is unchanged. When signs align, both may contribute.
+When `explicit_interest == 0.0`, `inferred_interest` remains active. This is the
+frozen operational meaning of "explicit preference overrides inferred preference
+when they conflict" (§10); no weight-dominance semantics are used.
+
+When a conflict is suppressed, `ScoreTrace.reason_codes` contains exactly
+`EXPLICIT_INFERRED_CONFLICT_SUPPRESSED`; otherwise that code is absent. This
+machine reason code is #47-owned and MUST NOT be replaced by the §15 explanation
+vocabulary; #48 may later translate it to
+`EXPLICIT_PREFERENCE_OVERRIDES_INFERRED`.
+
+### 11.4 ScoreTrace
 
 ```text
 ScoreTrace
-- feature_values              map<string, number>   # computed, inspectable
-- configured_weights          map<string, number>   # simulation config; omit if unweighted
-- component_scores            map<string, number>   # named contributions
+- feature_values              map<string, number>   # computed raw, inspectable; eight features
+- configured_weights          map<string, number>   # effective eight-feature weights, including 0.0 for omitted keys
+- component_scores            map<string, number>   # all eight contributions
 - pre_rerank_score            number
-- reason_codes                string[]              # trace-level, machine-readable
+- reason_codes                string[]              # #47 machine codes; canonical order
 ```
+
+`configured_weights` exposes the effective weight mapping for all eight features
+(`0.0` for omitted keys). `component_scores` exposes all eight contributions so
+that `pre_rerank_score` is exactly recomputable.
+
+The #47 `ScoreTrace.reason_codes` vocabulary is frozen and disjoint from the §15
+explanation vocabulary. In v3 the only score reason code is
+`EXPLICIT_INFERRED_CONFLICT_SUPPRESSED` (§11.3). No other scoring reason code may
+be emitted without contract evidence. Canonical ordering for `reason_codes` is
+ascending lexicographic order of the frozen code strings.
 
 Frozen bounds:
 
@@ -687,34 +845,108 @@ Frozen bounds:
   state for the relevant area/domain.
 - Higher values mean a better fit; both too-low and too-high relative difficulty
   reduce the contribution.
-- The exact numeric mapping and any weights are simulation configuration and are
-  unfrozen here.
 - Scenarios must be able to exercise "too low", "appropriate", and "too high"
   difficulty fit (§21, categories I, J, K).
 
+Frozen for v3:
+
+```text
+ChallengeStateSnapshot.ability_estimate  in [0.0, 1.0]
+EntitySnapshot.difficulty_prior          in [0.0, 1.0]
+
+difficulty_fit = 1.0 - abs(difficulty_prior - ability_estimate)     -> [0.0, 1.0]
+missing difficulty_prior  -> 0.0
+missing challenge state   -> 0.0    # no inferred ability value
+```
+
+The ability estimate is taken from the candidate's relevant area/domain challenge
+state. A challenge value is never inferred. This mapping is simulation-only and
+does not describe a production learner model. Its importance is controlled only
+by `configured_weights.difficulty_fit`.
+
 ## 13. Diversity / Rerank Contract
 
-Reranking is algorithm-neutral. MMR is not required.
+Reranking only reorders eligible, scored candidates. It must never override
+eligibility or prerequisite hard constraints, and it never creates or removes a
+candidate. Diversity may move a slightly lower-scoring eligible candidate above a
+redundant higher-scoring eligible candidate.
 
-- Diversity may move a slightly lower-scoring eligible candidate above a
-  redundant higher-scoring eligible candidate.
-- Diversity must never override eligibility or prerequisite hard constraints.
-- Reranking only reorders eligible, scored candidates.
+### 13.1 Frozen v3 strategy: DOMAIN_COVERAGE
+
+v3 freezes exactly one diversity strategy, `DOMAIN_COVERAGE`. MMR, pairwise
+semantic penalties, iterative greedy state, and any diversity lambda are NOT used
+in v3. `RerankConfig.strategy` MUST equal `"DOMAIN_COVERAGE"` and
+`RerankConfig.diversity_weight` is a required finite number `>= 0.0`. There is no
+hidden default diversity weight.
+
+Domain-coverage signal, computed over the **full eligible candidate set**:
+
+```text
+frequency(d)        = number of eligible candidates whose ontology domain_ids contain d
+domain_rarity(c)    = 0.0 if c.domain_ids is empty
+                      else mean(1.0 / frequency(d) for d in c.domain_ids)
+minimum_rarity      = min(domain_rarity(c) over all eligible candidates)
+diversity_signal(c) = domain_rarity(c) - minimum_rarity
+```
+
+Consequences: equally represented candidates receive equal signal; when every
+candidate has equally rare domains every signal is `0.0`; an
+underrepresented-domain candidate may receive a positive signal. Ineligible
+candidates are never part of the frequency population.
+
+Diversity adjustment (normative arithmetic for `DOMAIN_COVERAGE`):
+
+```text
+diversity_adjustment(c) = RerankConfig.diversity_weight * diversity_signal(c)
+ordering_score(c)       = pre_rerank_score(c) + diversity_adjustment(c)
+```
+
+### 13.2 Null rerank
+
+If `SimulationConfig.rerank == null`, reranking is a strict no-op:
+
+```text
+diversity_adjustment = 0.0
+ordering_score       = pre_rerank_score
+post_rerank_rank     = pre_rerank_rank
+```
+
+No diversity reason code is emitted.
+
+### 13.3 RerankTrace
 
 ```text
 RerankTrace
 - pre_rerank_rank             integer
 - pre_rerank_score            number
-- diversity_dimensions        object        # e.g. topic/domain/source spread
+- diversity_dimensions        object        # DOMAIN_COVERAGE domain trace
 - diversity_adjustment        number
 - post_rerank_rank            integer
 - reason_codes                string[]
 ```
 
-Tie-breaking is deterministic. The output schema must accommodate a future
-MMR-like or category-spread implementation without change. Revisit and new
-exploration are named signals (`revisit_value`, `continuation_value`); the
-contract does not freeze a universal revisit-wins rule.
+For `DOMAIN_COVERAGE`, `diversity_dimensions` MUST expose the smallest
+domain-based trace sufficient to reconstruct the adjustment:
+
+```text
+diversity_dimensions
+- domain_ids              string[]              # candidate's ontology domain_ids, canonical order
+- domain_rarity           number                # candidate-level rarity
+- minimum_rarity          number                # eligible-set minimum
+- diversity_signal        number                # domain_rarity - minimum_rarity
+```
+
+No unrelated dimensions are added. When `diversity_adjustment > 0.0`,
+`reason_codes` contains `DOMAIN_COVERAGE_ADJUSTMENT`; when
+`diversity_adjustment == 0.0` no diversity reason code is required. This machine
+reason code is #47-owned and disjoint from the §15 explanation vocabulary.
+
+`diversity_dimensions` uses canonical key ordering (§4). `reason_codes` canonical
+order is ascending lexicographic order of the frozen code strings.
+
+Tie-breaking is deterministic and frozen in §14. Revisit and new exploration are
+named signals (`revisit_value`, `continuation_value`); the contract does not
+freeze a universal revisit-wins rule.
 
 ## 14. Final Recommendation Contract
 
@@ -738,24 +970,51 @@ Frozen rules:
   learner rating, and it is never exposed as a user-visible learner attribute.
 - `deterministic_tiebreak_key` is the canonical string
   `"{target_entity_type}:{target_entity_id}:{target_entity_version}"`.
-- Ordering: `ordering_score` descending, then `deterministic_tiebreak_key`
-  ascending.
+- Pre-rerank ordering is `pre_rerank_score` descending, then
+  `deterministic_tiebreak_key` ascending; `pre_rerank_rank` is 1-based, unique,
+  and contiguous.
+- Final ordering is `ordering_score` descending, then
+  `deterministic_tiebreak_key` ascending; `post_rerank_rank` is 1-based, unique,
+  and contiguous; `final_rank == post_rerank_rank`, so `final_rank` is also
+  1-based, unique, and contiguous.
+- Only resolved eligible candidates are ranked, so `target_entity_type` is
+  non-null and `candidate_id` is never used as the tiebreak key.
+- `readiness_summary` is produced by #47 scoring from #46
+  `PrerequisiteEvaluation[]` and consumed by #48; #48 MUST NOT recompute
+  readiness from raw learner state.
+- #47 ranks the ENTIRE eligible candidate set and does not apply `top_k`.
+  `SimulationConfig.top_k` is applied by #49 when producing the final
+  `SimulationResult`/selection; `final_rank` is relative to the entire eligible
+  set.
 - An empty final recommendation set is a valid result (§19, invariant IN-10).
 
-Trace score definitions (frozen normalized representation):
+Trace score definitions (frozen):
 
 ```text
-pre_rerank_score       score before diversity reranking
-diversity_adjustment   signed scalar delta applied by the reranking trace representation
+pre_rerank_score       weighted additive score before diversity reranking (§11.1)
+diversity_adjustment   RerankConfig.diversity_weight * diversity_signal (§13.1)
 ordering_score         pre_rerank_score + diversity_adjustment
 ```
 
-This is a normalized trace representation, not a requirement that the internal
-reranking algorithm itself be additive. A reranker may use MMR-like,
-category-spread, or another deterministic method; its final scalar ordering
-effect is normalized as `diversity_adjustment = ordering_score -
-pre_rerank_score`, preserving algorithm-neutrality while keeping the trace
-arithmetically self-consistent.
+For v3 `DOMAIN_COVERAGE` this arithmetic is normative, not merely a trace
+representation. `ordering_score` remains internal only and is never a
+user-visible learner attribute.
+
+### 14.1 #47 public ranking API
+
+The smallest frozen public API boundary for #47 is:
+
+```text
+rank_candidates(simulation_input, candidates) -> list[dict]
+```
+
+Semantics: `candidates` may contain ELIGIBLE and INELIGIBLE candidates; #47
+filters to `eligibility_state == ELIGIBLE`, never scores or ranks an ineligible
+candidate, returns the FULL ranked eligible list, does not mutate the input
+candidates, and does not return excluded candidates. #49 later combines the
+original `Candidate[]`, the ranked eligible list, the `top_k` selection, and
+metrics. Internal helpers (feature extraction, per-candidate scoring, rerank) are
+implementation details and are not separately frozen.
 
 ## 15. Explanation Contract
 
@@ -941,7 +1200,7 @@ frozen. Fixtures are **not** built in this issue; they are implemented by #45.
 | M | Graph-neighbor candidate | graph nomination | graph_proximity, source_paths | IN-1, IN-5, IN-8; eligible with GRAPH source |
 | N | Continuation candidate | history continuation | continuation_value | IN-1, IN-5; eligible |
 | O | Revisit candidate | revisit signal | revisit_value | IN-1, IN-5; eligible |
-| P | Diversity pressure | rerank | diversity_context, rerank_trace | IN-1, IN-2; rerank of eligible only |
+| P | Diversity pressure | rerank | diversity_dimensions, rerank_trace | IN-1, IN-2; rerank of eligible only |
 | Q | Deterministic tie | tie-breaking | ordering_score, tiebreak key | IN-1, IN-7; stable deterministic order |
 | R | Duplicate candidate from multiple sources | normalization | source_paths, candidate_id | IN-1, IN-8; one candidate, merged sources |
 | S | Sparse learner history | insufficient evidence | eligibility, exclusions, metrics | IN-1, IN-6, IN-10; missing evidence handled deterministically |
@@ -985,7 +1244,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v2",
+  "contract_version": "m3-simulation/v3",
   "scenario_id": "scn-minimal-001",
   "learner": {
     "learner_id": "10000000-0000-4000-8000-000000000001",
@@ -1054,7 +1313,17 @@ Identifiers below are fixed synthetic UUIDs.
   "simulation_config": {
     "config_version": "m3-sim-config/v1",
     "top_k": 5,
-    "feature_weights": {},
+    "feature_weights": {
+      "readiness": 1.0,
+      "difficulty_fit": 1.0,
+      "explicit_interest": 2.0,
+      "inferred_interest": 1.0,
+      "graph_proximity": 0.5,
+      "semantic_similarity": 1.0,
+      "continuation_value": 1.0,
+      "revisit_value": 1.0
+    },
+    "rerank": {"strategy": "DOMAIN_COVERAGE", "diversity_weight": 1.0},
     "unknown_prerequisite_policy": "CONSERVATIVE_INELIGIBLE"
   }
 }
@@ -1171,7 +1440,7 @@ Identifiers below are fixed synthetic UUIDs.
   "target_entity_id": "20000000-0000-4000-8000-000000000001",
   "target_entity_version": 1,
   "final_rank": 1,
-  "ordering_score": 5.36,
+  "ordering_score": 5.16,
   "candidate_sources": ["GRAPH", "SEMANTIC"],
   "readiness_summary": {
     "hard_prerequisites_total": 1,
@@ -1186,8 +1455,8 @@ Identifiers below are fixed synthetic UUIDs.
       "inferred_interest": 0.3,
       "graph_proximity": 0.5,
       "semantic_similarity": 0.81,
-      "novelty": 0.4,
-      "diversity_context": 0.0
+      "continuation_value": 0.0,
+      "revisit_value": 0.0
     },
     "configured_weights": {
       "readiness": 1.0,
@@ -1196,7 +1465,8 @@ Identifiers below are fixed synthetic UUIDs.
       "inferred_interest": 1.0,
       "graph_proximity": 0.5,
       "semantic_similarity": 1.0,
-      "novelty": 0.5
+      "continuation_value": 1.0,
+      "revisit_value": 1.0
     },
     "component_scores": {
       "readiness": 1.0,
@@ -1205,15 +1475,21 @@ Identifiers below are fixed synthetic UUIDs.
       "inferred_interest": 0.3,
       "graph_proximity": 0.25,
       "semantic_similarity": 0.81,
-      "novelty": 0.2
+      "continuation_value": 0.0,
+      "revisit_value": 0.0
     },
-    "pre_rerank_score": 5.36,
+    "pre_rerank_score": 5.16,
     "reason_codes": []
   },
   "rerank_trace": {
     "pre_rerank_rank": 1,
-    "pre_rerank_score": 5.36,
-    "diversity_dimensions": {"primary_domain": "30000000-0000-4000-8000-000000000001"},
+    "pre_rerank_score": 5.16,
+    "diversity_dimensions": {
+      "domain_ids": ["30000000-0000-4000-8000-000000000001"],
+      "domain_rarity": 1.0,
+      "minimum_rarity": 1.0,
+      "diversity_signal": 0.0
+    },
     "diversity_adjustment": 0.0,
     "post_rerank_rank": 1,
     "reason_codes": []
@@ -1232,7 +1508,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v2",
+  "contract_version": "m3-simulation/v3",
   "scenario_id": "scn-explicit-more-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
@@ -1270,7 +1546,7 @@ Identifiers below are fixed synthetic UUIDs.
       "target_entity_id": "20000000-0000-4000-8000-000000000001",
       "target_entity_version": 1,
       "final_rank": 1,
-      "ordering_score": 5.36,
+      "ordering_score": 5.16,
       "candidate_sources": ["GRAPH", "SEMANTIC"],
       "readiness_summary": {
         "hard_prerequisites_total": 1,
@@ -1285,8 +1561,8 @@ Identifiers below are fixed synthetic UUIDs.
           "inferred_interest": 0.3,
           "graph_proximity": 0.5,
           "semantic_similarity": 0.81,
-          "novelty": 0.4,
-          "diversity_context": 0.0
+          "continuation_value": 0.0,
+          "revisit_value": 0.0
         },
         "configured_weights": {
           "readiness": 1.0,
@@ -1295,7 +1571,8 @@ Identifiers below are fixed synthetic UUIDs.
           "inferred_interest": 1.0,
           "graph_proximity": 0.5,
           "semantic_similarity": 1.0,
-          "novelty": 0.5
+          "continuation_value": 1.0,
+          "revisit_value": 1.0
         },
         "component_scores": {
           "readiness": 1.0,
@@ -1304,15 +1581,21 @@ Identifiers below are fixed synthetic UUIDs.
           "inferred_interest": 0.3,
           "graph_proximity": 0.25,
           "semantic_similarity": 0.81,
-          "novelty": 0.2
+          "continuation_value": 0.0,
+          "revisit_value": 0.0
         },
-        "pre_rerank_score": 5.36,
+        "pre_rerank_score": 5.16,
         "reason_codes": []
       },
       "rerank_trace": {
         "pre_rerank_rank": 1,
-        "pre_rerank_score": 5.36,
-        "diversity_dimensions": {"primary_domain": "30000000-0000-4000-8000-000000000001"},
+        "pre_rerank_score": 5.16,
+        "diversity_dimensions": {
+          "domain_ids": ["30000000-0000-4000-8000-000000000001"],
+          "domain_rarity": 1.0,
+          "minimum_rarity": 1.0,
+          "diversity_signal": 0.0
+        },
         "diversity_adjustment": 0.0,
         "post_rerank_rank": 1,
         "reason_codes": []
@@ -1368,7 +1651,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
 
 ```json
 {
-  "contract_version": "m3-simulation/v2",
+  "contract_version": "m3-simulation/v3",
   "scenario_id": "scn-no-eligible-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
@@ -1484,10 +1767,10 @@ The following are frozen by Issue #44:
   UNKNOWN policy, hard-filter vs soft-feature (§7).
 - **Explicit preference semantics** — five values, entity-scoped, override on
   conflict, separation from inferred interest (§10).
-- **Scoring trace** — named features, `ScoreTrace`, weights as configuration
-  (§11, §12).
-- **Diversity/rerank trace** — algorithm-neutral `RerankTrace`, deterministic
-  tie-breaking, MMR not required (§13).
+- **Scoring trace** — eight named features, frozen additive aggregation,
+  `ScoreTrace`, explicit per-scenario `feature_weights` (§11, §12).
+- **Diversity/rerank trace** — frozen `DOMAIN_COVERAGE` strategy,
+  `diversity_weight`, `RerankTrace`, deterministic tie-breaking (§13).
 - **RecommendationResult** — internal `ordering_score`, full trace,
   deterministic tiebreak key (§14).
 - **Explanation codes** — machine-readable; template rendering optional (§15).
@@ -1505,12 +1788,56 @@ The following are frozen by Issue #44:
   ordering, no wall-clock, offline (§4).
 - **Non-goals** — what M3 does not prove (§22) and the privacy boundary (§23).
 
-Deliberately **not** frozen here and deferred to evaluation in later M3 issues:
-numeric weights, embedding provider, embedding dimension, ANN strategy, the
-diversity algorithm, and any revisit-vs-exploration weighting. Production
+Deliberately **not** frozen here: production numeric weights (v3 weights are
+per-scenario simulation configuration only), the embedding provider, embedding
+dimension, ANN strategy, and any revisit-vs-exploration weighting. Production
 semantic-retrieval limits (thresholds, top-K, ANN) and production graph-traversal
 bounds also remain unfrozen; M3 simulation uses exhaustive deterministic
-retrieval over the scenario fixture space only.
+retrieval over the scenario fixture space only. `novelty`, `diversity_context`
+as a scoring feature, and any MMR-like or non-domain diversity algorithm are
+deferred beyond M3 v3.
+
+### Erratum — Issue #47 scoring and diversity freeze (v2 → v3)
+
+Issue #47 introduces newly frozen executable scoring and reranking semantics that
+did not exist at v2, so the contract version is bumped to `m3-simulation/v3`. v2
+is already merged and consumed by the #46 candidate engine; this is not a v2
+erratum but an additive semantic freeze on top of v2's candidate contract.
+
+Changes from v2 to v3:
+
+1. Fixes the eight scoring features and their computations: readiness
+   proportion, `1 - abs(difficulty_prior - ability_estimate)`, explicit
+   `MORE/+1.0`, `NEUTRAL/0.0`, `LESS/-1.0`, inferred
+   `(recent_affinity + long_term_affinity) / 2`, `max(1/hop_distance)` graph
+   proximity, `max(raw cosine)` semantic similarity, and binary
+   continuation/revisit values (§11.1, §11.2, §12).
+2. Freezes additive aggregation:
+   `component_scores[f] = configured_weights[f] * effective_feature_value[f]`
+   and `pre_rerank_score = SUM(component_scores[f])` (§11.1).
+3. Freezes explicit-over-inferred conflict as suppression of the conflicting
+   inferred contribution while preserving the raw feature and emitting the
+   #47-owned machine reason code `EXPLICIT_INFERRED_CONFLICT_SUPPRESSED`
+   (§11.3).
+4. Replaces `RerankConfig.parameters` with an explicit `diversity_weight` and
+   freezes the single v3 strategy `DOMAIN_COVERAGE` with a normative
+   domain-coverage adjustment and `DOMAIN_COVERAGE_ADJUSTMENT` machine reason
+   code; `rerank: null` is a strict no-op (§13).
+5. Removes `novelty` and `diversity_context` from the scoring vocabulary:
+   `novelty` is deferred, `diversity_context` is trace-only (§11.1).
+6. Freezes pre-rerank and post-rerank ordering, 1-based contiguous ranks,
+   `#47` ownership of `readiness_summary`, `#49` ownership of `top_k`, and the
+   `rank_candidates(simulation_input, candidates)` public API (§14, §14.1).
+7. Constrains simulation ranges: `ability_estimate` and `difficulty_prior` in
+   `[0.0, 1.0]`; `recent_affinity` and `long_term_affinity` in
+   `[-1.0, 1.0]`; `feature_weights` values finite and `>= 0.0` with recognized
+   keys only (§5, §11.2, §12).
+
+This is a simulation-only semantic freeze: no production persistence change, no
+migration, no API change, and no production weights or embedding limits are
+frozen. Fixtures migrate their `contract_version` to `m3-simulation/v3` and
+configure only the feature weights each scenario exercises. `contract_version`
+is now `m3-simulation/v3`.
 
 ### Erratum — Issue #46 implementation/discovery evidence (v1 → v2)
 

@@ -76,10 +76,10 @@ def test_contract_freezes_interest_state_type_fields():
     assert frozen_fields == INTEREST_STATE_FIELDS
 
 
-def test_contract_version_is_v2():
-    assert 'contract_version = "m3-simulation/v2"' in _contract_text()
+def test_contract_version_is_v3():
+    assert 'contract_version = "m3-simulation/v3"' in _contract_text()
     for scenario_id, simulation_input in SCENARIOS.items():
-        assert simulation_input["contract_version"] == "m3-simulation/v2", scenario_id
+        assert simulation_input["contract_version"] == "m3-simulation/v3", scenario_id
 
 
 def _iter_candidates(value):
@@ -112,11 +112,11 @@ def test_contract_examples_version_learner_references():
                 assert "entity_version" in mapping, mapping
 
 
-def test_contract_examples_are_v2():
+def test_contract_examples_are_v3():
     examples = [json.loads(raw) for raw in _json_examples(_contract_text())]
     versions = [ex["contract_version"] for ex in examples if "contract_version" in ex]
     assert versions, "expected versioned worked examples"
-    assert all(version == "m3-simulation/v2" for version in versions)
+    assert all(version == "m3-simulation/v3" for version in versions)
 
 
 def test_contract_examples_have_no_zero_source_candidate():
@@ -314,6 +314,9 @@ def test_invalid_target_representation_referenced_in_exclusion_contract():
     assert "`INVALID_TARGET` and `target_entity_type = null` (§8.3)" in text
 
 
-def test_contract_version_still_v2_after_repair():
-    assert 'contract_version = "m3-simulation/v2"' in _contract_text()
-    assert "m3-simulation/v3" not in _contract_text()
+def test_contract_records_v2_to_v3_migration():
+    text = _contract_text()
+    assert 'contract_version = "m3-simulation/v3"' in text
+    assert "### Erratum — Issue #47 scoring and diversity freeze (v2 → v3)" in text
+    # v2 history is retained for the #46 erratum.
+    assert "m3-simulation/v2" in text
