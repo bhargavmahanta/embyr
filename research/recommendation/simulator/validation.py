@@ -1,4 +1,4 @@
-"""Structural validation for the candidate pipeline (m3-simulation/v4).
+"""Structural validation for the candidate pipeline (m3-simulation/v5).
 
 Structural invalidity raises :class:`SimulationInputError`. A structurally valid
 source reference whose target is absent from the ontology is *not* a validation
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-CONTRACT_VERSION = "m3-simulation/v4"
+CONTRACT_VERSION = "m3-simulation/v5"
 
 ENTITY_TYPES = frozenset(
     {"DOMAIN", "AREA", "TOPIC", "CONCEPT", "SKILL", "TECHNIQUE", "JOURNEY"}
@@ -407,7 +407,12 @@ def validate_simulation_input(simulation_input: object) -> None:
         _field(config, "config_version", "input.simulation_config"),
         "input.simulation_config.config_version",
     )
-    _integer(_field(config, "top_k", "input.simulation_config"), "input.simulation_config.top_k")
+    top_k = _integer(
+        _field(config, "top_k", "input.simulation_config"), "input.simulation_config.top_k"
+    )
+    _require(
+        top_k >= 0, "input.simulation_config.top_k must be >= 0"
+    )
     policy = _field(config, "unknown_prerequisite_policy", "input.simulation_config")
     _require(
         policy == "CONSERVATIVE_INELIGIBLE",

@@ -72,7 +72,7 @@ objective state and explicit preference is never collapsed into a score input.
   `deferred_to: "#47"`.
 - `descriptive_observations` — metric names only, never thresholds.
 
-Under `m3-simulation/v4`, eligible targets also carry exact `explanation_codes`
+Under `m3-simulation/v5`, eligible targets also carry exact `explanation_codes`
 oracles (canonical `ExplanationCode` order, deduped, `0..8`) derived from the
 frozen §15.1 emission rules. Ineligible targets never carry explanation codes;
 `#48` does not explain exclusions.
@@ -99,7 +99,7 @@ structurally by `tests/test_fixture_offline.py`.
    amended (see the §25 erratum), and `interest_states` is now a **required**
    field of the frozen snapshot. It is the simulation analogue of the LLD §27
    `learner_interest_state` domain. This repair is preserved in
-   `m3-simulation/v4`.
+   `m3-simulation/v5`.
 5. **Generation context is explicit (v2, retained in v4).** Every `SimulationInput` carries a
    required `generation_context.anchor_entities` list: explicit simulation query
    context for GRAPH/SEMANTIC generation. Anchors are never derived from
@@ -132,7 +132,7 @@ python -m pytest research/recommendation/tests
 
 The suite covers id/timestamp determinism, canonical bytes and fingerprint
 stability, graph/reference integrity, frozen-vocabulary validity, semantic
-dimension and ordering, `m3-simulation/v4` scoring/rerank configuration shape,
+dimension and ordering, `m3-simulation/v5` scoring/rerank configuration shape,
 generation-context and `objective_id` migration integrity, expectation coverage
 (A-T 20/20, IN-* union 10/10), and offline/no-hosted-identifier constraints.
 
@@ -153,3 +153,15 @@ key. `simulation_config.rerank` is `null` (strict no-op) or a
 `{"strategy": "DOMAIN_COVERAGE", "diversity_weight": <finite >= 0>}` object.
 Scenario `P`, `X4`, and `X5` configure `DOMAIN_COVERAGE` to exercise domain-based
 diversity; `Q` leaves rerank `null` to exercise pure deterministic tie-breaking.
+
+## v4 → v5 evaluation freeze
+
+Issue #49 bumps the contract to `m3-simulation/v5`. The corpus migrates
+`contract_version` to `m3-simulation/v5` without changing scenario intent. v5
+freezes the executable `SimulationResult` population, `top_k` prefix selection,
+`candidates_considered`/`candidates_excluded` semantics, the thirteen exact
+metric formulas, the non-raising #49 invariant evaluation, the engine-owned
+input fingerprint, and the runner/evaluation-harness boundary
+(`ScenarioEvaluation`, `ExpectationFailure`, `EvaluationReport`). Fixture
+`SimulationInput`s are unchanged in meaning; `#49` assembly and evaluation
+remain owned by #49, and durable documentation/findings remain owned by #50.

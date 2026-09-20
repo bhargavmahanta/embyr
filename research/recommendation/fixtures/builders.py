@@ -40,7 +40,7 @@ from .canonical import (
 from .semantic import EMBEDDING_MODEL, VECTOR_DIMENSION, semantic_vector
 from .timestamps import sim_time
 
-CONTRACT_VERSION = "m3-simulation/v4"
+CONTRACT_VERSION = "m3-simulation/v5"
 CONFIG_VERSION = "m3-sim-config/v1"
 UNKNOWN_PREREQUISITE_POLICY = "CONSERVATIVE_INELIGIBLE"
 INTEREST_MODEL_VERSION = "fixture-interest-state/v1"

@@ -1,4 +1,4 @@
-"""Deterministic recommendation explanations (#48, m3-simulation/v4).
+"""Deterministic recommendation explanations (#48, m3-simulation/v5).
 
 Implements the frozen v4 explanation contract (§15): contextual explanation-code
 derivation from a #47 ``RankedCandidate`` and assembly of the #48

@@ -7,7 +7,7 @@ evaluation rubric that M3 recommendation-simulation work builds against. It is a
 simulation-only contract and does not describe, extend, or modify production
 recommendation persistence.
 
-`contract_version = "m3-simulation/v4"`
+`contract_version = "m3-simulation/v5"`
 
 Changes to this contract after Issue #44 require evidence from implementation,
 security, performance, cost, or product constraints.
@@ -141,7 +141,7 @@ must never require real Auth users or hosted identifiers.
 
 ```text
 SimulationInput
-- contract_version            string        # "m3-simulation/v4"
+- contract_version            string        # "m3-simulation/v5"
 - scenario_id                 string
 - learner                     LearnerRef
 - ontology_snapshot           OntologySnapshot
@@ -674,7 +674,7 @@ continuation_value
 revisit_value
 ```
 
-`novelty` is **deferred beyond M3 v4** and MUST NOT be part of pre-rerank
+`novelty` is **deferred beyond M3 v5** and MUST NOT be part of pre-rerank
 scoring. `diversity_context` is **trace-only** and MUST NOT be a scoring feature,
 a `feature_weights` key, or a `pre_rerank_score` term; diversity is represented
 by `RerankTrace.diversity_adjustment` (§13). A candidate's `feature_values` may
@@ -1120,7 +1120,7 @@ Pipeline ownership:
 #46 -> Candidate
 #47 -> RankedCandidate
 #48 -> RecommendationResult (RankedCandidate + explanation_codes and any #48-owned explanation fields)
-#49 -> SimulationResult (RankedCandidate[] + top_k selection + metrics + invariants)
+#49 -> SimulationResult (top_k-selected RecommendationResult[] + candidates_considered/candidates_excluded + metrics + invariants)
 ```
 
 ### 14.3 #48 public explanation API
@@ -1321,13 +1321,106 @@ InvariantResult
 
 - `invariant_results` is deterministic and independent of wall-clock time.
 - `metrics` never carries pass/fail thresholds.
-- Wall-clock timestamps may exist only inside `execution_metadata` and are
-  excluded from deterministic comparison.
+- `execution_metadata` is excluded from deterministic comparison. For M3 v5 the
+  deterministic runner emits it as `{}` and MUST NOT include wall-clock
+  timestamps, durations, hostnames, process ids, or random identifiers (§17.2).
+  Any future operator-only, non-semantic runtime metadata lives outside the M3 v5
+  deterministic runner and does not weaken §17.2.
 - `candidates_considered` is every normalized candidate the simulator evaluated,
   including both `ELIGIBLE` and `INELIGIBLE` candidates.
 - `candidates_excluded` is the `INELIGIBLE` subset of `candidates_considered`.
   Every excluded candidate also appears in `candidates_considered`; it is a
   diagnostic subset, not a disjoint collection.
+
+### 17.1 #49 SimulationResult population, selection, and ordering
+
+`SimulationResult` is assembled by #49 by orchestrating the frozen earlier
+stages. The #49 pipeline order is frozen:
+
+```text
+SimulationInput
+  -> generate_candidates(...)         #46 -> Candidate[]  (candidates_considered)
+  -> rank_candidates(...)             #47 -> full RankedCandidate[] (ranked eligible)
+  -> build_recommendation_results(...) #48 -> full RecommendationResult[] (explained eligible)
+  -> apply top_k prefix selection
+  -> selected RecommendationResult[]
+  -> assemble SimulationResult
+```
+
+Field population (frozen):
+
+- `candidates_considered` is **exactly** the normalized `Candidate[]` produced
+  by #46, including `ELIGIBLE` and `INELIGIBLE` candidates. It is **not**
+  transformed, filtered, or re-derived by #49. Full #46 trace is preserved.
+- `candidates_considered` is ordered by `candidate_id` ascending.
+- `candidates_excluded` is **exactly** the subset of `candidates_considered`
+  whose `eligibility_state == "INELIGIBLE"`. #49 does not recompute exclusion
+  reasons. `candidates_excluded` is ordered by `candidate_id` ascending.
+- `ranked_recommendations` is `RecommendationResult[]` (**not**
+  `RankedCandidate[]`): the `top_k`-selected prefix of the full `#48`
+  `RecommendationResult[]`. It is ordered by `final_rank` ascending and
+  `final_rank` values are **not** renumbered by selection.
+- Selection occurs **after** #48 has built a `RecommendationResult` for the full
+  eligible ranked set. #47 ranks the entire eligible set and does not apply
+  `top_k`; #48 does not apply `top_k`; #49 applies it.
+- Eligible candidates ranked below `top_k` are **not** retained in the public
+  `SimulationResult`. No `ranked_candidates_all`, `recommendations_all`,
+  `non_selected_recommendations`, or equivalent field exists. Their
+  Candidate-level forensic trace remains available in `candidates_considered`.
+  The full ranked/explained populations MAY be used transiently by #49 for
+  metrics, invariants, and evaluation, then discarded.
+- The conceptual populations used internally are: `considered` (full `#46`
+  `Candidate[]`), `ranked` (full `#47` `RankedCandidate[]`), `explained` (full
+  `#48` `RecommendationResult[]`), and `selected` (the `top_k` prefix of
+  `explained`). These names are internal and are not public fields.
+
+`top_k` semantics (frozen):
+
+```text
+SimulationConfig.top_k is a required integer >= 0.
+selected_count            = min(top_k, len(full_recommendation_results))
+ranked_recommendations    = full_recommendation_results[:selected_count]
+```
+
+- Negative, null, missing, or boolean `top_k` is a structural input validation
+  failure ("boolean masquerading as integer" is rejected by existing integer
+  validation).
+- `top_k == 0` is valid and yields `ranked_recommendations == []`.
+- `top_k` greater than the number of available results selects all available
+  results and MUST NOT raise.
+- Zero eligible candidates yields `ranked_recommendations == []` (IN-10).
+
+### 17.2 #49 execution metadata and input fingerprint
+
+- `execution_metadata` remains a required object. For M3 v5 it has **no
+  required key**; the deterministic runner emits `{}`. Wall-clock timestamps,
+  durations, hostnames, process ids, and random identifiers MUST NOT be added.
+  Logical equality and IN-1 exclude `execution_metadata`. Future non-semantic
+  metadata may be added later without changing the logical simulation result.
+- `input_fingerprint` is computed by the engine as:
+
+```text
+canonical_input   = canonicalize_simulation_input_for_identity(validated SimulationInput)
+input_fingerprint = "sha256:" + lowercase_hex(sha256(canonical_json(canonical_input)))
+```
+
+The validated input is first placed into the frozen §4 canonical snapshot form:
+order-insensitive arrays (ontology entities and nested
+relationships/`domain_ids`/`objective_ids`, semantic vectors, generation-context
+anchors, learner objective/interest states, explicit preferences, explorations)
+are canonically ordered, while semantically ordered arrays (for example
+`SemanticVector.vector`) are preserved. Canonicalization is the engine's
+identity responsibility and MUST NOT mutate the caller's `SimulationInput`; it is
+not a caller ordering obligation and validation still checks structural validity
+and uniqueness only.
+
+The engine-owned canonical serializer (`research/recommendation/simulator/identity.py`
+`canonical_json`) MUST be used; this remains one canonical JSON serializer. The
+engine MUST NOT import fixture canonicalization from
+`research/recommendation/fixtures/`, and no third canonical serializer may be
+introduced. `SimulationConfig` is part of `SimulationInput` and therefore
+participates in the fingerprint. Fixture expectation metadata never participates.
+
 
 ## 18. Production Persistence Boundary
 
@@ -1387,6 +1480,81 @@ IN-9   no external model/network dependency is required
 IN-10  an empty recommendation set is valid when no candidate is eligible
 ```
 
+### 19.1 #49 invariant evaluation semantics
+
+#49 evaluates the outcome of the assembled `SimulationResult`. Invariants MUST
+verify outcomes using evidence already produced by #46/#47/#48; #49 MUST NOT
+reimplement candidate generation, eligibility, scoring, reranking, or
+explanation derivation.
+
+```text
+IN-1   Run a second independent deterministic execution of the core pipeline
+       WITHOUT invariant evaluation (an internal core-execution helper, never a
+       recursive run_simulation). Compare canonical logical payloads containing
+       candidates_considered, candidates_excluded, ranked_recommendations, and
+       metrics. Exclude invariant_results, execution_metadata, and
+       input_fingerprint. PASS iff canonical payload bytes match.
+
+IN-2   PASS iff every selected RecommendationResult joins by candidate_id to a
+       Candidate whose eligibility_state == ELIGIBLE. Eligibility is read, not
+       recomputed.
+
+IN-3   PASS iff no selected recommendation corresponds to a Candidate carrying
+       a HARD prerequisite evaluation with state UNSATISFIED or UNKNOWN. Uses
+       #46 prerequisite_evaluations; learner state is not reevaluated.
+
+IN-4   PASS iff, for every full RankedCandidate/RecommendationResult carrying
+       EXPLICIT_INFERRED_CONFLICT_SUPPRESSED, component_scores.inferred_interest
+       == 0.0 and the RecommendationResult carries
+       EXPLICIT_PREFERENCE_OVERRIDES_INFERRED, AND the second deterministic
+       execution (IN-1 helper) produces the same conflict-machine-reason state.
+       Explicit/inferred conflict is not recomputed.
+
+IN-5   PASS iff every selected RecommendationResult has the complete decision
+       trace required by v5 (same predicate as trace_completeness). For a
+       non-empty selected set, trace_completeness therefore equals 1.0 when
+       IN-5 passes. Empty selected set PASSes.
+
+IN-6   PASS iff every INELIGIBLE Candidate carries at least one exclusion reason
+       and every exclusion reason belongs to the frozen ExclusionCode
+       vocabulary. Eligible Candidates are not required to carry a reason. The
+       reason is read, not recomputed.
+
+IN-7   Evaluated against the full ranked population. PASS iff final_rank values
+       are 1-based, unique, contiguous, and ordered, equal to
+       1..len(full ranked). The selected top_k output MUST be the prefix of that
+       ordered sequence and MUST preserve the original final_rank values.
+
+IN-8   Evaluated against the full ranked population. PASS iff no two final
+       ranked candidates share (target_entity_id, target_entity_version).
+       candidate_id encoding semantics are not used.
+
+IN-9   PASS iff a deterministic static offline guard over the recommendation
+       simulator modules finds no forbidden external dependency or
+       nondeterministic call, using the frozen forbidden set already used by the
+       recommendation offline tests. Inspected files/modules are enumerated in
+       deterministic sorted order and the guard itself makes no network call.
+       Diagnostics expose at minimum external_calls: 0 and MAY expose a
+       deterministic list of forbidden findings when FAIL. Test modules are not
+       imported into the runtime engine.
+
+IN-10  PASS iff, when eligible_candidate_count == 0,
+       ranked_recommendations == []. The inverse is NOT asserted: top_k == 0
+       with eligible candidates and ranked_recommendations == [] is also valid.
+       Empty recommendation sets never fail merely for being empty.
+```
+
+### 19.2 #49 invariant failure behavior
+
+An invariant failure does **not** raise. `run_simulation` returns a
+`SimulationResult` whose affected `InvariantResult` entries carry
+`status == "FAIL"`; the result remains inspectable. Structurally invalid
+`SimulationInput` may still raise according to existing validation behavior.
+`invariant_results` always contains all ten invariants, in canonical
+`IN-1`..`IN-10` order, with deterministic machine-readable `diagnostics`. No
+`NOT_APPLICABLE` status exists.
+
+
 ## 20. Descriptive Metrics
 
 Metrics are informational. They are kept separate from hard invariants and are
@@ -1410,6 +1578,160 @@ trace_completeness
 
 Deliberately excluded for M3-1, because no defensible relevance labels exist
 yet: `NDCG`, `MAP`, `Recall@K`, `Precision@K`.
+
+### 20.1 Exact metric definitions (frozen)
+
+Every `SimulationResult.metrics` object MUST contain all thirteen keys, even when
+a metric is empty or zero; metrics are never omitted for empty scenarios.
+Populations are `considered` (full #46 `Candidate[]`), `ranked` (full #47
+`RankedCandidate[]`), `explained` (full #48 `RecommendationResult[]`), and
+`selected` (the `top_k` prefix of `explained`) as defined in §17.1.
+
+```text
+candidate_count              = len(considered)                          # integer >= 0
+
+eligible_candidate_count     = count(c.eligibility_state == ELIGIBLE
+                                     for c in considered)               # integer >= 0
+
+exclusion_count_by_reason    map over the five ExclusionCodes, all keys present,
+                             initialized 0. For every candidate in
+                             candidates_excluded, increment every distinct
+                             exclusion reason it carries. A candidate with
+                             multiple reasons increments multiple counters, so
+                             sum(counts) MAY exceed len(candidates_excluded).  # map<string,int>
+
+source_coverage              map over the five CandidateSources, all keys present,
+                             initialized 0, population considered. For each
+                             Candidate, increment each distinct CandidateSource
+                             present in source_paths at most once; a multi-source
+                             candidate increments multiple counters.             # map<string,int>
+
+top_k_source_mix             same five source keys, initialized 0, population
+                             selected, using RecommendationResult.candidate_sources;
+                             each selected recommendation increments each distinct
+                             source it carries once.                             # map<string,int>
+
+topic_domain_diversity       population selected. Collect distinct domain IDs from
+                             rerank_trace.diversity_dimensions.domain_ids across
+                             selected recommendations. Value = number of distinct
+                             domain IDs. No selected recommendations -> 0.
+                             Ontology is NOT queried again.                       # integer >= 0
+
+difficulty_distribution      population selected. Join each selected
+                             RecommendationResult back to its Candidate by
+                             candidate_id and read the frozen #46 feature_inputs
+                             difficulty_prior. Bucket by exact canonical value with
+                             key canonical_json(difficulty_prior) (e.g. 0.5 -> "0.5",
+                             missing/null -> "null"). No LOW/MEDIUM/HIGH threshold
+                             buckets. No selected recommendations -> {}.         # map<string,int>
+
+explicit_interest_coverage   population considered. numerator = count of Candidates
+                             containing an EXPLICIT_INTEREST source; denominator =
+                             candidate_count; denominator == 0 -> 0.0.
+                             Uses nomination/source coverage, never score sign.   # float
+
+semantic_candidate_coverage  population considered. numerator = count of Candidates
+                             containing a SEMANTIC source; denominator =
+                             candidate_count; denominator == 0 -> 0.0.          # float
+
+revisit_share                population selected. numerator = selected
+                             RecommendationResults containing REVISIT source;
+                             denominator = len(selected); empty -> 0.0.          # float
+
+continuation_share           population selected. numerator = selected
+                             RecommendationResults containing HISTORY_CONTINUATION
+                             source; denominator = len(selected); empty -> 0.0.  # float
+
+rank_change_due_to_diversity population ranked (full, BEFORE top_k truncation).
+                             count of candidates where
+                             rerank_trace.pre_rerank_rank !=
+                             rerank_trace.post_rerank_rank. No score delta and no
+                             sum of absolute rank movement.                      # integer >= 0
+
+trace_completeness           population selected. A selected RecommendationResult is
+                             trace-complete iff a matching Candidate exists in
+                             candidates_considered by candidate_id AND the Candidate
+                             contains source_paths, prerequisite_evaluations,
+                             feature_inputs, exclusion_reasons AND the
+                             RecommendationResult contains candidate_sources,
+                             readiness_summary, score_trace, rerank_trace,
+                             ordering_score, deterministic_tiebreak_key, final_rank,
+                             explanation_codes. numerator = count complete;
+                             denominator = len(selected); empty -> 0.0.
+                             explanation_codes need not be non-empty.            # float
+```
+
+### 20.2 Metric numeric policy and gating
+
+- Counts are integers; shares are finite floats. A zero denominator yields
+  `0.0`. There is no rounding and no `Decimal`; count maps are not normalized.
+  Canonical JSON serialization governs deterministic bytes.
+- Metrics are descriptive evidence only. They MUST NOT determine scenario
+  PASS/FAIL, determine invariant PASS/FAIL, impose success thresholds, change
+  recommendation ranking, or change `top_k`.
+
+### 20.3 #49 engine, evaluation harness, and report
+
+Generic engine API (frozen):
+
+```text
+run_simulation(simulation_input: dict) -> dict   # returns SimulationResult
+```
+
+The generic engine MUST NOT import fixture scenario IDs, fixture expectations,
+or fixture manifests. Fixture comparison belongs only to the harness.
+
+Fixture harness APIs (frozen responsibilities; exact Python signatures may
+follow existing fixture helper shapes):
+
+```text
+evaluate_scenario(...)
+run_fixture_suite(...)
+render_evaluation_summary(...)
+```
+
+The fixture harness MAY import fixture data. Harness structures (frozen):
+
+```text
+ScenarioEvaluation
+- scenario_id          string
+- status               string          # PASS|FAIL
+- simulation_result    SimulationResult
+- expectation_failures ExpectationFailure[]
+
+ExpectationFailure
+- check                string          # stable deterministic identifier/path
+- expected             JSON-compatible value
+- actual               JSON-compatible value
+
+EvaluationReport
+- contract_version     string
+- status               string          # PASS|FAIL
+- scenario_count       integer
+- passed_count         integer
+- failed_count         integer
+- scenario_evaluations ScenarioEvaluation[]
+```
+
+Scenario status (frozen): `ScenarioEvaluation.status == "PASS"` iff every
+`SimulationResult.invariant_results[].status == "PASS"` AND
+`expectation_failures == []`. Metrics never gate scenario status.
+`ExpectationFailure` carries no human prose and no stack traces.
+`EvaluationReport` lists scenarios in fixture canonical order, and
+`EvaluationReport.status == "PASS"` iff `failed_count == 0`. Aggregate metric
+averages, an overall recommendation score, a quality percentage, and success
+thresholds are NOT part of `EvaluationReport`.
+
+Evaluation data (expected/actual, scenario verdict, expectation failures) MUST
+NOT be placed inside `SimulationResult` (§17).
+
+Human-readable summary: #49 MAY render a concise deterministic summary string
+from an `EvaluationReport` containing at minimum `passed_count / scenario_count`,
+`failed_count`, and failed scenario IDs when any. No long-form findings
+narrative and no required Markdown artifact; #50 owns durable
+architecture/findings/limitations documentation. Generated JSON/Markdown/text
+reports MUST NOT be committed as #49 source artifacts.
+
 
 ## 21. Scenario Categories
 
@@ -1477,7 +1799,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v4",
+  "contract_version": "m3-simulation/v5",
   "scenario_id": "scn-minimal-001",
   "learner": {
     "learner_id": "10000000-0000-4000-8000-000000000001",
@@ -1810,7 +2132,7 @@ cardinality. The `candidate_id` textual encoding is illustrative and not frozen
 
 ```json
 {
-  "contract_version": "m3-simulation/v4",
+  "contract_version": "m3-simulation/v5",
   "scenario_id": "scn-explicit-more-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
@@ -1928,9 +2250,27 @@ cardinality. The `candidate_id` textual encoding is illustrative and not frozen
   "metrics": {
     "candidate_count": 1,
     "eligible_candidate_count": 1,
-    "exclusion_count_by_reason": {},
-    "source_coverage": {"GRAPH": 1, "SEMANTIC": 1},
-    "top_k_source_mix": {"GRAPH": 1, "SEMANTIC": 1},
+    "exclusion_count_by_reason": {
+      "PREREQUISITE_UNMET": 0,
+      "EXPLICITLY_PAUSED": 0,
+      "NOT_INTERESTED": 0,
+      "INVALID_TARGET": 0,
+      "INSUFFICIENT_STATE": 0
+    },
+    "source_coverage": {
+      "GRAPH": 1,
+      "SEMANTIC": 1,
+      "EXPLICIT_INTEREST": 0,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
+    "top_k_source_mix": {
+      "GRAPH": 1,
+      "SEMANTIC": 1,
+      "EXPLICIT_INTEREST": 0,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
     "topic_domain_diversity": 1,
     "difficulty_distribution": {"0.3": 1},
     "explicit_interest_coverage": 1.0,
@@ -1940,11 +2280,7 @@ cardinality. The `candidate_id` textual encoding is illustrative and not frozen
     "rank_change_due_to_diversity": 0,
     "trace_completeness": 1.0
   },
-  "execution_metadata": {
-    "duration_ms": 12,
-    "host": "synthetic-runner",
-    "note": "excluded from equality and fingerprint"
-  }
+  "execution_metadata": {}
 }
 ```
 
@@ -1955,7 +2291,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
 
 ```json
 {
-  "contract_version": "m3-simulation/v4",
+  "contract_version": "m3-simulation/v5",
   "scenario_id": "scn-no-eligible-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
@@ -2039,7 +2375,150 @@ must succeed with an empty ranked set and all invariants `PASS`.
   "metrics": {
     "candidate_count": 1,
     "eligible_candidate_count": 0,
-    "exclusion_count_by_reason": {"INSUFFICIENT_STATE": 1}
+    "exclusion_count_by_reason": {
+      "PREREQUISITE_UNMET": 0,
+      "EXPLICITLY_PAUSED": 0,
+      "NOT_INTERESTED": 0,
+      "INVALID_TARGET": 0,
+      "INSUFFICIENT_STATE": 1
+    },
+    "source_coverage": {
+      "GRAPH": 0,
+      "SEMANTIC": 0,
+      "EXPLICIT_INTEREST": 1,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
+    "top_k_source_mix": {
+      "GRAPH": 0,
+      "SEMANTIC": 0,
+      "EXPLICIT_INTEREST": 0,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
+    "topic_domain_diversity": 0,
+    "difficulty_distribution": {},
+    "explicit_interest_coverage": 1.0,
+    "semantic_candidate_coverage": 0.0,
+    "revisit_share": 0.0,
+    "continuation_share": 0.0,
+    "rank_change_due_to_diversity": 0,
+    "trace_completeness": 0.0
+  },
+  "execution_metadata": {}
+}
+```
+
+### 24.8 SimulationResult with top_k prefix selection
+
+A controlled example where `top_k == 1` and two eligible candidates are ranked.
+Only the first ranked `RecommendationResult` is selected into
+`ranked_recommendations`; full `final_rank` values are preserved and
+`candidates_considered` still carries every normalized candidate. Metrics whose
+population is the full ranked set or the considered set therefore still observe
+the non-selected candidate.
+
+```json
+{
+  "contract_version": "m3-simulation/v5",
+  "scenario_id": "scn-top-k-prefix-001",
+  "config_version": "m3-sim-config/v1",
+  "input_fingerprint": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+  "candidates_considered": [
+    {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
+      "target_entity_id": "20000000-0000-4000-8000-000000000001",
+      "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
+      "source_paths": [
+        {"source": "GRAPH", "provenance": {"anchor_entity_id": "20000000-0000-4000-8000-000000000009", "anchor_entity_version": 1, "hop_distance": 1, "canonical_path": [{"entity_id": "20000000-0000-4000-8000-000000000009", "entity_version": 1}, {"entity_id": "20000000-0000-4000-8000-000000000001", "entity_version": 1}]}}
+      ],
+      "prerequisite_evaluations": [],
+      "eligibility_state": "ELIGIBLE",
+      "exclusion_reasons": [],
+      "feature_inputs": {"difficulty_prior": 0.4}
+    },
+    {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000002:1",
+      "target_entity_id": "20000000-0000-4000-8000-000000000002",
+      "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
+      "source_paths": [
+        {"source": "SEMANTIC", "provenance": {"anchor_entity_id": "20000000-0000-4000-8000-000000000009", "anchor_entity_version": 1, "cosine_similarity": 0.7}}
+      ],
+      "prerequisite_evaluations": [],
+      "eligibility_state": "ELIGIBLE",
+      "exclusion_reasons": [],
+      "feature_inputs": {"difficulty_prior": 0.6}
+    }
+  ],
+  "candidates_excluded": [],
+  "ranked_recommendations": [
+    {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
+      "target_entity_id": "20000000-0000-4000-8000-000000000001",
+      "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
+      "final_rank": 1,
+      "ordering_score": 1.0,
+      "candidate_sources": ["GRAPH"],
+      "readiness_summary": {"hard_prerequisites_total": 0, "hard_prerequisites_satisfied": 0, "state": "SATISFIED"},
+      "score_trace": {
+        "feature_values": {"readiness": 0.0, "difficulty_fit": 0.0, "explicit_interest": 0.0, "inferred_interest": 0.0, "graph_proximity": 1.0, "semantic_similarity": 0.0, "continuation_value": 0.0, "revisit_value": 0.0},
+        "configured_weights": {"readiness": 0.0, "difficulty_fit": 0.0, "explicit_interest": 0.0, "inferred_interest": 0.0, "graph_proximity": 1.0, "semantic_similarity": 0.0, "continuation_value": 0.0, "revisit_value": 0.0},
+        "component_scores": {"readiness": 0.0, "difficulty_fit": 0.0, "explicit_interest": 0.0, "inferred_interest": 0.0, "graph_proximity": 1.0, "semantic_similarity": 0.0, "continuation_value": 0.0, "revisit_value": 0.0},
+        "pre_rerank_score": 1.0,
+        "reason_codes": []
+      },
+      "rerank_trace": {"pre_rerank_rank": 1, "pre_rerank_score": 1.0, "diversity_dimensions": {"domain_ids": ["30000000-0000-4000-8000-000000000001"], "domain_rarity": 1.0, "minimum_rarity": 1.0, "diversity_signal": 0.0}, "diversity_adjustment": 0.0, "post_rerank_rank": 1, "reason_codes": []},
+      "explanation_codes": [],
+      "deterministic_tiebreak_key": "TOPIC:20000000-0000-4000-8000-000000000001:1"
+    }
+  ],
+  "invariant_results": [
+    {"invariant_code": "IN-1", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-2", "status": "PASS", "diagnostics": {"checked": 1}},
+    {"invariant_code": "IN-3", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-4", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-5", "status": "PASS", "diagnostics": {"traces_incomplete": 0}},
+    {"invariant_code": "IN-6", "status": "PASS", "diagnostics": {"exclusions_without_reason": 0}},
+    {"invariant_code": "IN-7", "status": "PASS", "diagnostics": {"ranks": [1, 2]}},
+    {"invariant_code": "IN-8", "status": "PASS", "diagnostics": {"duplicate_targets": 0}},
+    {"invariant_code": "IN-9", "status": "PASS", "diagnostics": {"external_calls": 0}},
+    {"invariant_code": "IN-10", "status": "PASS", "diagnostics": {"empty_is_valid": true}}
+  ],
+  "metrics": {
+    "candidate_count": 2,
+    "eligible_candidate_count": 2,
+    "exclusion_count_by_reason": {
+      "PREREQUISITE_UNMET": 0,
+      "EXPLICITLY_PAUSED": 0,
+      "NOT_INTERESTED": 0,
+      "INVALID_TARGET": 0,
+      "INSUFFICIENT_STATE": 0
+    },
+    "source_coverage": {
+      "GRAPH": 1,
+      "SEMANTIC": 1,
+      "EXPLICIT_INTEREST": 0,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
+    "top_k_source_mix": {
+      "GRAPH": 1,
+      "SEMANTIC": 0,
+      "EXPLICIT_INTEREST": 0,
+      "HISTORY_CONTINUATION": 0,
+      "REVISIT": 0
+    },
+    "topic_domain_diversity": 1,
+    "difficulty_distribution": {"0.4": 1},
+    "explicit_interest_coverage": 0.0,
+    "semantic_candidate_coverage": 0.5,
+    "revisit_share": 0.0,
+    "continuation_share": 0.0,
+    "rank_change_due_to_diversity": 0,
+    "trace_completeness": 1.0
   },
   "execution_metadata": {}
 }
@@ -2082,14 +2561,23 @@ The following are frozen by Issue #44:
   emission rules, canonical order, `0..8` cardinality, dedupe, no fallback;
   human-readable rendering explicitly out of #48 (§15).
 - **Exclusion codes** — minimal machine-readable vocabulary (§16).
-- **SimulationResult** — fingerprint, candidates, recommendations, invariants,
-  metrics, excluded execution metadata (§17).
+- **SimulationResult** — fingerprint, candidates, top_k-selected
+  recommendations, invariants, metrics, excluded execution metadata; #49
+  population/selection/ordering and fingerprint semantics are frozen
+  (§17, §17.1, §17.2).
 - **Persistence boundary** — simulation trace is richer than production
   recommendation provenance but is not a field-for-field superset, and is not a
   new production schema; no migration (§18).
-- **Hard invariants** — IN-1 through IN-10, `PASS|FAIL` with diagnostics (§19).
-- **Descriptive metrics** — thirteen informational metrics, no thresholds; NDCG,
-  MAP, Recall@K, Precision@K excluded (§20).
+- **Hard invariants** — IN-1 through IN-10, `PASS|FAIL` with diagnostics; #49
+  outcome-oriented evaluation semantics and non-raising failure behavior are
+  frozen (§19, §19.1, §19.2).
+- **Descriptive metrics** — thirteen informational metrics with exact frozen
+  formulas, populations, and zero-denominator behavior; never gating; NDCG, MAP,
+  Recall@K, Precision@K excluded (§20, §20.1, §20.2).
+- **Runner and evaluation harness** — `run_simulation` generic engine API,
+  `ScenarioEvaluation`/`ExpectationFailure`/`EvaluationReport` harness shapes,
+  concise deterministic summary, and no committed report artifact
+  (§20.3).
 - **Scenario categories** — A through T, twenty categories (§21).
 - **Determinism requirements** — canonical serialization, fingerprint, stable
   ordering, no wall-clock, offline (§4).
@@ -2102,7 +2590,58 @@ semantic-retrieval limits (thresholds, top-K, ANN) and production graph-traversa
 bounds also remain unfrozen; M3 simulation uses exhaustive deterministic
 retrieval over the scenario fixture space only. `novelty`, `diversity_context`
 as a scoring feature, and any MMR-like or non-domain diversity algorithm are
-deferred beyond M3 v4.
+deferred beyond M3 v5.
+
+### Erratum — Issue #49 simulation evaluation freeze (v4 → v5)
+
+Issue #49 freezes previously ambiguous executable semantics for the scenario
+runner and evaluation report, so the contract version is bumped to
+`m3-simulation/v5`. v4 is already merged through #48; this is an additive
+semantic freeze on top of v4, not a v4 erratum. It changes no candidate
+generation, eligibility, scoring, reranking, feature, weight, or explanation
+arithmetic.
+
+Changes from v4 to v5:
+
+1. Freezes the #49 pipeline order and `SimulationResult` population: #46
+   `Candidate[]` as `candidates_considered`, the full #47/#48 eligible
+   populations used transiently, and a `top_k` prefix selection into
+   `ranked_recommendations` (§17.1).
+2. Resolves `ranked_recommendations` as `RecommendationResult[]` (not
+   `RankedCandidate[]`) and aligns the §14.2 pipeline-ownership line (§14.2,
+   §17.1).
+3. Freezes `top_k` as a required integer `>= 0`, prefix selection,
+   `selected_count = min(top_k, available)`, no raise on shortfall, `0 -> []`
+   (§17.1).
+4. Freezes drop semantics for eligible candidates below `top_k`: they are not
+   retained publicly and no `*_all` field is permitted; their Candidate-level
+   trace remains in `candidates_considered` (§10, §17.1).
+5. Freezes `candidates_considered` (all normalized candidates, `candidate_id`
+   order, untransformed) and `candidates_excluded` (`INELIGIBLE` overlapping
+   subset, `candidate_id` order, reasons not recomputed) (§6, §7, §17.1).
+6. Freezes exact formulas, populations, and zero-denominator behavior for all
+   thirteen descriptive metrics; every result carries all thirteen keys and
+   metrics never gate outcomes (§20.1, §20.2).
+7. Freezes #49 outcome-oriented invariant evaluation for IN-1..IN-10 and the
+   non-raising failure behavior (FAIL is returned and inspectable) (§19.1,
+   §19.2).
+8. Freezes `input_fingerprint` as engine-owned canonical SHA-256 over the
+   validated `SimulationInput`, with no fixture canonicalization import and no
+   third serializer (§17.2).
+9. Freezes `execution_metadata` as a required object with no mandatory v5 key
+   (deterministic runner emits `{}`), excluded from logical equality and IN-1
+   (§17.2).
+10. Freezes the generic engine API (`run_simulation`) and the separate fixture
+    harness (`evaluate_scenario`, `run_fixture_suite`,
+    `render_evaluation_summary`), plus the `ScenarioEvaluation`,
+    `ExpectationFailure`, and `EvaluationReport` shapes and PASS rules; the
+    generic engine MUST NOT import fixture data, and evaluation data is not part
+    of `SimulationResult` (§20.3).
+
+This is a simulation-only semantic freeze: no production persistence, database,
+migration, API, weights, or embedding limits change. Fixtures migrate their
+`contract_version` to `m3-simulation/v5`; `contract_version` is now
+`m3-simulation/v5`.
 
 ### Erratum — Issue #48 explanation freeze (v3 → v4)
 

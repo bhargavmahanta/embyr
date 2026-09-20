@@ -153,9 +153,9 @@ def test_contract_recommendation_result_block_lists_exact_ranked_fields():
     ]
 
 
-def test_contract_json_examples_still_parse_and_count_is_seven():
+def test_contract_json_examples_still_parse_and_count_is_eight():
     examples = _json_examples()
-    assert len(examples) == 7
+    assert len(examples) == 8
     for raw in examples:
         json.loads(raw)
 
