@@ -254,6 +254,11 @@ Hard-filter vs soft-feature distinction:
   weight, or diversity rule may move an `INELIGIBLE` candidate into the final
   recommendation set.
 
+A `PrerequisiteEvaluation` is emitted only when a prerequisite actually exists.
+An empty `prerequisite_evaluations` list means no prerequisite evaluations were
+required for that candidate. Absence of prerequisites is always represented by
+the empty list, never by a placeholder entry with a null prerequisite.
+
 ## 8. Candidate Contract
 
 A normalized candidate represents one target entity. Normalization is
@@ -453,6 +458,21 @@ Frozen rules:
   ascending.
 - An empty final recommendation set is a valid result (§19, invariant IN-10).
 
+Trace score definitions (frozen normalized representation):
+
+```text
+pre_rerank_score       score before diversity reranking
+diversity_adjustment   signed scalar delta applied by the reranking trace representation
+ordering_score         pre_rerank_score + diversity_adjustment
+```
+
+This is a normalized trace representation, not a requirement that the internal
+reranking algorithm itself be additive. A reranker may use MMR-like,
+category-spread, or another deterministic method; its final scalar ordering
+effect is normalized as `diversity_adjustment = ordering_score -
+pre_rerank_score`, preserving algorithm-neutrality while keeping the trace
+arithmetically self-consistent.
+
 ## 15. Explanation Contract
 
 Explanations are machine-readable codes. Codes justified by this contract:
@@ -515,6 +535,11 @@ InvariantResult
 - `metrics` never carries pass/fail thresholds.
 - Wall-clock timestamps may exist only inside `execution_metadata` and are
   excluded from deterministic comparison.
+- `candidates_considered` is every normalized candidate the simulator evaluated,
+  including both `ELIGIBLE` and `INELIGIBLE` candidates.
+- `candidates_excluded` is the `INELIGIBLE` subset of `candidates_considered`.
+  Every excluded candidate also appears in `candidates_considered`; it is a
+  diagnostic subset, not a disjoint collection.
 
 ## 18. Production Persistence Boundary
 
@@ -819,16 +844,7 @@ Identifiers below are fixed synthetic UUIDs.
   "source_paths": [
     {"source": "SEMANTIC", "provenance": {"similarity": 0.9}}
   ],
-  "prerequisite_evaluations": [
-    {
-      "objective_id": "40000000-0000-4000-8000-000000000004",
-      "prerequisite_entity_id": null,
-      "requirement": "HARD",
-      "evidence_summary": {"positive_evidence_count": 0, "negative_evidence_count": 0},
-      "state": "SATISFIED",
-      "reason_codes": ["NO_PREREQUISITES"]
-    }
-  ],
+  "prerequisite_evaluations": [],
   "eligibility_state": "INELIGIBLE",
   "exclusion_reasons": ["NOT_INTERESTED"],
   "feature_inputs": {
@@ -844,7 +860,7 @@ Identifiers below are fixed synthetic UUIDs.
   "target_entity_id": "20000000-0000-4000-8000-000000000001",
   "target_entity_version": 1,
   "final_rank": 1,
-  "ordering_score": 0.73,
+  "ordering_score": 5.36,
   "candidate_sources": ["GRAPH", "SEMANTIC"],
   "readiness_summary": {
     "hard_prerequisites_total": 1,
@@ -881,7 +897,7 @@ Identifiers below are fixed synthetic UUIDs.
       "novelty": 0.2
     },
     "pre_rerank_score": 5.36,
-    "reason_codes": ["EXPLICIT_PREFERENCE_OVERRIDES_INFERRED"]
+    "reason_codes": []
   },
   "rerank_trace": {
     "pre_rerank_rank": 1,
@@ -909,9 +925,96 @@ Identifiers below are fixed synthetic UUIDs.
   "scenario_id": "scn-explicit-more-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
-  "candidates_considered": [],
+  "candidates_considered": [
+    {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
+      "target_entity_id": "20000000-0000-4000-8000-000000000001",
+      "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
+      "source_paths": [
+        {"source": "GRAPH", "provenance": {"edge_id": "edge-synthetic-01"}},
+        {"source": "SEMANTIC", "provenance": {"similarity": 0.81}}
+      ],
+      "prerequisite_evaluations": [
+        {
+          "objective_id": "40000000-0000-4000-8000-000000000001",
+          "prerequisite_entity_id": "20000000-0000-4000-8000-000000000002",
+          "requirement": "HARD",
+          "evidence_summary": {"positive_evidence_count": 2},
+          "state": "SATISFIED",
+          "reason_codes": ["PREREQUISITE_SATISFIED"]
+        }
+      ],
+      "eligibility_state": "ELIGIBLE",
+      "exclusion_reasons": [],
+      "feature_inputs": {
+        "difficulty_prior": 0.3,
+        "graph_distance": 1
+      }
+    }
+  ],
   "candidates_excluded": [],
-  "ranked_recommendations": [],
+  "ranked_recommendations": [
+    {
+      "target_entity_id": "20000000-0000-4000-8000-000000000001",
+      "target_entity_version": 1,
+      "final_rank": 1,
+      "ordering_score": 5.36,
+      "candidate_sources": ["GRAPH", "SEMANTIC"],
+      "readiness_summary": {
+        "hard_prerequisites_total": 1,
+        "hard_prerequisites_satisfied": 1,
+        "state": "SATISFIED"
+      },
+      "score_trace": {
+        "feature_values": {
+          "readiness": 1.0,
+          "difficulty_fit": 0.8,
+          "explicit_interest": 1.0,
+          "inferred_interest": 0.3,
+          "graph_proximity": 0.5,
+          "semantic_similarity": 0.81,
+          "novelty": 0.4,
+          "diversity_context": 0.0
+        },
+        "configured_weights": {
+          "readiness": 1.0,
+          "difficulty_fit": 1.0,
+          "explicit_interest": 2.0,
+          "inferred_interest": 1.0,
+          "graph_proximity": 0.5,
+          "semantic_similarity": 1.0,
+          "novelty": 0.5
+        },
+        "component_scores": {
+          "readiness": 1.0,
+          "difficulty_fit": 0.8,
+          "explicit_interest": 2.0,
+          "inferred_interest": 0.3,
+          "graph_proximity": 0.25,
+          "semantic_similarity": 0.81,
+          "novelty": 0.2
+        },
+        "pre_rerank_score": 5.36,
+        "reason_codes": []
+      },
+      "rerank_trace": {
+        "pre_rerank_rank": 1,
+        "pre_rerank_score": 5.36,
+        "diversity_dimensions": {"primary_domain": "30000000-0000-4000-8000-000000000001"},
+        "diversity_adjustment": 0.0,
+        "post_rerank_rank": 1,
+        "reason_codes": []
+      },
+      "explanation_codes": [
+        "EXPLICIT_INTEREST_MATCH",
+        "PREREQUISITES_SATISFIED",
+        "GOOD_DIFFICULTY_FIT",
+        "SEMANTICALLY_RELATED"
+      ],
+      "deterministic_tiebreak_key": "TOPIC:20000000-0000-4000-8000-000000000001:1"
+    }
+  ],
   "invariant_results": [
     {"invariant_code": "IN-1", "status": "PASS", "diagnostics": {}},
     {"invariant_code": "IN-2", "status": "PASS", "diagnostics": {"checked": 1}},
@@ -958,7 +1061,19 @@ must succeed with an empty ranked set and all invariants `PASS`.
   "scenario_id": "scn-no-eligible-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
-  "candidates_considered": [],
+  "candidates_considered": [
+    {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000003:1",
+      "target_entity_id": "20000000-0000-4000-8000-000000000003",
+      "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
+      "source_paths": [],
+      "prerequisite_evaluations": [],
+      "eligibility_state": "INELIGIBLE",
+      "exclusion_reasons": ["INSUFFICIENT_STATE"],
+      "feature_inputs": {}
+    }
+  ],
   "candidates_excluded": [
     {
       "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000003:1",
