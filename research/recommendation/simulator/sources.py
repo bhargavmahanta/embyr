@@ -1,4 +1,4 @@
-"""Raw candidate nomination from the five frozen sources (m3-simulation/v2).
+"""Raw candidate nomination from the five frozen sources (m3-simulation/v3).
 
 Nomination carries no eligibility and no score. Sources are pure functions of
 the validated ``SimulationInput`` and are deterministic (no wall clock, no

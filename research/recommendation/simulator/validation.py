@@ -1,15 +1,19 @@
-"""Structural validation for the #46 candidate pipeline (m3-simulation/v2).
+"""Structural validation for the candidate pipeline (m3-simulation/v3).
 
 Structural invalidity raises :class:`SimulationInputError`. A structurally valid
 source reference whose target is absent from the ontology is *not* a validation
 failure; it becomes an ``INVALID_TARGET`` candidate later (§16, §8.3).
+
+v3 additionally validates the scoring configuration shape: recognized
+`feature_weights` keys with finite non-negative values, and an optional
+`DOMAIN_COVERAGE` `rerank` block with a finite non-negative `diversity_weight`.
 """
 
 from __future__ import annotations
 
 import math
 
-CONTRACT_VERSION = "m3-simulation/v2"
+CONTRACT_VERSION = "m3-simulation/v3"
 
 ENTITY_TYPES = frozenset(
     {"DOMAIN", "AREA", "TOPIC", "CONCEPT", "SKILL", "TECHNIQUE", "JOURNEY"}
@@ -31,6 +35,21 @@ LEARNING_INTENTS = frozenset(
     }
 )
 EXPLORATION_STATUSES = frozenset({"ACTIVE", "PAUSED", "COMPLETED"})
+
+#: v3 scoring features recognized as `feature_weights` keys, canonical order (§11.1).
+SCORING_FEATURES = (
+    "readiness",
+    "difficulty_fit",
+    "explicit_interest",
+    "inferred_interest",
+    "graph_proximity",
+    "semantic_similarity",
+    "continuation_value",
+    "revisit_value",
+)
+SCORING_FEATURE_SET = frozenset(SCORING_FEATURES)
+#: Frozen rerank strategy vocabulary (§13.1).
+RERANK_STRATEGIES = frozenset({"DOMAIN_COVERAGE"})
 
 REQUIRED_TOP_LEVEL = (
     "contract_version",
@@ -94,6 +113,53 @@ def _enum(value: object, allowed: frozenset, ctx: str) -> str:
     return value  # type: ignore[return-value]
 
 
+def _number_in(value: object, low: float, high: float, ctx: str) -> float:
+    result = _number(value, ctx)
+    _require(low <= result <= high, f"{ctx} must be within [{low}, {high}]")
+    return result
+
+
+def _validate_feature_weights_config(config: dict) -> None:
+    weights = config.get("feature_weights", {})
+    _require(
+        isinstance(weights, dict),
+        "input.simulation_config.feature_weights must be an object",
+    )
+    for key, value in weights.items():
+        _require(
+            key in SCORING_FEATURE_SET,
+            f"input.simulation_config.feature_weights has unknown key {key!r}",
+        )
+        weight = _number(value, f"input.simulation_config.feature_weights[{key!r}]")
+        _require(
+            weight >= 0.0,
+            f"input.simulation_config.feature_weights[{key!r}] must be >= 0",
+        )
+
+
+def _validate_rerank_config(config: dict) -> None:
+    rerank = config.get("rerank")
+    if rerank is None:
+        return
+    rerank = _mapping(rerank, "input.simulation_config.rerank")
+    strategy = _text(
+        _field(rerank, "strategy", "input.simulation_config.rerank"),
+        "input.simulation_config.rerank.strategy",
+    )
+    _require(
+        strategy in RERANK_STRATEGIES,
+        f"input.simulation_config.rerank.strategy has invalid value {strategy!r}",
+    )
+    weight = _number(
+        _field(rerank, "diversity_weight", "input.simulation_config.rerank"),
+        "input.simulation_config.rerank.diversity_weight",
+    )
+    _require(
+        weight >= 0.0,
+        "input.simulation_config.rerank.diversity_weight must be >= 0",
+    )
+
+
 def _validate_ontology(sim: dict) -> set[tuple[str, int]]:
     ontology = _mapping(_field(sim, "ontology_snapshot", "input"), "ontology_snapshot")
     entities = _sequence(_field(ontology, "entities", "ontology_snapshot"), "ontology_snapshot.entities")
@@ -104,8 +170,15 @@ def _validate_ontology(sim: dict) -> set[tuple[str, int]]:
         entity_id = _text(_field(entity, "entity_id", ctx), f"{ctx}.entity_id")
         entity_version = _integer(_field(entity, "entity_version", ctx), f"{ctx}.entity_version")
         _enum(_field(entity, "entity_type", ctx), ENTITY_TYPES, f"{ctx}.entity_type")
-        _number(_field(entity, "difficulty_prior", ctx), f"{ctx}.difficulty_prior")
-        _sequence(_field(entity, "domain_ids", ctx), f"{ctx}.domain_ids")
+        _number_in(
+            _field(entity, "difficulty_prior", ctx),
+            0.0,
+            1.0,
+            f"{ctx}.difficulty_prior",
+        )
+        domain_ids = _sequence(_field(entity, "domain_ids", ctx), f"{ctx}.domain_ids")
+        for domain_index, domain_id in enumerate(domain_ids):
+            _text(domain_id, f"{ctx}.domain_ids[{domain_index}]")
         _sequence(_field(entity, "objective_ids", ctx), f"{ctx}.objective_ids")
         relationships = _sequence(
             _field(entity, "relationships", ctx), f"{ctx}.relationships"
@@ -183,13 +256,60 @@ def _validate_learner_state(sim: dict) -> None:
         seen.add(key)
     challenge = state.get("challenge_state")
     if challenge is not None:
-        _mapping(challenge, "learner_state_snapshot.challenge_state")
+        challenge = _mapping(challenge, "learner_state_snapshot.challenge_state")
+        _text(
+            _field(challenge, "area_id", "learner_state_snapshot.challenge_state"),
+            "learner_state_snapshot.challenge_state.area_id",
+        )
+        _number_in(
+            _field(
+                challenge,
+                "ability_estimate",
+                "learner_state_snapshot.challenge_state",
+            ),
+            0.0,
+            1.0,
+            "learner_state_snapshot.challenge_state.ability_estimate",
+        )
     interest_states = _sequence(
         _field(state, "interest_states", "learner_state_snapshot"),
         "learner_state_snapshot.interest_states",
     )
+    seen_interest: set[tuple[str, int]] = set()
     for index, raw_interest in enumerate(interest_states):
-        _mapping(raw_interest, f"learner_state_snapshot.interest_states[{index}]")
+        ctx = f"learner_state_snapshot.interest_states[{index}]"
+        entry = _mapping(raw_interest, ctx)
+        entity_id = _text(_field(entry, "entity_id", ctx), f"{ctx}.entity_id")
+        entity_version = _integer(
+            _field(entry, "entity_version", ctx), f"{ctx}.entity_version"
+        )
+        key = (entity_id, entity_version)
+        _require(key not in seen_interest, f"duplicate interest state for {key!r}")
+        seen_interest.add(key)
+        for field_name in ("recent_affinity", "long_term_affinity"):
+            _number_in(
+                _field(entry, field_name, ctx),
+                -1.0,
+                1.0,
+                f"{ctx}.{field_name}",
+            )
+        _number(_field(entry, "user_initiated_strength", ctx), f"{ctx}.user_initiated_strength")
+        _number(
+            _field(entry, "algorithm_exposure_strength", ctx),
+            f"{ctx}.algorithm_exposure_strength",
+        )
+        revisit_count = _integer(
+            _field(entry, "voluntary_revisit_count", ctx),
+            f"{ctx}.voluntary_revisit_count",
+        )
+        _require(revisit_count >= 0, f"{ctx}.voluntary_revisit_count must be >= 0")
+        last_interaction_at = _field(entry, "last_interaction_at", ctx)
+        _require(
+            last_interaction_at is None or isinstance(last_interaction_at, str),
+            f"{ctx}.last_interaction_at must be a string or null",
+        )
+        _text(_field(entry, "computed_at", ctx), f"{ctx}.computed_at")
+        _text(_field(entry, "model_version", ctx), f"{ctx}.model_version")
 
 
 def _validate_preferences(sim: dict) -> None:
@@ -293,6 +413,8 @@ def validate_simulation_input(simulation_input: object) -> None:
         policy == "CONSERVATIVE_INELIGIBLE",
         "input.simulation_config.unknown_prerequisite_policy must be 'CONSERVATIVE_INELIGIBLE'",
     )
+    _validate_feature_weights_config(config)
+    _validate_rerank_config(config)
     ontology_keys = _validate_ontology(sim)
     _validate_generation_context(sim, ontology_keys)
     _validate_learner_state(sim)

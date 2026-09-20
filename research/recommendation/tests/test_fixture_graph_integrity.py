@@ -12,6 +12,11 @@ from research.recommendation.fixtures.builders import (
     EXPLICIT_PREFERENCES,
     EXPLORATION_STATUSES,
     FEATURES,
+    RERANK_STRATEGIES,
+    SCORING_REASON_CODES,
+    DIVERSITY_REASON_CODES,
+    DEFERRED_FEATURES,
+    TRACE_ONLY_FEATURES,
     LEARNING_INTENTS,
     OBJECTIVE_STATES,
     PREREQUISITE_REQUIREMENTS,
@@ -41,7 +46,7 @@ def test_scenario_ids_are_unique_and_complete():
 def test_scenario_shape(scenario_id):
     snapshot = SCENARIOS[scenario_id]
     assert snapshot["scenario_id"] == scenario_id
-    assert snapshot["contract_version"] == "m3-simulation/v2"
+    assert snapshot["contract_version"] == "m3-simulation/v3"
     assert snapshot["learner"]["synthetic"] is True
     assert snapshot["simulation_config"]["unknown_prerequisite_policy"] == "CONSERVATIVE_INELIGIBLE"
 
@@ -136,7 +141,22 @@ def test_frozen_vocabulary_constants_match_contract():
         "REVISIT",
     )
     assert len(EXPLANATION_CODES) == 8
-    assert len(FEATURES) == 10
+    assert len(FEATURES) == 8
+    assert FEATURES == (
+        "readiness",
+        "difficulty_fit",
+        "explicit_interest",
+        "inferred_interest",
+        "graph_proximity",
+        "semantic_similarity",
+        "continuation_value",
+        "revisit_value",
+    )
+    assert DEFERRED_FEATURES == ("novelty",)
+    assert TRACE_ONLY_FEATURES == ("diversity_context",)
+    assert RERANK_STRATEGIES == ("DOMAIN_COVERAGE",)
+    assert SCORING_REASON_CODES == ("EXPLICIT_INFERRED_CONFLICT_SUPPRESSED",)
+    assert DIVERSITY_REASON_CODES == ("DOMAIN_COVERAGE_ADJUSTMENT",)
     assert SIM_EPOCH == "2026-01-01T00:00:00Z"
 
 

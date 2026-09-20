@@ -1,7 +1,8 @@
-"""m3-simulation/v2 migration integrity: generation context and objective_id.
+"""m3-simulation/v3 migration integrity: generation context and objective_id.
 
-Covers Issue #46 Phase A: explicit ``CandidateGenerationContext`` anchors and the
-explicit ``objective_id`` required for ``REQUIRES`` relationships. These are
+Covers the retained Issue #46 candidate contract (explicit
+``CandidateGenerationContext`` anchors and the explicit ``objective_id`` required
+for ``REQUIRES`` relationships) under the v3 contract version. These are
 fixture/input integrity checks, not a candidate engine.
 """
 
@@ -57,9 +58,9 @@ def _objective_state(
     return None
 
 
-def test_all_fixtures_are_v2():
+def test_all_fixtures_are_v3():
     for scenario_id in SCENARIO_IDS:
-        assert SCENARIOS[scenario_id]["contract_version"] == "m3-simulation/v2", scenario_id
+        assert SCENARIOS[scenario_id]["contract_version"] == "m3-simulation/v3", scenario_id
 
 
 def test_anchors_are_unique_and_canonically_sorted():
