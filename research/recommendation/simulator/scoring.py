@@ -1,4 +1,4 @@
-"""Interpretable scoring and candidate ranking (#47, m3-simulation/v3).
+"""Interpretable scoring and candidate ranking (#47, m3-simulation/v4).
 
 Implements the frozen v3 scoring features, additive aggregation, ``ScoreTrace``,
 ``readiness_summary``, deterministic pre-rerank ordering, and the public

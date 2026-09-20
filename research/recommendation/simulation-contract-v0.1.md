@@ -7,7 +7,7 @@ evaluation rubric that M3 recommendation-simulation work builds against. It is a
 simulation-only contract and does not describe, extend, or modify production
 recommendation persistence.
 
-`contract_version = "m3-simulation/v3"`
+`contract_version = "m3-simulation/v4"`
 
 Changes to this contract after Issue #44 require evidence from implementation,
 security, performance, cost, or product constraints.
@@ -141,7 +141,7 @@ must never require real Auth users or hosted identifiers.
 
 ```text
 SimulationInput
-- contract_version            string        # "m3-simulation/v3"
+- contract_version            string        # "m3-simulation/v4"
 - scenario_id                 string
 - learner                     LearnerRef
 - ontology_snapshot           OntologySnapshot
@@ -674,7 +674,7 @@ continuation_value
 revisit_value
 ```
 
-`novelty` is **deferred beyond M3 v3** and MUST NOT be part of pre-rerank
+`novelty` is **deferred beyond M3 v4** and MUST NOT be part of pre-rerank
 scoring. `diversity_context` is **trace-only** and MUST NOT be a scoring feature,
 a `feature_weights` key, or a `pre_rerank_score` term; diversity is represented
 by `RerankTrace.diversity_adjustment` (§13). A candidate's `feature_values` may
@@ -984,17 +984,25 @@ not `RecommendationResult`, so no partial `RecommendationResult` exists after
 
 ```text
 RecommendationResult
+- candidate_id                string        # from the #47 RankedCandidate
 - target_entity_id            string
 - target_entity_version       integer
-- final_rank                  integer       # unique, contiguous, from 1
-- ordering_score              number        # internal only
+- target_entity_type          string        # non-null; only resolved ranked candidates
 - candidate_sources           string[]      # CandidateSource values, sorted
 - readiness_summary           ReadinessSummary
 - score_trace                 ScoreTrace
 - rerank_trace                RerankTrace
-- explanation_codes           string[]
+- ordering_score              number        # internal only
 - deterministic_tiebreak_key  string
+- final_rank                  integer       # unique, contiguous, from 1
+- explanation_codes           string[]      # 0..8 codes, ExplanationCode order (§15)
 ```
+
+`RecommendationResult` is exactly the §14.2 `RankedCandidate` shape plus
+`explanation_codes`; every `RankedCandidate` field is copied unchanged and no
+`RankedCandidate` field is dropped, renamed, or transformed. `#48` does not add
+`source_paths`, `prerequisite_evaluations`, `feature_inputs`, `SimulationResult`
+fields, `top_k` selection, or human-readable text.
 
 Frozen rules:
 
@@ -1028,7 +1036,7 @@ diversity_adjustment   RerankConfig.diversity_weight * diversity_signal (§13.1)
 ordering_score         pre_rerank_score + diversity_adjustment
 ```
 
-For v3 `DOMAIN_COVERAGE` this arithmetic is normative, not merely a trace
+For `DOMAIN_COVERAGE` this arithmetic is normative, not merely a trace
 representation. `ordering_score` remains internal only and is never a
 user-visible learner attribute.
 
@@ -1115,9 +1123,50 @@ Pipeline ownership:
 #49 -> SimulationResult (RankedCandidate[] + top_k selection + metrics + invariants)
 ```
 
+### 14.3 #48 public explanation API
+
+The smallest frozen public API boundary for #48 is:
+
+```text
+build_recommendation_results(ranked_candidates: list[dict]) -> list[dict]
+```
+
+Semantics: `ranked_candidates` is the full `RankedCandidate[]` returned by
+`rank_candidates` (§14.1). `SimulationInput`, raw learner state, and the original
+`Candidate[]` are **not** required; all explanation evidence is read from the
+`RankedCandidate` itself (§15). The function returns `RecommendationResult[]`,
+does not mutate its input, and does not rescore, rerank, apply `top_k`,
+recompute eligibility, or regenerate candidate provenance.
+
+Frozen #48 behavior:
+
+- **Immutability.** Results are freshly constructed; the input
+  `RankedCandidate[]` is not mutated, and nested mutable structures copied into a
+  `RecommendationResult` (for example `score_trace`, `rerank_trace`,
+  `readiness_summary`) MUST NOT alias input containers.
+- **Order preservation.** #48 never reranks. `final_rank`, `ordering_score`, and
+  `deterministic_tiebreak_key` are copied unchanged. The returned list is
+  serialized in `final_rank` ascending order; if the input order differs, the
+  output is reordered by `final_rank` without changing rank values.
+- **Upstream invariants.** #48 may assume #47 output has positive, unique, and
+  contiguous `final_rank` values and a non-null resolved `target_entity_type`
+  (§14.2). #48 does not recompute or repair these.
+- **Empty input.** `rank_candidates` returning `[]` yields `[]` (IN-10).
+- **Decision trace.** The #48 machine-readable decision trace is the existing
+  `candidate_sources` + `readiness_summary` + `score_trace` + `rerank_trace` +
+  `ordering_score` + `deterministic_tiebreak_key` + `final_rank`. No new
+  `DecisionTrace` schema is introduced. Full path-level #46 provenance
+  (`source_paths`, `prerequisite_evaluations`, `feature_inputs`) is **not**
+  duplicated into `RecommendationResult`; it remains in the original
+  `Candidate[]`, which #49 may combine with the ranked list. For
+  `RecommendationResult`, `candidate_sources` is the category-level source
+  summary and the only "where the candidate came from" information; §14.2's
+  prohibition on `source_paths` in the ranked shape still applies.
+
 ## 15. Explanation Contract
 
-Explanations are machine-readable codes. Codes justified by this contract:
+Explanations are machine-readable codes. The frozen vocabulary is exactly these
+eight codes, listed in **canonical order**:
 
 ```text
 EXPLICIT_INTEREST_MATCH
@@ -1130,14 +1179,96 @@ DIVERSITY_ADJUSTMENT
 EXPLICIT_PREFERENCE_OVERRIDES_INFERRED   # justified by §10 precedence
 ```
 
+No other explanation code is permitted. In particular there is no generic,
+fallback, "other", inferred-interest, or graph-relation code.
+
+Frozen rules:
+
 - Canonical explanations are machine-readable codes.
-- Human-readable rendering is optional and, if present, must be deterministic and
-  template-based. No LLM is required.
-- No psychological, personality, or identity inference is permitted.
-- Every final recommendation must carry at least one explanation code.
+- `explanation_codes` is an **ordered** list. Canonical order is exactly the
+  vocabulary order above (§4); codes MUST NOT be alphabetically sorted and MUST
+  NOT be reordered by importance.
+- **Emit all applicable codes** for a candidate, **deduplicate**, and serialize
+  in canonical order. There is no top-N cap and no per-source one-code rule.
+- **Cardinality is `0..8`.** An empty `explanation_codes` list is valid whenever
+  no frozen emission condition holds. M3 MUST NOT fabricate a generic code to
+  satisfy a non-empty requirement.
+- Explanations are **contextual, not strictly rank-causal.** A code is emitted
+  from the frozen evidence in the `RankedCandidate`; it does not require the
+  corresponding feature's `configured_weights` entry or `component_scores`
+  contribution to be greater than zero. Codes describe genuine recommendation
+  context even when that feature did not materially affect ordering.
 - Explanation codes are added by #48 when it forms a `RecommendationResult` from
-  a #47 `RankedCandidate` (§14.2). #47 `RankedCandidate` output does not carry
-  `explanation_codes`.
+  a #47 `RankedCandidate` (§14.2, §14.3). #47 `RankedCandidate` output does not
+  carry `explanation_codes`.
+- Human-readable rendering (sentences, tooltips, localized prose, generated
+  rationale, template rendering, LLM-written reasons) is **not part of #48** and
+  is deferred to future product/UI concerns. #48 emits deterministic machine
+  codes only.
+- No psychological, personality, or identity inference is permitted.
+- All explanation evidence is available in the `RankedCandidate`; no code
+  requires `SimulationInput`, raw learner state, or the original `Candidate[]`.
+
+### 15.1 Frozen emission rules
+
+Each rule reads only `RankedCandidate` fields and is deterministic. Let
+`fv = score_trace.feature_values`.
+
+```text
+EXPLICIT_INTEREST_MATCH
+    iff fv.explicit_interest > 0.0
+    (under v3 scoring this is exactly explicit MORE; LESS/NEUTRAL/absent do not
+     emit; configured weight does not matter)
+
+EXPLICIT_PREFERENCE_OVERRIDES_INFERRED
+    iff score_trace.reason_codes contains EXPLICIT_INFERRED_CONFLICT_SUPPRESSED
+    (do NOT recompute explicit/inferred conflict; #47 remains the authority for
+     the conflict arithmetic, §11.3)
+
+PREREQUISITES_SATISFIED
+    iff readiness_summary.hard_prerequisites_total > 0
+    AND readiness_summary.hard_prerequisites_satisfied
+        == readiness_summary.hard_prerequisites_total
+    AND readiness_summary.state == "SATISFIED"
+    (a candidate with 0 HARD prerequisites is vacuously SATISFIED for the #47
+     hard-gate summary but MUST NOT emit this code; do NOT use
+     feature_values.readiness == 1.0 because that feature also counts SOFT
+     prerequisites)
+
+GOOD_DIFFICULTY_FIT
+    iff fv.difficulty_fit >= 0.8
+    (inclusive; a simulation v4 explanation threshold, not a production
+     personalization constant; configured weight does not matter)
+
+SEMANTICALLY_RELATED
+    iff fv.semantic_similarity > 0.0
+    (0.0 and negative cosine do not emit; do NOT inspect raw source-path count
+     and do NOT introduce another semantic threshold; configured weight does not
+     matter)
+
+RELATED_TO_RECENT_EXPLORATION
+    iff candidate_sources contains HISTORY_CONTINUATION
+    ("RECENT" is the canonical explanation-code label only; it introduces no
+     wall-clock threshold, elapsed-time condition, or recency cutoff. M3
+     HISTORY_CONTINUATION provenance is sufficient, §8.2)
+
+REVISIT_OPPORTUNITY
+    iff candidate_sources contains REVISIT
+    (no retention decline, elapsed time, low assessment, positive revisit score,
+     or nonzero revisit weight is required)
+
+DIVERSITY_ADJUSTMENT
+    iff rerank_trace.reason_codes contains DOMAIN_COVERAGE_ADJUSTMENT
+    (do NOT recompute diversity behavior and do NOT emit merely because
+     rerank.strategy == "DOMAIN_COVERAGE" while the adjustment is zero)
+```
+
+GRAPH provenance alone has no dedicated explanation code in v4. Graph influence
+remains visible in `ScoreTrace` (for example `graph_proximity`). Similarly,
+positive inferred interest alone has no dedicated code and remains visible in
+`ScoreTrace`; a conflict with explicit preference may instead produce
+`EXPLICIT_PREFERENCE_OVERRIDES_INFERRED`. Explanation codes intentionally cover
+selected salient contexts rather than every scoring feature.
 
 ## 16. Exclusion Contract
 
@@ -1346,7 +1477,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v3",
+  "contract_version": "m3-simulation/v4",
   "scenario_id": "scn-minimal-001",
   "learner": {
     "learner_id": "10000000-0000-4000-8000-000000000001",
@@ -1537,11 +1668,15 @@ Identifiers below are fixed synthetic UUIDs.
 
 ### 24.5 Ranked candidate / final recommendation
 
-The object below is a `RecommendationResult`, i.e. a #47 `RankedCandidate`
-(§14.2) plus `explanation_codes` added by #48. The `candidate_id` textual
-encoding is illustrative and not frozen (§8).
+The array below contains two `RecommendationResult` objects, i.e. #47
+`RankedCandidate`s (§14.2) plus `explanation_codes` added by #48. The first
+carries multiple codes; the second satisfies no §15.1 emission condition and
+therefore carries `explanation_codes: []`, demonstrating the frozen `0..8`
+cardinality. The `candidate_id` textual encoding is illustrative and not frozen
+(§8).
 
 ```json
+[
 {
   "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
   "target_entity_id": "20000000-0000-4000-8000-000000000001",
@@ -1609,14 +1744,73 @@ encoding is illustrative and not frozen (§8).
     "SEMANTICALLY_RELATED"
   ],
   "deterministic_tiebreak_key": "TOPIC:20000000-0000-4000-8000-000000000001:1"
+},
+{
+  "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000007:1",
+  "target_entity_id": "20000000-0000-4000-8000-000000000007",
+  "target_entity_version": 1,
+  "target_entity_type": "TOPIC",
+  "final_rank": 2,
+  "ordering_score": 0.75,
+  "candidate_sources": ["GRAPH"],
+  "readiness_summary": {
+    "hard_prerequisites_total": 0,
+    "hard_prerequisites_satisfied": 0,
+    "state": "SATISFIED"
+  },
+  "score_trace": {
+    "feature_values": {
+      "readiness": 0.0,
+      "difficulty_fit": 0.5,
+      "explicit_interest": 0.0,
+      "inferred_interest": 0.0,
+      "graph_proximity": 0.5,
+      "semantic_similarity": 0.0,
+      "continuation_value": 0.0,
+      "revisit_value": 0.0
+    },
+    "configured_weights": {
+      "readiness": 1.0,
+      "difficulty_fit": 1.0,
+      "explicit_interest": 2.0,
+      "inferred_interest": 1.0,
+      "graph_proximity": 0.5,
+      "semantic_similarity": 1.0,
+      "continuation_value": 1.0,
+      "revisit_value": 1.0
+    },
+    "component_scores": {
+      "readiness": 0.0,
+      "difficulty_fit": 0.5,
+      "explicit_interest": 0.0,
+      "inferred_interest": 0.0,
+      "graph_proximity": 0.25,
+      "semantic_similarity": 0.0,
+      "continuation_value": 0.0,
+      "revisit_value": 0.0
+    },
+    "pre_rerank_score": 0.75,
+    "reason_codes": []
+  },
+  "rerank_trace": {
+    "pre_rerank_rank": 2,
+    "pre_rerank_score": 0.75,
+    "diversity_dimensions": {},
+    "diversity_adjustment": 0.0,
+    "post_rerank_rank": 2,
+    "reason_codes": []
+  },
+  "explanation_codes": [],
+  "deterministic_tiebreak_key": "TOPIC:20000000-0000-4000-8000-000000000007:1"
 }
+]
 ```
 
 ### 24.6 SimulationResult with invariants and metrics
 
 ```json
 {
-  "contract_version": "m3-simulation/v3",
+  "contract_version": "m3-simulation/v4",
   "scenario_id": "scn-explicit-more-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
@@ -1761,7 +1955,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
 
 ```json
 {
-  "contract_version": "m3-simulation/v3",
+  "contract_version": "m3-simulation/v4",
   "scenario_id": "scn-no-eligible-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
@@ -1881,9 +2075,12 @@ The following are frozen by Issue #44:
   `ScoreTrace`, explicit per-scenario `feature_weights` (§11, §12).
 - **Diversity/rerank trace** — frozen `DOMAIN_COVERAGE` strategy,
   `diversity_weight`, `RerankTrace`, deterministic tie-breaking (§13).
-- **RecommendationResult** — internal `ordering_score`, full trace,
-  deterministic tiebreak key (§14).
-- **Explanation codes** — machine-readable; template rendering optional (§15).
+- **RecommendationResult** — exact §14.2 `RankedCandidate` pass-through plus
+  `explanation_codes`; internal `ordering_score`, full trace, deterministic
+  tiebreak key; #48-owned `build_recommendation_results` API (§14).
+- **Explanation codes** — eight-code machine-readable vocabulary, contextual
+  emission rules, canonical order, `0..8` cardinality, dedupe, no fallback;
+  human-readable rendering explicitly out of #48 (§15).
 - **Exclusion codes** — minimal machine-readable vocabulary (§16).
 - **SimulationResult** — fingerprint, candidates, recommendations, invariants,
   metrics, excluded execution metadata (§17).
@@ -1905,7 +2102,46 @@ semantic-retrieval limits (thresholds, top-K, ANN) and production graph-traversa
 bounds also remain unfrozen; M3 simulation uses exhaustive deterministic
 retrieval over the scenario fixture space only. `novelty`, `diversity_context`
 as a scoring feature, and any MMR-like or non-domain diversity algorithm are
-deferred beyond M3 v3.
+deferred beyond M3 v4.
+
+### Erratum — Issue #48 explanation freeze (v3 → v4)
+
+Issue #48 adds newly frozen executable explanation semantics that did not exist
+at v3, and freezes the #48 `RecommendationResult` stage, so the contract version
+is bumped to `m3-simulation/v4`. v3 is already merged and consumed by the #47
+scoring/reranking engine; this is an additive semantic freeze on top of v3, not a
+v3 erratum. It changes no scoring, reranking, eligibility, candidate-generation,
+weight, or feature arithmetic.
+
+Changes from v3 to v4:
+
+1. Freezes the #48 `RecommendationResult` stage as the exact §14.2
+   `RankedCandidate` shape plus `explanation_codes`, including `candidate_id` and
+   `target_entity_type`, with no added or transformed fields (§14).
+2. Freezes the #48 public API
+   `build_recommendation_results(ranked_candidates) -> list[dict]`, input
+   immutability, `final_rank` order preservation, and borrowed #47 rank/type
+   invariants (§14.3).
+3. Freezes deterministic explanation emission rules for all eight codes from
+   `RankedCandidate` evidence only (§15.1).
+4. Freezes the explanation model as **contextual**, not strictly rank-causal:
+   code emission does not require a positive configured weight or component
+   score (§15).
+5. Repairs explanation cardinality from "at least one code" to `0..8`, with an
+   empty list valid and no generic/fallback code (§15).
+6. Freezes canonical code order (vocabulary order), emit-all-applicable,
+   deduplication, and no top-N cap (§15).
+7. Freezes `RELATED_TO_RECENT_EXPLORATION` as the canonical label for
+   `HISTORY_CONTINUATION` provenance with no wall-clock/recency threshold (§15.1).
+8. Confirms decision-trace ownership: existing #46/#47 traces are sufficient, no
+   new `DecisionTrace` schema, and full `source_paths` provenance is not
+   duplicated into `RecommendationResult` (§14.3).
+9. Places human-readable explanation prose explicitly out of #48 v4 (§15).
+
+This is a simulation-only semantic freeze: no production persistence, database,
+migration, API, weights, or embedding limits change. Fixtures migrate their
+`contract_version` to `m3-simulation/v4`; `contract_version` is now
+`m3-simulation/v4`.
 
 ### Erratum — Issue #47 scoring and diversity freeze (v2 → v3)
 

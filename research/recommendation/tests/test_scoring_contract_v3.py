@@ -64,7 +64,7 @@ def test_scoring_features_are_exactly_eight():
 
 def test_contract_defers_novelty_and_keeps_diversity_context_trace_only():
     text = CONTRACT_PATH.read_text(encoding="utf-8")
-    assert "`novelty` is **deferred beyond M3 v3**" in text
+    assert "`novelty` is **deferred beyond M3 v4**" in text
     assert "`diversity_context` is **trace-only**" in text
 
 
@@ -336,6 +336,6 @@ def test_fixture_fingerprints_are_deterministic():
         ), scenario_id
 
 
-def test_every_fixture_is_v3():
+def test_every_fixture_is_v4():
     for scenario_id, simulation_input in SCENARIOS.items():
-        assert simulation_input["contract_version"] == "m3-simulation/v3", scenario_id
+        assert simulation_input["contract_version"] == "m3-simulation/v4", scenario_id

@@ -1,4 +1,4 @@
-"""Deterministic DOMAIN_COVERAGE reranking (#47, m3-simulation/v3).
+"""Deterministic DOMAIN_COVERAGE reranking (#47, m3-simulation/v4).
 
 Applies the frozen v3 diversity strategy to an already-scored eligible
 candidate list. It never changes eligibility and never creates or removes a
