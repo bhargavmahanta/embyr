@@ -1,4 +1,4 @@
-"""Structural validation for the candidate pipeline (m3-simulation/v3).
+"""Structural validation for the candidate pipeline (m3-simulation/v4).
 
 Structural invalidity raises :class:`SimulationInputError`. A structurally valid
 source reference whose target is absent from the ontology is *not* a validation
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-CONTRACT_VERSION = "m3-simulation/v3"
+CONTRACT_VERSION = "m3-simulation/v4"
 
 ENTITY_TYPES = frozenset(
     {"DOMAIN", "AREA", "TOPIC", "CONCEPT", "SKILL", "TECHNIQUE", "JOURNEY"}

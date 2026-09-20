@@ -46,7 +46,7 @@ def test_scenario_ids_are_unique_and_complete():
 def test_scenario_shape(scenario_id):
     snapshot = SCENARIOS[scenario_id]
     assert snapshot["scenario_id"] == scenario_id
-    assert snapshot["contract_version"] == "m3-simulation/v3"
+    assert snapshot["contract_version"] == "m3-simulation/v4"
     assert snapshot["learner"]["synthetic"] is True
     assert snapshot["simulation_config"]["unknown_prerequisite_policy"] == "CONSERVATIVE_INELIGIBLE"
 
@@ -141,6 +141,16 @@ def test_frozen_vocabulary_constants_match_contract():
         "REVISIT",
     )
     assert len(EXPLANATION_CODES) == 8
+    assert EXPLANATION_CODES == (
+        "EXPLICIT_INTEREST_MATCH",
+        "RELATED_TO_RECENT_EXPLORATION",
+        "PREREQUISITES_SATISFIED",
+        "GOOD_DIFFICULTY_FIT",
+        "SEMANTICALLY_RELATED",
+        "REVISIT_OPPORTUNITY",
+        "DIVERSITY_ADJUSTMENT",
+        "EXPLICIT_PREFERENCE_OVERRIDES_INFERRED",
+    )
     assert len(FEATURES) == 8
     assert FEATURES == (
         "readiness",
