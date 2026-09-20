@@ -407,7 +407,12 @@ def validate_simulation_input(simulation_input: object) -> None:
         _field(config, "config_version", "input.simulation_config"),
         "input.simulation_config.config_version",
     )
-    _integer(_field(config, "top_k", "input.simulation_config"), "input.simulation_config.top_k")
+    top_k = _integer(
+        _field(config, "top_k", "input.simulation_config"), "input.simulation_config.top_k"
+    )
+    _require(
+        top_k >= 0, "input.simulation_config.top_k must be >= 0"
+    )
     policy = _field(config, "unknown_prerequisite_policy", "input.simulation_config")
     _require(
         policy == "CONSERVATIVE_INELIGIBLE",
