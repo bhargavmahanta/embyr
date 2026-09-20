@@ -16,9 +16,9 @@ def _entities_by_key(simulation_input: dict) -> dict[tuple[str, int], dict]:
     }
 
 
-def _preferences_by_entity(simulation_input: dict) -> dict[str, str]:
+def _preferences_by_key(simulation_input: dict) -> dict[tuple[str, int], str]:
     return {
-        preference["entity_id"]: preference["preference"]
+        (preference["entity_id"], preference["entity_version"]): preference["preference"]
         for preference in simulation_input["preference_snapshot"]["explicit_preferences"]
     }
 
@@ -32,7 +32,7 @@ def generate_candidates(simulation_input: dict) -> list[dict]:
     validate_simulation_input(simulation_input)
 
     entities = _entities_by_key(simulation_input)
-    preferences = _preferences_by_entity(simulation_input)
+    preferences = _preferences_by_key(simulation_input)
 
     normalized = normalize_nominations(generate_nominations(simulation_input))
 
@@ -41,7 +41,7 @@ def generate_candidates(simulation_input: dict) -> list[dict]:
         key = (entry["target_entity_id"], entry["target_entity_version"])
         entity = entities.get(key)
         prerequisite_evaluations = evaluate_prerequisites(key, entity, simulation_input)
-        explicit_preference = preferences.get(entry["target_entity_id"])
+        explicit_preference = preferences.get(key)
         candidates.append(
             build_candidate(
                 entry, entity, explicit_preference, prerequisite_evaluations

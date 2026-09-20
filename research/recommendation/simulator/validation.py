@@ -7,6 +7,8 @@ failure; it becomes an ``INVALID_TARGET`` candidate later (§16, §8.3).
 
 from __future__ import annotations
 
+import math
+
 CONTRACT_VERSION = "m3-simulation/v2"
 
 ENTITY_TYPES = frozenset(
@@ -83,6 +85,7 @@ def _number(value: object, ctx: str) -> float:
         isinstance(value, (int, float)) and not isinstance(value, bool),
         f"{ctx} must be a number",
     )
+    _require(math.isfinite(value), f"{ctx} must be a finite number")  # type: ignore[arg-type]
     return value  # type: ignore[return-value]
 
 
@@ -272,8 +275,24 @@ def validate_simulation_input(simulation_input: object) -> None:
         sim["contract_version"] == CONTRACT_VERSION,
         f"input.contract_version must be {CONTRACT_VERSION!r}",
     )
-    _mapping(sim["learner"], "input.learner")
-    _mapping(sim["simulation_config"], "input.simulation_config")
+    _text(sim["scenario_id"], "input.scenario_id")
+    learner = _mapping(sim["learner"], "input.learner")
+    _text(_field(learner, "learner_id", "input.learner"), "input.learner.learner_id")
+    _require(
+        learner.get("synthetic") is True,
+        "input.learner.synthetic must be true in M3",
+    )
+    config = _mapping(sim["simulation_config"], "input.simulation_config")
+    _text(
+        _field(config, "config_version", "input.simulation_config"),
+        "input.simulation_config.config_version",
+    )
+    _integer(_field(config, "top_k", "input.simulation_config"), "input.simulation_config.top_k")
+    policy = _field(config, "unknown_prerequisite_policy", "input.simulation_config")
+    _require(
+        policy == "CONSERVATIVE_INELIGIBLE",
+        "input.simulation_config.unknown_prerequisite_policy must be 'CONSERVATIVE_INELIGIBLE'",
+    )
     ontology_keys = _validate_ontology(sim)
     _validate_generation_context(sim, ontology_keys)
     _validate_learner_state(sim)

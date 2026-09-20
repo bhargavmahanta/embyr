@@ -59,6 +59,24 @@ def test_unresolved_preference_version_is_preserved():
     assert candidate["feature_inputs"]["explicit_preference"] == "MORE"
 
 
+def test_per_version_explicit_preferences_do_not_cross_contaminate():
+    sim = make_input(
+        entities=[topic("a", version=1), topic("a", version=2)],
+        preferences=[
+            preference("a", "MORE", entity_version=1),
+            preference("a", "PAUSED", entity_version=2),
+        ],
+    )
+    candidates = generate_candidates(sim)
+    version_1 = candidate_by_target(candidates, "a", version=1)
+    version_2 = candidate_by_target(candidates, "a", version=2)
+    assert version_1["eligibility_state"] == "ELIGIBLE"
+    assert version_1["exclusion_reasons"] == []
+    assert version_1["feature_inputs"]["explicit_preference"] == "MORE"
+    assert version_2["eligibility_state"] == "INELIGIBLE"
+    assert version_2["exclusion_reasons"] == ["EXPLICITLY_PAUSED"]
+
+
 def test_unresolved_revisit_target_is_invalid_target():
     sim = make_input(entities=[topic("a")], explorations=[exploration("e1", "ghost", "COMPLETED")])
     candidate = candidate_by_target(generate_candidates(sim), "ghost")

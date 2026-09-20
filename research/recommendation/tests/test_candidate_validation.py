@@ -166,6 +166,48 @@ def test_duplicate_explicit_preference_key_rejected():
         generate_candidates(sim)
 
 
+def test_non_finite_semantic_vector_rejected():
+    sim = _valid_input()
+    sim["semantic_space"]["vectors"][0]["vector"] = [float("nan"), 0.0, 0.0, 0.0]
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_non_finite_difficulty_rejected():
+    sim = _valid_input()
+    sim["ontology_snapshot"]["entities"][0]["difficulty_prior"] = float("inf")
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_malformed_learner_rejected():
+    sim = _valid_input()
+    sim["learner"] = {}
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_non_synthetic_learner_rejected():
+    sim = _valid_input()
+    sim["learner"]["synthetic"] = False
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_empty_scenario_id_rejected():
+    sim = _valid_input()
+    sim["scenario_id"] = ""
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_malformed_simulation_config_rejected():
+    sim = _valid_input()
+    sim["simulation_config"] = {}
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
 def test_structural_invalidity_is_not_invalid_target():
     sim = copy.deepcopy(_valid_input())
     sim["semantic_space"]["vectors"][0]["vector"] = [1.0, 0.0]
