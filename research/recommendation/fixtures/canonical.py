@@ -35,11 +35,18 @@ def sort_vectors(vectors: list[dict]) -> list[dict]:
 
 
 def sort_objective_states(states: list[dict]) -> list[dict]:
-    return sorted(states, key=lambda item: item["objective_id"])
+    return sorted(
+        states,
+        key=lambda item: (item["objective_id"], item["entity_id"], item["entity_version"]),
+    )
 
 
 def sort_interest_states(states: list[dict]) -> list[dict]:
     return sorted(states, key=lambda item: (item["entity_id"], item["entity_version"]))
+
+
+def sort_anchor_entities(anchors: list[dict]) -> list[dict]:
+    return sorted(anchors, key=lambda item: (item["entity_id"], item["entity_version"]))
 
 
 def sort_explorations(explorations: list[dict]) -> list[dict]:
@@ -47,7 +54,9 @@ def sort_explorations(explorations: list[dict]) -> list[dict]:
 
 
 def sort_explicit_preferences(preferences: list[dict]) -> list[dict]:
-    return sorted(preferences, key=lambda item: item["entity_id"])
+    return sorted(
+        preferences, key=lambda item: (item["entity_id"], item["entity_version"])
+    )
 
 
 def sort_domain_ids(domain_ids: list[str]) -> list[str]:

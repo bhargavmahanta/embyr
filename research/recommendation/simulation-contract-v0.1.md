@@ -7,7 +7,7 @@ evaluation rubric that M3 recommendation-simulation work builds against. It is a
 simulation-only contract and does not describe, extend, or modify production
 recommendation persistence.
 
-`contract_version = "m3-simulation/v1"`
+`contract_version = "m3-simulation/v2"`
 
 Changes to this contract after Issue #44 require evidence from implementation,
 security, performance, cost, or product constraints.
@@ -116,9 +116,10 @@ Canonical array ordering (frozen) removes every unordered-array ambiguity:
 - Arrays of objects are sorted ascending by their stable identity key:
   `entities` by `(entity_id, entity_version)`; `relationships` by
   `(target_entity_id, target_entity_version, relationship_type)`; `vectors` by
-  `(entity_id, entity_version)`; `objective_states` by `objective_id`;
+  `(entity_id, entity_version)`;   `objective_states` by `(objective_id, entity_id, entity_version)`;
   `interest_states` by `(entity_id, entity_version)`;
-  `explorations` by `exploration_id`; `explicit_preferences` by `entity_id`;
+  `anchor_entities` by `(entity_id, entity_version)`;
+  `explorations` by `exploration_id`; `explicit_preferences` by `(entity_id, entity_version)`;
   `prerequisite_evaluations` by `(objective_id, prerequisite_entity_id)`;
   `candidates_considered` by `candidate_id`; `ranked_recommendations` by
   `final_rank`; `invariant_results` by `invariant_code`.
@@ -140,10 +141,11 @@ must never require real Auth users or hosted identifiers.
 
 ```text
 SimulationInput
-- contract_version            string        # "m3-simulation/v1"
+- contract_version            string        # "m3-simulation/v2"
 - scenario_id                 string
 - learner                     LearnerRef
 - ontology_snapshot           OntologySnapshot
+- generation_context          CandidateGenerationContext
 - learner_state_snapshot      LearnerStateSnapshot
 - preference_snapshot         PreferenceSnapshot
 - exploration_history         ExplorationHistory
@@ -170,6 +172,28 @@ SimulationConfig
 truth and are never presented as a learner attribute.
 
 ```text
+CandidateGenerationContext
+- anchor_entities             EntityRef[]
+
+EntityRef
+- entity_id                   string
+- entity_version              integer
+```
+
+`generation_context` is simulation query context. It declares the anchor
+entities that GRAPH and SEMANTIC candidate generation start from. It is
+**required** in `m3-simulation/v2`; `anchor_entities` is required and `[]` is
+valid. Anchors are unique by `(entity_id, entity_version)`, must resolve in
+`ontology_snapshot`, and are canonically sorted by `(entity_id, entity_version)`
+(§4).
+
+Anchors are query-context declarations, not learner facts. An implementation
+MUST NOT derive anchors implicitly from `objective_states`, `interest_states`,
+`explicit_preferences`, or `exploration_history`. An entity MAY appear both as
+an anchor and in one of those learner-state domains; those are two explicit
+facts in separate domains and neither implies the other.
+
+```text
 LearnerStateSnapshot
 - snapshot_version            string
 - objective_states            ObjectiveStateSnapshot[]
@@ -179,6 +203,7 @@ LearnerStateSnapshot
 ObjectiveStateSnapshot
 - objective_id                string
 - entity_id                   string
+- entity_version              integer
 - state                       string        # derived objective/entity state vocabulary
 - understanding_estimate      number|null   # optional, synthetic
 
@@ -206,6 +231,7 @@ PreferenceSnapshot
 
 ExplicitPreferenceEntry
 - entity_id                   string
+- entity_version              integer       # ontology version selected in this snapshot
 - preference                  string        # NEUTRAL|MORE|LESS|PAUSED|NOT_INTERESTED
 - version                     integer
 ```
@@ -248,7 +274,7 @@ and from `LearnerStateSnapshot.challenge_state` (ability context). Field names
 follow the LLD domain; `entity_version` is added because simulation entities are
 versioned and the canonical identity key is `(entity_id, entity_version)`. An
 input with no inferred-interest state uses `interest_states: []`. The field is
-required in `m3-simulation/v1`: a producer MUST emit it, and a validator MUST
+required in `m3-simulation/v2`: a producer MUST emit it, and a validator MUST
 reject an input that omits it. Omission carries no separate meaning; it is a
 validation error, not an implicit `[]`.
 
@@ -278,7 +304,13 @@ RelationshipSnapshot
 - target_entity_id            string
 - target_entity_version       integer
 - requirement                 string|null   # HARD|SOFT; required for REQUIRES, null otherwise
+- objective_id                string|null   # required for REQUIRES, null otherwise
 ```
+
+For a `REQUIRES` relationship, `objective_id` is REQUIRED and `requirement` is
+REQUIRED. For every other relationship type, `objective_id` MUST be null and
+`requirement` MUST be null. `objective_id` identifies the learner objective
+whose state is used to evaluate that prerequisite entity (§7).
 
 Prerequisite relationships are evaluated against the target learning objective,
 not treated as universal laws.
@@ -364,6 +396,36 @@ An empty `prerequisite_evaluations` list means no prerequisite evaluations were
 required for that candidate. Absence of prerequisites is always represented by
 the empty list, never by a placeholder entry with a null prerequisite.
 
+Objective-relative lookup (frozen):
+
+- A `REQUIRES` relationship carries an explicit `objective_id` (§6). The
+  prerequisite state is derived from the learner's objective state matched by
+  `objective_id` AND the prerequisite entity identity
+  (`entity_id`, `entity_version`); it is never inferred from arbitrary
+  objective-state rows.
+- `ObjectiveStateSnapshot` carries `entity_version` (§5), so versioned
+  prerequisite evidence is representable. The logical objective-state key is
+  `(objective_id, entity_id, entity_version)`.
+- `PrerequisiteEvaluation.objective_id` copies the `REQUIRES` edge's
+  `objective_id`.
+- If no matching learner objective state exists → `UNKNOWN`.
+- If the input contains duplicate/ambiguous learner objective state for the same
+  logical `(objective_id, entity_id, entity_version)` → the input FAILS
+  validation.
+
+Readiness state mapping (frozen, no numeric threshold):
+
+```text
+objective state UNDERSTOOD      → SATISFIED
+objective state RETAINED        → SATISFIED
+no matching objective state     → UNKNOWN
+all other frozen objective states → UNSATISFIED
+```
+
+`understanding_estimate`, `evaluation_confidence`, `support_required`, and any
+other numeric evidence MAY be retained inside `evidence_summary` for
+inspectability, but they MUST NOT determine the M3 hard prerequisite state.
+
 ## 8. Candidate Contract
 
 A normalized candidate represents one target entity. Normalization is
@@ -374,7 +436,7 @@ Candidate
 - candidate_id                string        # derived deterministically from target identity
 - target_entity_id            string
 - target_entity_version       integer
-- target_entity_type          string
+- target_entity_type          string|null   # non-null iff target resolves; null iff unresolved (INVALID_TARGET)
 - source_paths                SourcePath[] # merged, deterministically ordered
 - prerequisite_evaluations    PrerequisiteEvaluation[]
 - eligibility_state           string        # ELIGIBLE|INELIGIBLE
@@ -401,12 +463,75 @@ Normalization rules (frozen):
 - All source paths for the same `(target_entity_id, target_entity_version)` merge
   into exactly one `Candidate`; `source_paths` is deduplicated and sorted by
   `(source enum order, canonical provenance)`.
-- `candidate_id` is derived from target identity only, so merging is stable and
-  independent of generation order.
+- `candidate_id` is derived deterministically and opaquely from
+  `(target_entity_id, target_entity_version)` only; `target_entity_type` is
+  metadata and is NOT part of logical identity. The textual encoding is not
+  frozen; consumers MUST NOT depend on its exact form.
 - Normalization never emits two candidates for the same final target, and never
   changes eligibility.
 - `exclusion_reasons` is deterministically ordered and carries one code per
   contract-required exclusion.
+
+### 8.1 Candidate source nomination rules
+
+Nomination is not eligibility and is not ranking value. A nominated candidate is
+still subject to hard eligibility evaluation (§7) and may be excluded.
+
+- `GRAPH` and `SEMANTIC` MUST NOT nominate an anchor entity itself. An anchor
+  MAY still become a candidate through `EXPLICIT_INTEREST`, `REVISIT`, or
+  another legitimate source.
+- `RELATED_TO` is candidate-generating (GRAPH). `REQUIRES` is readiness-only and
+  never nominates a candidate. `PART_OF` and `BUILDS_ON` are non-nominating in
+  M3. No other production ontology relationship type is assigned recommendation
+  semantics in M3.
+- `EXPLICIT_INTEREST` nominates entries whose preference is `MORE`, `LESS`,
+  `PAUSED`, or `NOT_INTERESTED`. `NEUTRAL` does not nominate. `PAUSED` and
+  `NOT_INTERESTED` are generated first and then filtered, so the exclusion trace
+  retains a real nomination source.
+- `HISTORY_CONTINUATION` nominates non-anchor entities reachable by a
+  `RELATED_TO` relationship from the target of an `ACTIVE` exploration.
+- `REVISIT` nominates the target of a `COMPLETED` exploration.
+- A `PAUSED` exploration nominates neither `HISTORY_CONTINUATION` nor `REVISIT`
+  in M3.
+
+### 8.2 History continuation and revisit
+
+A `COMPLETED` exploration is sufficient on its own to nominate the same target
+via `REVISIT`; M3 imposes no retention-decay requirement and `SimulationInput`
+carries no retention state. `HISTORY_CONTINUATION` nominates next entities
+related to an `ACTIVE` exploration rather than the exploration target itself.
+The contract does not freeze a universal revisit-vs-exploration ranking rule
+(§13); nomination and ranking value remain separate.
+
+### 8.3 Unresolved target representation
+
+`Candidate.target_entity_type` is a required but nullable field. It is the only
+Candidate field whose nullability is conditional.
+
+- A target that resolves in `ontology_snapshot.entities` MUST have a non-null
+  `target_entity_type` equal to that entity's frozen `entity_type`
+  (`DOMAIN|AREA|TOPIC|CONCEPT|SKILL|TECHNIQUE|JOURNEY`). `null` is invalid output
+  for a resolved target.
+- A structurally valid source reference whose `(target_entity_id, target_entity_version)` does NOT resolve in `ontology_snapshot.entities` MUST
+  emit a Candidate with `target_entity_type = null`, `eligibility_state =
+  INELIGIBLE`, and `exclusion_reasons` including `INVALID_TARGET`.
+- This is the ONLY situation in which `target_entity_type` may be null. No
+  `UNKNOWN`, `INVALID`, `MISSING`, `UNRESOLVED`, or other sentinel entity type is
+  permitted.
+- An unresolved target has no ontology `EntitySnapshot`, so its
+  `prerequisite_evaluations` MUST be empty (`[]`). Prerequisite reasons
+  (`PREREQUISITE_UNMET`, `INSUFFICIENT_STATE`) are not emitted merely because
+  ontology metadata is absent; `INVALID_TARGET` describes that failure.
+- Collect-all exclusions still apply where directly knowable from an independent
+  source. For example, an unresolved target that also carries an explicit
+  `NOT_INTERESTED` preference yields `exclusion_reasons` containing both
+  `NOT_INTERESTED` and `INVALID_TARGET`, serialized in frozen enum order.
+- Structural invalid input (missing required fields, invalid enum, malformed
+  shape, duplicate canonical keys where forbidden) still FAILS input validation;
+  it is never converted into an `INVALID_TARGET` candidate.
+- Target identity, deduplication, and `candidate_id` derivation are unchanged:
+  the logical key remains `(target_entity_id, target_entity_version)`, and
+  `target_entity_type` is not part of either.
 
 ## 9. Semantic Candidate Rule
 
@@ -419,6 +544,54 @@ conflated:
 Nomination does not imply eligibility, ordering, or admission to the final set.
 The contract freezes neither an embedding provider, a vector dimension, nor an
 ANN strategy.
+
+### 9.1 Semantic anchor retrieval
+
+For each anchor in `generation_context.anchor_entities` that has a semantic
+vector:
+
+- compare it to **every other structurally valid semantic-vector record**
+  (exhaustive, deterministic comparison); the candidate universe is the semantic
+  vector records, not only entities already resolved in the ontology;
+- exclude the anchor identity itself (an anchor is never nominated by its own
+  semantic retrieval).
+
+A structurally valid vector record whose `(entity_id, entity_version)` does not
+resolve in `ontology_snapshot` still nominates; it proceeds to
+normalization/eligibility as an unresolved target and becomes `INVALID_TARGET`
+(§8.3, §16). Trace preservation does not make an absent entity valid.
+
+M3 applies **no threshold, no top-K, no ANN, and no randomness**. If no anchor
+has a semantic vector, SEMANTIC emits no nominations.
+
+Semantic provenance MUST include `anchor_entity_id`, `anchor_entity_version`,
+and `cosine_similarity`. The raw cosine value is provenance and a raw input for
+later feature extraction; it is NOT a #46 score. Missing vectors simply do not
+participate; a mismatched vector dimension is an input validation failure.
+Production retrieval limits (provider, dimension, ANN, thresholds, top-K)
+remain deliberately unfrozen.
+
+### 9.2 Graph anchor traversal
+
+For each anchor in `generation_context.anchor_entities`:
+
+- traverse `RELATED_TO` edges only, treating adjacency deterministically;
+- discover every reachable non-anchor entity (exhaustive connected traversal,
+  no artificial maximum depth in M3);
+- retain the shortest hop distance;
+- if multiple shortest paths exist, choose one canonical path by the
+  lexicographically smallest ordered sequence of `(entity_id, entity_version)`.
+
+Graph provenance MUST contain `anchor_entity_id`, `anchor_entity_version`,
+`hop_distance`, and `canonical_path`. `canonical_path` is an ordered
+`EntityRef[]` from the anchor, through intermediate nodes, to the target; it
+includes the anchor and the target, and
+`hop_distance == len(canonical_path) - 1`. An anchor is never emitted as a GRAPH
+candidate through its own traversal.
+
+This path is simulation provenance/traceability only. It is NOT a production
+persistence schema, NOT a ranking feature by itself, and NOT a production
+graph-traversal contract; production traversal bounds remain unfrozen.
 
 ## 10. Explicit Preference Contract
 
@@ -463,6 +636,12 @@ suppresses all inferred signals.
 
 The trace exposes `explicit_interest` and `inferred_interest` separately
 wherever both apply.
+
+Candidate nomination (frozen): `MORE`, `LESS`, `PAUSED`, and `NOT_INTERESTED`
+nominate an `EXPLICIT_INTEREST` candidate; `NEUTRAL` does not. `PAUSED` and
+`NOT_INTERESTED` are generated and then hard-excluded, so their exclusion trace
+retains a real nomination source. A positive explicit preference never bypasses a
+hard readiness constraint (§8.1).
 
 ## 11. Feature and Scoring Trace
 
@@ -614,6 +793,18 @@ INSUFFICIENT_STATE      a contract-required decision lacks deciding evidence
   candidate has at least one.
 - `INSUFFICIENT_STATE` is not `PREREQUISITE_UNMET`: unknown is not unmet.
 - The vocabulary is intentionally minimal and must not be over-expanded.
+
+Invalid-target vs input invalidity (frozen):
+
+- **Structural invalid input FAILS validation.** Examples: missing required
+  fields, an invalid enum value, duplicate canonical keys, or a malformed
+  required shape.
+- A **structurally valid source record whose entity/version is absent from
+  `ontology_snapshot`** emits a normalized candidate that is `INELIGIBLE` with
+  exclusion reason `INVALID_TARGET` and `target_entity_type = null` (§8.3).
+- Eligibility evaluation **collects all applicable exclusion reasons** and does
+  not short-circuit; `exclusion_reasons` is serialized in the frozen enum order
+  (§4).
 
 ## 17. Simulation Output Contract
 
@@ -794,7 +985,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v1",
+  "contract_version": "m3-simulation/v2",
   "scenario_id": "scn-minimal-001",
   "learner": {
     "learner_id": "10000000-0000-4000-8000-000000000001",
@@ -816,12 +1007,21 @@ Identifiers below are fixed synthetic UUIDs.
       }
     ]
   },
+  "generation_context": {
+    "anchor_entities": [
+      {
+        "entity_id": "20000000-0000-4000-8000-000000000001",
+        "entity_version": 1
+      }
+    ]
+  },
   "learner_state_snapshot": {
     "snapshot_version": "state-001",
     "objective_states": [
       {
         "objective_id": "40000000-0000-4000-8000-000000000001",
         "entity_id": "20000000-0000-4000-8000-000000000001",
+        "entity_version": 1,
         "state": "EXPLORING"
       }
     ],
@@ -1032,7 +1232,7 @@ Identifiers below are fixed synthetic UUIDs.
 
 ```json
 {
-  "contract_version": "m3-simulation/v1",
+  "contract_version": "m3-simulation/v2",
   "scenario_id": "scn-explicit-more-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
@@ -1168,7 +1368,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
 
 ```json
 {
-  "contract_version": "m3-simulation/v1",
+  "contract_version": "m3-simulation/v2",
   "scenario_id": "scn-no-eligible-001",
   "config_version": "m3-sim-config/v1",
   "input_fingerprint": "sha256:1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
@@ -1178,11 +1378,30 @@ must succeed with an empty ranked set and all invariants `PASS`.
       "target_entity_id": "20000000-0000-4000-8000-000000000003",
       "target_entity_version": 1,
       "target_entity_type": "TOPIC",
-      "source_paths": [],
-      "prerequisite_evaluations": [],
+      "source_paths": [
+        {
+          "source": "EXPLICIT_INTEREST",
+          "provenance": {
+            "entity_id": "20000000-0000-4000-8000-000000000003",
+            "entity_version": 1,
+            "preference": "MORE",
+            "version": 1
+          }
+        }
+      ],
+      "prerequisite_evaluations": [
+        {
+          "objective_id": "40000000-0000-4000-8000-000000000009",
+          "prerequisite_entity_id": "20000000-0000-4000-8000-000000000008",
+          "requirement": "HARD",
+          "evidence_summary": {"positive_evidence_count": 0, "negative_evidence_count": 0},
+          "state": "UNKNOWN",
+          "reason_codes": ["NO_DECIDING_EVIDENCE"]
+        }
+      ],
       "eligibility_state": "INELIGIBLE",
       "exclusion_reasons": ["INSUFFICIENT_STATE"],
-      "feature_inputs": {}
+      "feature_inputs": {"explicit_preference": "MORE"}
     }
   ],
   "candidates_excluded": [
@@ -1191,11 +1410,30 @@ must succeed with an empty ranked set and all invariants `PASS`.
       "target_entity_id": "20000000-0000-4000-8000-000000000003",
       "target_entity_version": 1,
       "target_entity_type": "TOPIC",
-      "source_paths": [],
-      "prerequisite_evaluations": [],
+      "source_paths": [
+        {
+          "source": "EXPLICIT_INTEREST",
+          "provenance": {
+            "entity_id": "20000000-0000-4000-8000-000000000003",
+            "entity_version": 1,
+            "preference": "MORE",
+            "version": 1
+          }
+        }
+      ],
+      "prerequisite_evaluations": [
+        {
+          "objective_id": "40000000-0000-4000-8000-000000000009",
+          "prerequisite_entity_id": "20000000-0000-4000-8000-000000000008",
+          "requirement": "HARD",
+          "evidence_summary": {"positive_evidence_count": 0, "negative_evidence_count": 0},
+          "state": "UNKNOWN",
+          "reason_codes": ["NO_DECIDING_EVIDENCE"]
+        }
+      ],
       "eligibility_state": "INELIGIBLE",
       "exclusion_reasons": ["INSUFFICIENT_STATE"],
-      "feature_inputs": {}
+      "feature_inputs": {"explicit_preference": "MORE"}
     }
   ],
   "ranked_recommendations": [],
@@ -1226,10 +1464,21 @@ The following are frozen by Issue #44:
 
 - **Pipeline stages** — generation → normalization → eligibility → features →
   scoring → rerank → result + trace (§3).
-- **SimulationInput** — versioned, synthetic learner, snapshot domains, and
-  config; no real Auth users (§5, §6).
+- **SimulationInput** — versioned, synthetic learner, snapshot domains,
+  generation context, and config; no real Auth users (§5, §6).
+- **Candidate generation context** — explicit `CandidateGenerationContext`
+  anchors that are query context, not learner facts; GRAPH/SEMANTIC self-exclusion;
+  `RELATED_TO`-only graph traversal with canonical shortest-path provenance;
+  exhaustive deterministic semantic retrieval with no threshold/top-K/ANN
+  (§5, §8.1, §9).
+- **Prerequisite objective context** — `REQUIRES` carries a required
+  `objective_id`; objective-relative lookup matches `objective_id` AND
+  prerequisite entity identity; frozen readiness mapping
+  `UNDERSTOOD|RETAINED → SATISFIED`, absent → `UNKNOWN`, other states →
+  `UNSATISFIED` (§6, §7).
 - **Candidate** — normalized, merged, deterministic identity, source enum,
-  exclusion reasons (§8).
+  exclusion reasons, and `target_entity_type` nullable iff the target is
+  unresolved/`INVALID_TARGET` (§8, §8.3).
 - **Prerequisite/readiness contract** — objective-relative, derived, states
   `SATISFIED|UNSATISFIED|UNKNOWN`, eligibility `ELIGIBLE|INELIGIBLE`, conservative
   UNKNOWN policy, hard-filter vs soft-feature (§7).
@@ -1258,7 +1507,80 @@ The following are frozen by Issue #44:
 
 Deliberately **not** frozen here and deferred to evaluation in later M3 issues:
 numeric weights, embedding provider, embedding dimension, ANN strategy, the
-diversity algorithm, and any revisit-vs-exploration weighting.
+diversity algorithm, and any revisit-vs-exploration weighting. Production
+semantic-retrieval limits (thresholds, top-K, ANN) and production graph-traversal
+bounds also remain unfrozen; M3 simulation uses exhaustive deterministic
+retrieval over the scenario fixture space only.
+
+### Erratum — Issue #46 implementation/discovery evidence (v1 → v2)
+
+The v1 input shape could not define candidate generation or prerequisite
+evaluation unambiguously. Candidate generation needs explicit anchor/query
+context, and a `REQUIRES` relationship needs an explicit objective whose learner
+state is evaluated; neither was representable in `m3-simulation/v1`, whose
+fixtures were already a merged consumer. The contract version is bumped to
+`m3-simulation/v2`.
+
+Changes from v1 to v2:
+
+1. Adds required `CandidateGenerationContext` with `anchor_entities` to
+   `SimulationInput` (§5). Anchors are simulation query context and MUST NOT be
+   derived from learner-state or history domains.
+2. Makes prerequisite-objective context explicit: `RelationshipSnapshot`
+   carries `objective_id`, required for `REQUIRES` and null otherwise (§6, §7).
+   Readiness lookup matches `objective_id` AND prerequisite entity identity, and
+   the frozen state mapping is objective-state-based with no numeric threshold.
+3. Clarifies GRAPH/SEMANTIC anchor behavior: anchors are never self-nominated;
+   graph traversal is `RELATED_TO`-only, exhaustive, with canonical
+   shortest-path provenance; semantic retrieval is exhaustive with no
+   threshold/top-K/ANN (§8.1, §9).
+4. Fixes the zero-source worked example (§24.7): every considered candidate now
+   carries at least one genuine source path. The INSUFFICIENT_STATE candidate is
+   nominated by an explicit `MORE` preference and remains INELIGIBLE because its
+   hard prerequisite evidence is UNKNOWN, reinforcing that positive preference
+   never bypasses a hard readiness constraint.
+
+This is a simulation-only amendment: no production persistence change, no
+migration, no API change, no ranking semantics introduced, and no production
+retrieval or traversal limits frozen. The Issue #45 `interest_states` repair is
+preserved. `contract_version` is now `m3-simulation/v2`.
+
+#### Pre-consumer repair — unresolved target representation (Issue #46, v2)
+
+During Phase B implementation preflight, the `INVALID_TARGET` rule was found to
+be unrepresentable: `Candidate.target_entity_type` was non-nullable while an
+unresolved target has no ontology-derived type. v2 is repaired so
+`target_entity_type` is a required but nullable field, null **iff** the target is
+unresolved and carries `INVALID_TARGET` (§8, §8.3). This is a representation
+repair only: no candidate-generation semantics, ranking semantics, persistence,
+migration, or production API change. `contract_version` remains
+`m3-simulation/v2` because v2 exists only on the unmerged #46 branch and no
+runtime consumer has read it.
+
+#### Pre-consumer repair — versioned learner references and trace alignment (Issue #46, v2)
+
+Exact-head engine review found three representation gaps and one runtime
+alignment issue, all repaired within unmerged v2:
+
+1. `ExplicitPreferenceEntry` gained a required `entity_version` (§5). A
+   simulation preference resolves the entity-scoped production preference onto
+   an explicit ontology version; no version fallback, "latest", or "highest"
+   inference is permitted.
+2. `ObjectiveStateSnapshot` gained a required `entity_version` (§5), so
+   prerequisite evidence can match the versioned prerequisite entity identity
+   `(objective_id, entity_id, entity_version)` (§7).
+3. §9.1 now states the semantic candidate universe is structurally valid
+   semantic-vector records, so a valid vector record absent from the ontology
+   yields an `INVALID_TARGET` candidate instead of being silently dropped
+   (§8.3, §16).
+4. `prerequisite_evaluations` canonical order remains
+   `(objective_id, prerequisite_entity_id)` (§4); this is a runtime alignment,
+   not a schema change.
+
+Canonical ordering for `explicit_preferences` and `objective_states` is updated
+accordingly (§4). This is a simulation-only representation repair: no ranking
+semantics, persistence, migration, or production API change.
+`contract_version` remains `m3-simulation/v2`.
 
 ### Erratum — Issue #45 implementation evidence
 

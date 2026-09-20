@@ -25,6 +25,7 @@ semantic is altered.
 from __future__ import annotations
 
 from .canonical import (
+    sort_anchor_entities,
     sort_domain_ids,
     sort_entities,
     sort_explicit_preferences,
@@ -37,7 +38,7 @@ from .canonical import (
 from .semantic import EMBEDDING_MODEL, VECTOR_DIMENSION, semantic_vector
 from .timestamps import sim_time
 
-CONTRACT_VERSION = "m3-simulation/v1"
+CONTRACT_VERSION = "m3-simulation/v2"
 CONFIG_VERSION = "m3-sim-config/v1"
 UNKNOWN_PREREQUISITE_POLICY = "CONSERVATIVE_INELIGIBLE"
 INTEREST_MODEL_VERSION = "fixture-interest-state/v1"
@@ -106,24 +107,48 @@ def learner(learner_id: str) -> dict:
     return {"learner_id": learner_id, "synthetic": True}
 
 
+def entity_ref(entity_id: str, entity_version: int) -> dict:
+    return {"entity_id": entity_id, "entity_version": int(entity_version)}
+
+
+def candidate_generation_context(anchor_entities: list[dict] | tuple[dict, ...]) -> dict:
+    """Simulation query context: explicit GRAPH/SEMANTIC anchors.
+
+    Anchors are query-context declarations, never learner-state facts. They are
+    unique by ``(entity_id, entity_version)`` and canonically sorted.
+    """
+    anchors = list(anchor_entities)
+    keys = [(anchor["entity_id"], anchor["entity_version"]) for anchor in anchors]
+    if len(keys) != len(set(keys)):
+        raise ValueError("anchor_entities must be unique by (entity_id, entity_version)")
+    return {"anchor_entities": sort_anchor_entities(anchors)}
+
+
 def relationship(
     relationship_type: str,
     target_entity_id: str,
     target_entity_version: int,
     requirement: str | None = None,
+    objective_id: str | None = None,
 ) -> dict:
     if relationship_type not in RELATIONSHIP_TYPES:
         raise ValueError(f"unknown relationship_type: {relationship_type!r}")
     if relationship_type == "REQUIRES":
         if requirement not in PREREQUISITE_REQUIREMENTS:
             raise ValueError("REQUIRES relationships need a HARD or SOFT requirement")
-    elif requirement is not None:
-        raise ValueError("requirement is only valid for REQUIRES relationships")
+        if not objective_id:
+            raise ValueError("REQUIRES relationships need an objective_id")
+    else:
+        if requirement is not None:
+            raise ValueError("requirement is only valid for REQUIRES relationships")
+        if objective_id is not None:
+            raise ValueError("objective_id is only valid for REQUIRES relationships")
     return {
         "relationship_type": relationship_type,
         "target_entity_id": target_entity_id,
         "target_entity_version": target_entity_version,
         "requirement": requirement,
+        "objective_id": objective_id,
     }
 
 
@@ -163,10 +188,19 @@ def objective_state(
     entity_id: str,
     state: str,
     understanding_estimate: float | None = None,
+    *,
+    entity_version: int,
 ) -> dict:
     if state not in OBJECTIVE_STATES:
         raise ValueError(f"unknown objective state: {state!r}")
-    entry: dict = {"objective_id": objective_id, "entity_id": entity_id, "state": state}
+    if not isinstance(entity_version, int) or entity_version < 1:
+        raise ValueError("objective state entity_version must be a positive integer")
+    entry: dict = {
+        "objective_id": objective_id,
+        "entity_id": entity_id,
+        "entity_version": int(entity_version),
+        "state": state,
+    }
     if understanding_estimate is not None:
         entry["understanding_estimate"] = float(understanding_estimate)
     return entry
@@ -226,12 +260,21 @@ def learner_state_snapshot(
     }
 
 
-def explicit_preference(entity_id: str, preference: str, version: int = 1) -> dict:
+def explicit_preference(
+    entity_id: str, preference: str, version: int = 1, *, entity_version: int
+) -> dict:
     if preference not in EXPLICIT_PREFERENCES:
         raise ValueError(f"unknown explicit preference: {preference!r}")
     if version < 1:
         raise ValueError("preference version must be >= 1")
-    return {"entity_id": entity_id, "preference": preference, "version": int(version)}
+    if not isinstance(entity_version, int) or entity_version < 1:
+        raise ValueError("explicit preference entity_version must be a positive integer")
+    return {
+        "entity_id": entity_id,
+        "entity_version": int(entity_version),
+        "preference": preference,
+        "version": int(version),
+    }
 
 
 def preference_snapshot(snapshot_version: str, explicit_preferences: list[dict]) -> dict:
@@ -313,6 +356,7 @@ def simulation_input(
     scenario_id: str,
     learner_ref: dict,
     ontology_snapshot: dict,
+    generation_context: dict,
     learner_state_snapshot: dict,
     preference_snapshot: dict,
     exploration_history: dict,
@@ -324,6 +368,7 @@ def simulation_input(
         "scenario_id": scenario_id,
         "learner": learner_ref,
         "ontology_snapshot": ontology_snapshot,
+        "generation_context": generation_context,
         "learner_state_snapshot": learner_state_snapshot,
         "preference_snapshot": preference_snapshot,
         "exploration_history": exploration_history,

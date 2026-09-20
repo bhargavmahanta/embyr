@@ -62,6 +62,7 @@ class _Builder:
         self._interest_states: list[dict] = []
         self._preferences: list[dict] = []
         self._explorations: list[dict] = []
+        self._anchors: list[dict] = []
         self._challenge: dict | None = None
         self._objective_counter = 0
         self._exploration_counter = 0
@@ -113,10 +114,14 @@ class _Builder:
 
     # -- graph signals -------------------------------------------------------
     def require(
-        self, entity_id: str, prerequisite_entity_id: str, requirement: str = "HARD"
+        self,
+        entity_id: str,
+        prerequisite_entity_id: str,
+        objective_id: str,
+        requirement: str = "HARD",
     ) -> None:
         self._entities[entity_id]["relationships"].append(
-            b.relationship("REQUIRES", prerequisite_entity_id, 1, requirement)
+            b.relationship("REQUIRES", prerequisite_entity_id, 1, requirement, objective_id)
         )
 
     def relate(self, entity_id: str, other_entity_id: str) -> None:
@@ -131,13 +136,20 @@ class _Builder:
         *,
         state: str | None = None,
         understanding: float | None = None,
+        entity_version: int = 1,
     ) -> str:
         self._objective_counter += 1
         objective_id = self.ids.objective(self._objective_counter)
         self._entities[entity_id]["objective_ids"].append(objective_id)
         if state is not None:
             self._objective_states.append(
-                b.objective_state(objective_id, entity_id, state, understanding)
+                b.objective_state(
+                    objective_id,
+                    entity_id,
+                    state,
+                    understanding,
+                    entity_version=entity_version,
+                )
             )
         return objective_id
 
@@ -166,8 +178,14 @@ class _Builder:
     def inferred(self, entity_id: str, profile: dict) -> None:
         self.interest(entity_id, **profile)
 
-    def preference(self, entity_id: str, preference_value: str) -> None:
-        self._preferences.append(b.explicit_preference(entity_id, preference_value))
+    def preference(
+        self, entity_id: str, preference_value: str, entity_version: int = 1
+    ) -> None:
+        self._preferences.append(
+            b.explicit_preference(
+                entity_id, preference_value, entity_version=entity_version
+            )
+        )
 
     def exploration(
         self,
@@ -204,6 +222,16 @@ class _Builder:
         resolved = named_vector(vector) if isinstance(vector, str) else list(vector)
         self._vectors.append(b.semantic_vector(entity_id, 1, resolved))
 
+    # -- generation query context -------------------------------------------
+    def anchor_seed(self) -> None:
+        """Declare this scenario's ``seed`` topic as a GRAPH/SEMANTIC anchor.
+
+        Query context only; never derived from learner state. Scenarios whose
+        candidates are all reachable without GRAPH/SEMANTIC keep ``[]``.
+        """
+        seed = self.targets["seed"]
+        self._anchors.append(b.entity_ref(seed["entity_id"], seed["entity_version"]))
+
     # -- assembly ------------------------------------------------------------
     def build(self, *, top_k: int = 5) -> dict:
         entities = [
@@ -224,6 +252,7 @@ class _Builder:
             scenario_id=self.scenario_id,
             learner_ref=b.learner(self.ids.learner()),
             ontology_snapshot=b.ontology_snapshot(f"{self.scenario_id}-ontology", entities),
+            generation_context=b.candidate_generation_context(self._anchors),
             learner_state_snapshot=b.learner_state_snapshot(
                 f"{self.scenario_id}-learner-state",
                 objective_states=self._objective_states,
@@ -262,6 +291,7 @@ def _scenario_a() -> _Builder:
     s.vector(control, "near")
     s.preference(target, "MORE")
     s.preference(control, "NEUTRAL")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -280,6 +310,7 @@ def _scenario_b() -> _Builder:
     s.vector(control, "near")
     s.preference(target, "LESS")
     s.preference(control, "NEUTRAL")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -296,6 +327,7 @@ def _scenario_c() -> _Builder:
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.inferred(target, POSITIVE)
     s.preference(target, "PAUSED")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -312,18 +344,22 @@ def _scenario_d() -> _Builder:
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.inferred(target, POSITIVE)
     s.preference(target, "NOT_INTERESTED")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
 
 def _scenario_e() -> _Builder:
+    # No generation anchor: both meaningful targets are nominated through
+    # EXPLICIT_INTEREST. A NEUTRAL control would be unreachable under v2
+    # (NEUTRAL does not nominate and there is no GRAPH/SEMANTIC anchor), so the
+    # scenario deliberately contains no neutral comparator target.
     s = _Builder("scn-E-preference-conflict-001")
     domain = s.domain(1, "Foundations")
     s.topic("seed", 4, "Seed Topic", domains=[domain])
     more_target = s.topic("more_target", 1, "Explicitly Liked Topic", domains=[domain])
     less_target = s.topic("less_target", 2, "Explicitly Disliked Topic", domains=[domain])
-    control = s.topic("control", 3, "Control Topic", domains=[domain])
-    for entity_id in (more_target, less_target, control):
+    for entity_id in (more_target, less_target):
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "near")
     s.vector(s.targets["seed"]["entity_id"], "seed")
@@ -331,7 +367,6 @@ def _scenario_e() -> _Builder:
     s.inferred(less_target, POSITIVE)
     s.preference(more_target, "MORE")
     s.preference(less_target, "LESS")
-    s.preference(control, "NEUTRAL")
     s.challenge(domain, 0.5)
     return s
 
@@ -345,14 +380,17 @@ def _prerequisite_scenario(
     prerequisite = s.topic("prerequisite", 3, "Prerequisite Topic", domains=[domain])
     target = s.topic("target", 1, "Dependent Topic", domains=[domain])
     control = s.topic("control", 2, "Independent Topic", domains=[domain])
-    s.require(target, prerequisite)
-    s.objective(prerequisite, state=prerequisite_state, understanding=understanding)
+    prerequisite_objective = s.objective(
+        prerequisite, state=prerequisite_state, understanding=understanding
+    )
+    s.require(target, prerequisite, prerequisite_objective)
     s.objective(target, state="EXPLORING", understanding=0.5)
     s.objective(control, state="EXPLORING", understanding=0.5)
     s.inferred(control, MILD_POSITIVE)
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.vector(target, "near")
     s.vector(control, "near")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -382,6 +420,7 @@ def _difficulty_scenario(scenario_id: str) -> _Builder:
         s.objective(target, state="EXPLORING", understanding=0.5)
         s.vector(target, "mid")
     s.vector(s.targets["seed"]["entity_id"], "seed")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -409,6 +448,7 @@ def _scenario_l() -> _Builder:
     s.vector(seed, "seed")
     s.vector(near, "near")
     s.vector(far, "far")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -425,6 +465,7 @@ def _scenario_m() -> _Builder:
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "mid")
     s.vector(seed, "seed")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -442,6 +483,7 @@ def _scenario_n() -> _Builder:
     s.vector(seed, "seed")
     s.objective(seed, state="EXPLORING", understanding=0.5)
     s.exploration(seed, "ACTIVE", "DIRECT_INTEREST", start=0)
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -457,6 +499,7 @@ def _scenario_o() -> _Builder:
         s.vector(entity_id, "mid")
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.exploration(target, "COMPLETED", "DIRECT_INTEREST", start=0, returned=30, completed=60)
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -475,6 +518,7 @@ def _scenario_p() -> _Builder:
     s.vector(cluster_a, "near")
     s.vector(cluster_b, "near")
     s.vector(spread, "mid")
+    s.anchor_seed()
     s.challenge(domain_a, 0.5)
     return s
 
@@ -489,6 +533,7 @@ def _scenario_q() -> _Builder:
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "near")
     s.vector(s.targets["seed"]["entity_id"], "seed")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -503,6 +548,7 @@ def _scenario_r() -> _Builder:
     s.vector(seed, "seed")
     s.vector(target, "near")
     s.preference(target, "MORE")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -515,6 +561,7 @@ def _scenario_s() -> _Builder:
     s.relate(target, seed)
     s.vector(seed, "seed")
     s.vector(target, "near")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -527,7 +574,8 @@ def _scenario_t() -> _Builder:
     paused = s.topic("paused", 1, "Paused Topic", domains=[domain])
     disliked = s.topic("disliked", 2, "Disliked Topic", domains=[domain])
     dependent = s.topic("dependent", 5, "Dependent Topic", domains=[domain])
-    s.require(dependent, prerequisite)
+    prerequisite_objective = s.objective(prerequisite)
+    s.require(dependent, prerequisite, prerequisite_objective)
     for entity_id in (paused, disliked, dependent):
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "near")
@@ -535,6 +583,7 @@ def _scenario_t() -> _Builder:
     s.inferred(paused, POSITIVE)
     s.preference(paused, "PAUSED")
     s.preference(disliked, "NOT_INTERESTED")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -551,13 +600,14 @@ def _scenario_x1() -> _Builder:
     prerequisite = s.topic("prerequisite", 3, "Prerequisite Topic", domains=[domain])
     target = s.topic("target", 1, "Liked but Unready Topic", domains=[domain])
     control = s.topic("control", 2, "Ready Topic", domains=[domain])
-    s.require(target, prerequisite)
-    s.objective(prerequisite, state="ENCOUNTERED", understanding=0.0)
+    prerequisite_objective = s.objective(prerequisite, state="ENCOUNTERED", understanding=0.0)
+    s.require(target, prerequisite, prerequisite_objective)
     for entity_id in (target, control):
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.preference(entity_id, "MORE")
         s.vector(entity_id, "near")
     s.vector(s.targets["seed"]["entity_id"], "seed")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -574,6 +624,7 @@ def _scenario_x2() -> _Builder:
     s.vector(s.targets["seed"]["entity_id"], "seed")
     s.inferred(target, POSITIVE)
     s.preference(target, "NOT_INTERESTED")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -592,6 +643,7 @@ def _scenario_x3() -> _Builder:
     s.vector(target, "near")
     s.vector(graph_only, "mid")
     s.preference(target, "MORE")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -611,6 +663,7 @@ def _scenario_x4() -> _Builder:
     s.vector(cluster_a, "near")
     s.vector(cluster_b, "near")
     s.vector(ineligible, "near")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -629,6 +682,7 @@ def _scenario_x5() -> _Builder:
     s.vector(target_a, "near")
     s.vector(target_b, "near")
     s.vector(spread, "mid")
+    s.anchor_seed()
     s.challenge(domain_a, 0.5)
     return s
 
@@ -640,6 +694,7 @@ def _scenario_x6() -> _Builder:
     near = s.topic("near", 1, "Semantic Neighbor", domains=[domain])
     s.vector(seed, "seed")
     s.vector(near, "near")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
@@ -654,9 +709,10 @@ def _scenario_x7() -> _Builder:
     disliked = s.topic("disliked", 2, "Disliked Topic", domains=[domain])
     dependent = s.topic("dependent", 3, "Unready Topic", domains=[domain])
     unknown_dependent = s.topic("unknown_dependent", 6, "Unknown Prereq Topic", domains=[domain])
-    s.require(dependent, unmet_prerequisite)
-    s.require(unknown_dependent, unknown_source)
-    s.objective(unmet_prerequisite, state="ENCOUNTERED", understanding=0.0)
+    unmet_objective = s.objective(unmet_prerequisite, state="ENCOUNTERED", understanding=0.0)
+    unknown_objective = s.objective(unknown_source)
+    s.require(dependent, unmet_prerequisite, unmet_objective)
+    s.require(unknown_dependent, unknown_source, unknown_objective)
     for entity_id in (paused, disliked, dependent, unknown_dependent):
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "near")
@@ -664,6 +720,7 @@ def _scenario_x7() -> _Builder:
     s.inferred(paused, POSITIVE)
     s.preference(paused, "PAUSED")
     s.preference(disliked, "NOT_INTERESTED")
+    s.anchor_seed()
     s.challenge(domain, 0.5)
     return s
 
