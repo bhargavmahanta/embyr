@@ -173,6 +173,30 @@ def test_ranked_candidate_exact_shape():
     }
 
 
+def test_eligible_unresolved_entity_fails():
+    sim = make_input(
+        entities=[topic("a")],
+        preferences=[preference("a", "MORE")],
+        feature_weights={"explicit_interest": 1.0},
+    )
+    candidate = copy.deepcopy(generate_candidates(sim)[0])
+    candidate["target_entity_id"] = "ghost"
+    with pytest.raises(SimulationInputError):
+        rank_candidates(sim, [candidate])
+
+
+def test_eligible_type_mismatch_fails():
+    sim = make_input(
+        entities=[topic("a")],
+        preferences=[preference("a", "MORE")],
+        feature_weights={"explicit_interest": 1.0},
+    )
+    candidate = copy.deepcopy(generate_candidates(sim)[0])
+    candidate["target_entity_type"] = "CONCEPT"
+    with pytest.raises(SimulationInputError):
+        rank_candidates(sim, [candidate])
+
+
 @pytest.mark.parametrize("bad_state", ["UNSATISFIED", "UNKNOWN"])
 def test_eligible_with_non_satisfied_hard_prerequisite_fails(bad_state):
     sim = SCENARIOS["scn-G-prereq-satisfied-001"]

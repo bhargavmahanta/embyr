@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from research.recommendation.simulator import rerank
+from research.recommendation.simulator import SimulationInputError, rerank
 
 
 def _entry(entity_id: str, pre_score: float, pre_rank: int) -> dict:
@@ -154,6 +154,16 @@ def test_adjustment_emits_reason_code_only_when_positive():
     by_id = {e["target_entity_id"]: e for e in scored}
     assert by_id["c"]["rerank_trace"]["reason_codes"] == ["DOMAIN_COVERAGE_ADJUSTMENT"]
     assert by_id["a"]["rerank_trace"]["reason_codes"] == []
+
+
+def test_non_finite_ordering_score_fails():
+    scored = [_entry("a", 1.7e308, 1), _entry("b", 1.7e308, 2), _entry("c", 1.7e308, 3)]
+    with pytest.raises(SimulationInputError):
+        rerank.apply_rerank(
+            scored,
+            _entities(a=["d1"], b=["d1"], c=["d2"]),
+            {"strategy": "DOMAIN_COVERAGE", "diversity_weight": 1e308},
+        )
 
 
 def test_deterministic_ties_resolve_by_tiebreak_key():

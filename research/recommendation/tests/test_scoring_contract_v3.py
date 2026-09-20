@@ -178,6 +178,27 @@ def test_validation_rejects_out_of_range_ability_estimate():
         validate_simulation_input(sim)
 
 
+def test_validation_rejects_non_string_domain_id():
+    sim = make_input(entities=[topic("a")])
+    sim["ontology_snapshot"]["entities"][0]["domain_ids"] = ["d1", 2]
+    with pytest.raises(SimulationInputError):
+        validate_simulation_input(sim)
+
+
+def test_validation_rejects_incomplete_interest_state():
+    sim = make_input(entities=[topic("a")])
+    sim["learner_state_snapshot"]["interest_states"] = [
+        {
+            "entity_id": "a",
+            "entity_version": 1,
+            "recent_affinity": 0.1,
+            "long_term_affinity": 0.2,
+        }
+    ]
+    with pytest.raises(SimulationInputError):
+        validate_simulation_input(sim)
+
+
 def test_validation_rejects_out_of_range_inferred_affinity():
     sim = _base_input()
     sim["learner_state_snapshot"]["interest_states"] = [

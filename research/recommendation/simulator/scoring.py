@@ -238,10 +238,21 @@ def rank_candidates(simulation_input: dict, candidates: list[dict]) -> list[dict
     scored: list[dict] = []
     for candidate in eligible:
         key = (candidate["target_entity_id"], candidate["target_entity_version"])
+        entity = entities.get(key)
+        if entity is None:
+            raise SimulationInputError(
+                f"eligible candidate {key!r} does not resolve in ontology"
+            )
+        if entity["entity_type"] != candidate["target_entity_type"]:
+            raise SimulationInputError(
+                f"eligible candidate {key!r} target_entity_type "
+                f"{candidate['target_entity_type']!r} does not match ontology "
+                f"entity_type {entity['entity_type']!r}"
+            )
         scored.append(
             score_candidate(
                 candidate,
-                entities.get(key),
+                entity,
                 interest_states.get(key),
                 challenge,
                 weights,

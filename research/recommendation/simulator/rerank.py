@@ -7,6 +7,8 @@ candidate. Null rerank is a strict no-op.
 
 from __future__ import annotations
 
+import math
+
 from .validation import SimulationInputError
 
 #: #47-owned RerankTrace reason code (§13.3).
@@ -75,8 +77,11 @@ def _domain_coverage_rerank(
         key = (entry["target_entity_id"], entry["target_entity_version"])
         signal = rarity[key] - minimum_rarity
         adjustment = diversity_weight * signal
+        ordering_score = entry["pre_rerank_score"] + adjustment
+        if not math.isfinite(ordering_score):
+            raise SimulationInputError("ordering_score is not finite")
         entry["diversity_adjustment"] = adjustment
-        entry["ordering_score"] = entry["pre_rerank_score"] + adjustment
+        entry["ordering_score"] = ordering_score
         entry["rerank_trace"] = {
             "pre_rerank_rank": entry["pre_rerank_rank"],
             "pre_rerank_score": entry["pre_rerank_score"],

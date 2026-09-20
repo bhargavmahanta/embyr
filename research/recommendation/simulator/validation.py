@@ -176,7 +176,9 @@ def _validate_ontology(sim: dict) -> set[tuple[str, int]]:
             1.0,
             f"{ctx}.difficulty_prior",
         )
-        _sequence(_field(entity, "domain_ids", ctx), f"{ctx}.domain_ids")
+        domain_ids = _sequence(_field(entity, "domain_ids", ctx), f"{ctx}.domain_ids")
+        for domain_index, domain_id in enumerate(domain_ids):
+            _text(domain_id, f"{ctx}.domain_ids[{domain_index}]")
         _sequence(_field(entity, "objective_ids", ctx), f"{ctx}.objective_ids")
         relationships = _sequence(
             _field(entity, "relationships", ctx), f"{ctx}.relationships"
@@ -291,6 +293,23 @@ def _validate_learner_state(sim: dict) -> None:
                 1.0,
                 f"{ctx}.{field_name}",
             )
+        _number(_field(entry, "user_initiated_strength", ctx), f"{ctx}.user_initiated_strength")
+        _number(
+            _field(entry, "algorithm_exposure_strength", ctx),
+            f"{ctx}.algorithm_exposure_strength",
+        )
+        revisit_count = _integer(
+            _field(entry, "voluntary_revisit_count", ctx),
+            f"{ctx}.voluntary_revisit_count",
+        )
+        _require(revisit_count >= 0, f"{ctx}.voluntary_revisit_count must be >= 0")
+        last_interaction_at = _field(entry, "last_interaction_at", ctx)
+        _require(
+            last_interaction_at is None or isinstance(last_interaction_at, str),
+            f"{ctx}.last_interaction_at must be a string or null",
+        )
+        _text(_field(entry, "computed_at", ctx), f"{ctx}.computed_at")
+        _text(_field(entry, "model_version", ctx), f"{ctx}.model_version")
 
 
 def _validate_preferences(sim: dict) -> None:
