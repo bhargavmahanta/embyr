@@ -859,10 +859,37 @@ missing difficulty_prior  -> 0.0
 missing challenge state   -> 0.0    # no inferred ability value
 ```
 
-The ability estimate is taken from the candidate's relevant area/domain challenge
-state. A challenge value is never inferred. This mapping is simulation-only and
-does not describe a production learner model. Its importance is controlled only
-by `configured_weights.difficulty_fit`.
+Candidate→challenge matching (frozen): `ChallengeStateSnapshot` remains a single
+nullable learner challenge-state object. A candidate **matches** the challenge
+state iff:
+
+```text
+challenge_state.area_id is present in the candidate EntitySnapshot.domain_ids
+```
+
+This is an **ANY-membership** rule. A candidate may have zero, one, or multiple
+`domain_ids`; membership of `area_id` in that set is sufficient, and no other
+domain selects or averages anything. Because `SimulationInput` carries at most
+one `ChallengeStateSnapshot`, there is no multi-challenge-state selection or
+aggregation problem in v3.
+
+```text
+challenge_state is null                                  -> difficulty_fit = 0.0
+candidate entity has no domain matching challenge.area_id -> difficulty_fit = 0.0
+challenge.area_id in candidate.domain_ids                 -> 1.0 - abs(difficulty_prior - ability_estimate)
+```
+
+A candidate that cannot resolve its ontology metadata cannot be ranked, because
+unresolved targets are `INELIGIBLE` (§8.3). Matching MUST NOT use nearest-area,
+parent-area lookup, first domain, averaging across domains, graph traversal, or
+multiple challenge states.
+
+`ChallengeStateSnapshot.area_id` is compared to `EntitySnapshot.domain_ids` by
+identifier equality for simulation difficulty matching. This does NOT claim that
+every production ontology "area" is equivalent to a domain; it is the explicit
+M3 simulation matching coordinate. A challenge value is never inferred. This
+mapping is simulation-only and does not describe a production learner model. Its
+importance is controlled only by `configured_weights.difficulty_fit`.
 
 ## 13. Diversity / Rerank Contract
 
@@ -950,6 +977,11 @@ freeze a universal revisit-wins rule.
 
 ## 14. Final Recommendation Contract
 
+`RecommendationResult` is assembled downstream: #48 forms it from a #47
+`RankedCandidate` (§14.2) plus `explanation_codes`. #47 emits `RankedCandidate`,
+not `RecommendationResult`, so no partial `RecommendationResult` exists after
+#47.
+
 ```text
 RecommendationResult
 - target_entity_id            string
@@ -957,7 +989,7 @@ RecommendationResult
 - final_rank                  integer       # unique, contiguous, from 1
 - ordering_score              number        # internal only
 - candidate_sources           string[]      # CandidateSource values, sorted
-- readiness_summary           object
+- readiness_summary           ReadinessSummary
 - score_trace                 ScoreTrace
 - rerank_trace                RerankTrace
 - explanation_codes           string[]
@@ -1016,6 +1048,73 @@ original `Candidate[]`, the ranked eligible list, the `top_k` selection, and
 metrics. Internal helpers (feature extraction, per-candidate scoring, rerank) are
 implementation details and are not separately frozen.
 
+### 14.2 #47 RankedCandidate and readiness_summary
+
+`rank_candidates(...)` returns `RankedCandidate[]`. A `RankedCandidate` is the
+#47-owned ranked shape; it is not a partial `RecommendationResult`.
+
+```text
+RankedCandidate
+- candidate_id                string        # from the #46 Candidate; encoding not frozen (§8)
+- target_entity_id            string
+- target_entity_version       integer
+- target_entity_type          string        # non-null; only resolved ELIGIBLE candidates are ranked
+- candidate_sources           string[]      # CandidateSource values, sorted (§4)
+- readiness_summary           ReadinessSummary
+- score_trace                 ScoreTrace
+- rerank_trace                RerankTrace
+- ordering_score              number
+- deterministic_tiebreak_key  string
+- final_rank                  integer       # 1-based, unique, contiguous
+```
+
+`RankedCandidate` MUST NOT carry `explanation_codes`, `source_paths`,
+`prerequisite_evaluations`, `feature_inputs`, any `SimulationResult` field, or
+any `top_k` selection. `candidate_sources` is a machine-readable source summary;
+it does not replace the #46 `Candidate.source_paths`, which remain available to
+#49 in the original `Candidate[]`.
+
+```text
+ReadinessSummary
+- hard_prerequisites_total        integer
+- hard_prerequisites_satisfied    integer
+- state                           ReadinessState   # SATISFIED for #47 ranked output
+```
+
+`readiness_summary` describes the **HARD eligibility gate** and is derived only
+from `Candidate.prerequisite_evaluations`:
+
+```text
+hard_prerequisites_total      = count(evaluations with requirement == HARD)
+hard_prerequisites_satisfied  = count(HARD evaluations with state == SATISFIED)
+```
+
+Because only `ELIGIBLE` candidates may be ranked, every HARD prerequisite of a
+ranked candidate is already `SATISFIED` under #46, so
+`hard_prerequisites_satisfied == hard_prerequisites_total` and
+`state == "SATISFIED"` for all #47 ranked output. A candidate with 0 HARD
+prerequisites is vacuously `SATISFIED` (`0 / 0 / SATISFIED`); this is the
+intentional vacuous satisfaction of the hard eligibility gate.
+
+SOFT prerequisite outcomes are NOT represented in `readiness_summary`. They
+remain available through the separate scoring feature
+`score_trace.feature_values.readiness`, whose v3 formula (§11.2) counts HARD and
+SOFT prerequisites. #48 may consume both.
+
+A candidate marked `ELIGIBLE` that nevertheless carries a HARD evaluation whose
+state is `UNSATISFIED` or `UNKNOWN` is inconsistent #46 output and is an
+invariant violation: #47 MUST fail rather than silently summarize it as
+`SATISFIED`.
+
+Pipeline ownership:
+
+```text
+#46 -> Candidate
+#47 -> RankedCandidate
+#48 -> RecommendationResult (RankedCandidate + explanation_codes and any #48-owned explanation fields)
+#49 -> SimulationResult (RankedCandidate[] + top_k selection + metrics + invariants)
+```
+
 ## 15. Explanation Contract
 
 Explanations are machine-readable codes. Codes justified by this contract:
@@ -1036,6 +1135,9 @@ EXPLICIT_PREFERENCE_OVERRIDES_INFERRED   # justified by §10 precedence
   template-based. No LLM is required.
 - No psychological, personality, or identity inference is permitted.
 - Every final recommendation must carry at least one explanation code.
+- Explanation codes are added by #48 when it forms a `RecommendationResult` from
+  a #47 `RankedCandidate` (§14.2). #47 `RankedCandidate` output does not carry
+  `explanation_codes`.
 
 ## 16. Exclusion Contract
 
@@ -1433,12 +1535,18 @@ Identifiers below are fixed synthetic UUIDs.
 }
 ```
 
-### 24.5 Ranked RecommendationResult
+### 24.5 Ranked candidate / final recommendation
+
+The object below is a `RecommendationResult`, i.e. a #47 `RankedCandidate`
+(§14.2) plus `explanation_codes` added by #48. The `candidate_id` textual
+encoding is illustrative and not frozen (§8).
 
 ```json
 {
+  "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
   "target_entity_id": "20000000-0000-4000-8000-000000000001",
   "target_entity_version": 1,
+  "target_entity_type": "TOPIC",
   "final_rank": 1,
   "ordering_score": 5.16,
   "candidate_sources": ["GRAPH", "SEMANTIC"],
@@ -1543,8 +1651,10 @@ Identifiers below are fixed synthetic UUIDs.
   "candidates_excluded": [],
   "ranked_recommendations": [
     {
+      "candidate_id": "cand:TOPIC:20000000-0000-4000-8000-000000000001:1",
       "target_entity_id": "20000000-0000-4000-8000-000000000001",
       "target_entity_version": 1,
+      "target_entity_type": "TOPIC",
       "final_rank": 1,
       "ordering_score": 5.16,
       "candidate_sources": ["GRAPH", "SEMANTIC"],
@@ -1838,6 +1948,34 @@ migration, no API change, and no production weights or embedding limits are
 frozen. Fixtures migrate their `contract_version` to `m3-simulation/v3` and
 configure only the feature weights each scenario exercises. `contract_version`
 is now `m3-simulation/v3`.
+
+#### Pre-consumer repair — ranked candidate contract (Issue #47, v3)
+
+Exact-head engine review of #47 found three pre-consumer normative ambiguities in
+the unmerged `m3-simulation/v3`. They are clarified here without a version bump,
+because v3 has no merged downstream consumer and no scoring, reranking, weight,
+or feature formula changes:
+
+1. **Difficulty matching (Finding A).** §12 now freezes the candidate→challenge
+   rule as ANY-membership `challenge_state.area_id ∈ EntitySnapshot.domain_ids`,
+   with absent/unmatched challenge yielding `difficulty_fit = 0.0`. No
+   nearest-area, parent lookup, first-domain, averaging, traversal, or
+   multi-challenge-state behavior is introduced.
+2. **readiness_summary (Finding B).** §14.2 now freezes the exact
+   `ReadinessSummary` schema (`hard_prerequisites_total`,
+   `hard_prerequisites_satisfied`, `state`) and its HARD-gate semantics from
+   `Candidate.prerequisite_evaluations`; SOFT outcomes remain only in
+   `feature_values.readiness`. A candidate marked `ELIGIBLE` with a non-satisfied
+   HARD prerequisite is an invariant violation.
+3. **RankedCandidate (Finding C).** §14.2 now freezes a dedicated #47
+   `RankedCandidate` shape returned by `rank_candidates`, so #47 no longer emits
+   a partial `RecommendationResult`. `RecommendationResult` is assembled by #48;
+   `SimulationResult` remains #49.
+
+This is a simulation-only clarification of the unmerged v3 contract and the
+corresponding #47 runtime/test alignment. No production persistence, migration,
+API, weights, or ranking arithmetic changed. `contract_version` remains
+`m3-simulation/v3`.
 
 ### Erratum — Issue #46 implementation/discovery evidence (v1 → v2)
 

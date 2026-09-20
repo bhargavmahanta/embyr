@@ -113,23 +113,33 @@ def _has_source(candidate: dict, source: str) -> bool:
     return any(path["source"] == source for path in candidate["source_paths"])
 
 
+def _assert_hard_prerequisites_satisfied(candidate: dict) -> None:
+    """Eligible candidates must have every HARD prerequisite SATISFIED (§14.2).
+
+    An ELIGIBLE candidate with an UNSATISFIED/UNKNOWN HARD prerequisite is
+    inconsistent #46 output and must not be silently ranked.
+    """
+    for evaluation in candidate["prerequisite_evaluations"]:
+        if evaluation["requirement"] == "HARD" and evaluation["state"] != "SATISFIED":
+            raise SimulationInputError(
+                "eligible candidate has non-satisfied HARD prerequisite "
+                f"{evaluation['prerequisite_entity_id']!r} "
+                f"in state {evaluation['state']!r}"
+            )
+
+
 def _readiness_summary(candidate: dict) -> dict:
     hard = [
         evaluation
         for evaluation in candidate["prerequisite_evaluations"]
         if evaluation["requirement"] == "HARD"
     ]
-    hard_satisfied = sum(1 for evaluation in hard if evaluation["state"] == "SATISFIED")
-    if not hard or hard_satisfied == len(hard):
-        state = "SATISFIED"
-    elif any(evaluation["state"] == "UNKNOWN" for evaluation in hard):
-        state = "UNKNOWN"
-    else:
-        state = "UNSATISFIED"
     return {
         "hard_prerequisites_total": len(hard),
-        "hard_prerequisites_satisfied": hard_satisfied,
-        "state": state,
+        "hard_prerequisites_satisfied": sum(
+            1 for evaluation in hard if evaluation["state"] == "SATISFIED"
+        ),
+        "state": "SATISFIED",
     }
 
 
@@ -156,6 +166,7 @@ def score_candidate(
     weights: dict[str, float],
 ) -> dict:
     """Compute the frozen v3 features, components, and ``ScoreTrace`` for one candidate."""
+    _assert_hard_prerequisites_satisfied(candidate)
     feature_values = {
         "readiness": _readiness(candidate),
         "difficulty_fit": _difficulty_fit(candidate, entity, challenge),
@@ -185,6 +196,7 @@ def score_candidate(
         raise SimulationInputError("pre_rerank_score is not finite")
 
     return {
+        "candidate_id": candidate["candidate_id"],
         "target_entity_id": candidate["target_entity_id"],
         "target_entity_version": candidate["target_entity_version"],
         "target_entity_type": candidate["target_entity_type"],
@@ -251,15 +263,17 @@ def rank_candidates(simulation_input: dict, candidates: list[dict]) -> list[dict
 
 
 def _result(entry: dict) -> dict:
-    """Project the frozen #47 RecommendationResult subset (no explanation_codes)."""
+    """Project the frozen #47 ``RankedCandidate`` shape (§14.2)."""
     return {
+        "candidate_id": entry["candidate_id"],
         "target_entity_id": entry["target_entity_id"],
         "target_entity_version": entry["target_entity_version"],
-        "final_rank": entry["final_rank"],
-        "ordering_score": entry["ordering_score"],
+        "target_entity_type": entry["target_entity_type"],
         "candidate_sources": entry["candidate_sources"],
         "readiness_summary": entry["readiness_summary"],
         "score_trace": entry["score_trace"],
         "rerank_trace": entry["rerank_trace"],
+        "ordering_score": entry["ordering_score"],
         "deterministic_tiebreak_key": entry["deterministic_tiebreak_key"],
+        "final_rank": entry["final_rank"],
     }

@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import copy
 
-from research.recommendation.simulator import generate_candidates, rank_candidates
+import pytest
+
+from research.recommendation.fixtures import SCENARIOS
+from research.recommendation.simulator import (
+    SimulationInputError,
+    generate_candidates,
+    rank_candidates,
+)
 from research.recommendation.tests._candidate_helpers import (
     make_input,
     preference,
@@ -12,15 +19,24 @@ from research.recommendation.tests._candidate_helpers import (
 )
 
 RESULT_KEYS = {
+    "candidate_id",
     "target_entity_id",
     "target_entity_version",
-    "final_rank",
-    "ordering_score",
+    "target_entity_type",
     "candidate_sources",
     "readiness_summary",
     "score_trace",
     "rerank_trace",
+    "ordering_score",
     "deterministic_tiebreak_key",
+    "final_rank",
+}
+
+FORBIDDEN_RESULT_KEYS = {
+    "explanation_codes",
+    "source_paths",
+    "prerequisite_evaluations",
+    "feature_inputs",
 }
 
 
@@ -127,6 +143,58 @@ def test_ineligible_candidate_never_influences_diversity():
 
     assert canonical_json(with_ineligible) == canonical_json(without_ineligible)
     assert "c" not in {entry["target_entity_id"] for entry in with_ineligible}
+
+
+def test_ranked_candidate_exact_shape():
+    scenario_id = "scn-G-prereq-satisfied-001"
+    sim = SCENARIOS[scenario_id]
+    ranked = rank_candidates(sim, generate_candidates(sim))
+    assert ranked
+    for entry in ranked:
+        assert set(entry) == RESULT_KEYS
+        assert not (set(entry) & FORBIDDEN_RESULT_KEYS)
+        assert entry["target_entity_type"] is not None
+        assert isinstance(entry["candidate_id"], str)
+        assert set(entry["readiness_summary"]) == {
+            "hard_prerequisites_total",
+            "hard_prerequisites_satisfied",
+            "state",
+        }
+        assert entry["readiness_summary"]["state"] == "SATISFIED"
+
+    from research.recommendation.fixtures import SCENARIO_TARGETS
+
+    target_id = SCENARIO_TARGETS[scenario_id]["target"]["entity_id"]
+    target = next(entry for entry in ranked if entry["target_entity_id"] == target_id)
+    assert target["readiness_summary"] == {
+        "hard_prerequisites_total": 1,
+        "hard_prerequisites_satisfied": 1,
+        "state": "SATISFIED",
+    }
+
+
+@pytest.mark.parametrize("bad_state", ["UNSATISFIED", "UNKNOWN"])
+def test_eligible_with_non_satisfied_hard_prerequisite_fails(bad_state):
+    sim = SCENARIOS["scn-G-prereq-satisfied-001"]
+    candidates = generate_candidates(sim)
+    target = next(
+        candidate
+        for candidate in candidates
+        if candidate["eligibility_state"] == "ELIGIBLE"
+        and candidate["prerequisite_evaluations"]
+    )
+    corrupted = copy.deepcopy(target)
+    for evaluation in corrupted["prerequisite_evaluations"]:
+        if evaluation["requirement"] == "HARD":
+            evaluation["state"] = bad_state
+    patched = [
+        corrupted
+        if candidate["target_entity_id"] == corrupted["target_entity_id"]
+        else candidate
+        for candidate in candidates
+    ]
+    with pytest.raises(SimulationInputError):
+        rank_candidates(sim, patched)
 
 
 def test_ordering_score_equals_pre_plus_adjustment():

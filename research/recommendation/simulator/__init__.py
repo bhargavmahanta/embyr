@@ -7,7 +7,7 @@ Public surface:
   hard eligibility filtering, returning deterministic ``Candidate`` dictionaries.
 * :func:`rank_candidates` (#47) -- score eligible candidates with the frozen v3
   features, apply optional ``DOMAIN_COVERAGE`` reranking, and return the full
-  ranked eligible list.
+  ``RankedCandidate`` list (§14.2).
 * :class:`SimulationInputError` -- raised for structurally invalid input.
 
 The package does not emit explanations, assemble ``SimulationResult`` metrics,

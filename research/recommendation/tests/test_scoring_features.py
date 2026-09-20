@@ -206,6 +206,51 @@ def test_continuation_and_revisit_are_binary_presence():
 # --- effective weights -----------------------------------------------------
 
 
+# --- readiness summary (HARD gate) ----------------------------------------
+
+
+def test_readiness_summary_exact_hard_gate_shape():
+    candidate = _candidate(
+        prerequisite_evaluations=[
+            {"requirement": "HARD", "state": "SATISFIED", "prerequisite_entity_id": "h"},
+            {"requirement": "SOFT", "state": "UNSATISFIED", "prerequisite_entity_id": "s"},
+        ]
+    )
+    assert scoring._readiness_summary(candidate) == {
+        "hard_prerequisites_total": 1,
+        "hard_prerequisites_satisfied": 1,
+        "state": "SATISFIED",
+    }
+    # SOFT outcomes affect only the numeric scoring feature, not the summary.
+    assert scoring._readiness(candidate) == 0.5
+
+
+def test_readiness_summary_no_hard_prerequisites_is_vacuously_satisfied():
+    assert scoring._readiness_summary(_candidate()) == {
+        "hard_prerequisites_total": 0,
+        "hard_prerequisites_satisfied": 0,
+        "state": "SATISFIED",
+    }
+
+
+@pytest.mark.parametrize("bad_state", ["UNSATISFIED", "UNKNOWN"])
+def test_non_satisfied_hard_prerequisite_on_eligible_is_invariant_violation(bad_state):
+    candidate = _candidate(
+        prerequisite_evaluations=[
+            {
+                "requirement": "HARD",
+                "state": bad_state,
+                "prerequisite_entity_id": "h",
+            }
+        ]
+    )
+    with pytest.raises(SimulationInputError):
+        scoring._assert_hard_prerequisites_satisfied(candidate)
+
+
+# --- effective weights -----------------------------------------------------
+
+
 def test_effective_weights_fill_missing_with_zero():
     sim = {
         "simulation_config": {
