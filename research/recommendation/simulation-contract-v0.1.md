@@ -247,8 +247,10 @@ intent), from `LearnerStateSnapshot.objective_states` (understanding/readiness),
 and from `LearnerStateSnapshot.challenge_state` (ability context). Field names
 follow the LLD domain; `entity_version` is added because simulation entities are
 versioned and the canonical identity key is `(entity_id, entity_version)`. An
-input with no inferred-interest state uses `interest_states: []`; omission and
-`[]` are not separate semantic states.
+input with no inferred-interest state uses `interest_states: []`. The field is
+required in `m3-simulation/v1`: a producer MUST emit it, and a validator MUST
+reject an input that omits it. Omission carries no separate meaning; it is a
+validation error, not an implicit `[]`.
 
 ## 6. Ontology Snapshot and Semantic Space
 
