@@ -199,3 +199,70 @@ def test_no_universal_learner_score_introduced():
         serialized = canonical_json(simulation_input).lower()
         for term in forbidden:
             assert term not in serialized, (scenario_id, term)
+
+
+# ---------------------------------------------------------------------------
+# Issue #46 pre-consumer repair: unresolved target representation (Option A).
+# Contract/document alignment only; no runtime candidate behavior.
+# ---------------------------------------------------------------------------
+
+ENTITY_TYPE_VOCABULARY = ["DOMAIN", "AREA", "TOPIC", "CONCEPT", "SKILL", "TECHNIQUE", "JOURNEY"]
+UNRESOLVED_SECTION_HEADING = "### 8.3 Unresolved target representation"
+
+
+def _candidate_block() -> str:
+    match = re.search(r"```text\nCandidate\n(.*?)\n```", _contract_text(), flags=re.DOTALL)
+    assert match, "Candidate block missing"
+    return match.group(1)
+
+
+def test_candidate_target_entity_type_is_required_and_nullable():
+    line = re.search(r"^- target_entity_type\s+(.+)$", _candidate_block(), flags=re.MULTILINE)
+    assert line, "target_entity_type field missing"
+    assert line.group(1).strip().startswith("string|null")
+
+
+def test_contract_freezes_unresolved_target_representation():
+    text = _contract_text()
+    assert UNRESOLVED_SECTION_HEADING in text
+    section = text.split(UNRESOLVED_SECTION_HEADING, 1)[1].split("## 9.", 1)[0]
+    for phrase in (
+        "target_entity_type = null",
+        "INELIGIBLE",
+        "INVALID_TARGET",
+        "prerequisite_evaluations` MUST be empty",
+        "FAILS input validation",
+        "(target_entity_id, target_entity_version)",
+    ):
+        assert phrase in section, phrase
+
+
+def test_resolved_target_requires_frozen_entity_type_and_forbids_null():
+    text = _contract_text()
+    assert "`null` is invalid output" in text
+    assert "equal to that entity's frozen `entity_type`" in text
+
+
+def test_no_entity_type_sentinel_introduced():
+    text = _contract_text()
+    vocabulary = re.search(
+        r"^- entity_type\s+string\s+#\s*(DOMAIN[^\n]*)$", text, flags=re.MULTILINE
+    )
+    assert vocabulary, "EntitySnapshot.entity_type vocabulary missing"
+    assert [value.strip() for value in vocabulary.group(1).split("|")] == ENTITY_TYPE_VOCABULARY
+    target_line = re.search(
+        r"^- target_entity_type\s+(.+)$", _candidate_block(), flags=re.MULTILINE
+    )
+    assert target_line
+    for sentinel in ("UNKNOWN", "INVALID", "MISSING", "UNRESOLVED"):
+        assert re.search(rf"\b{sentinel}\b", target_line.group(1)) is None, sentinel
+
+
+def test_invalid_target_representation_referenced_in_exclusion_contract():
+    text = _contract_text()
+    assert "`INVALID_TARGET` and `target_entity_type = null` (§8.3)" in text
+
+
+def test_contract_version_still_v2_after_repair():
+    assert 'contract_version = "m3-simulation/v2"' in _contract_text()
+    assert "m3-simulation/v3" not in _contract_text()

@@ -431,7 +431,7 @@ Candidate
 - candidate_id                string        # derived deterministically from target identity
 - target_entity_id            string
 - target_entity_version       integer
-- target_entity_type          string
+- target_entity_type          string|null   # non-null iff target resolves; null iff unresolved (INVALID_TARGET)
 - source_paths                SourcePath[] # merged, deterministically ordered
 - prerequisite_evaluations    PrerequisiteEvaluation[]
 - eligibility_state           string        # ELIGIBLE|INELIGIBLE
@@ -497,6 +497,36 @@ carries no retention state. `HISTORY_CONTINUATION` nominates next entities
 related to an `ACTIVE` exploration rather than the exploration target itself.
 The contract does not freeze a universal revisit-vs-exploration ranking rule
 (§13); nomination and ranking value remain separate.
+
+### 8.3 Unresolved target representation
+
+`Candidate.target_entity_type` is a required but nullable field. It is the only
+Candidate field whose nullability is conditional.
+
+- A target that resolves in `ontology_snapshot.entities` MUST have a non-null
+  `target_entity_type` equal to that entity's frozen `entity_type`
+  (`DOMAIN|AREA|TOPIC|CONCEPT|SKILL|TECHNIQUE|JOURNEY`). `null` is invalid output
+  for a resolved target.
+- A structurally valid source reference whose `(target_entity_id, target_entity_version)` does NOT resolve in `ontology_snapshot.entities` MUST
+  emit a Candidate with `target_entity_type = null`, `eligibility_state =
+  INELIGIBLE`, and `exclusion_reasons` including `INVALID_TARGET`.
+- This is the ONLY situation in which `target_entity_type` may be null. No
+  `UNKNOWN`, `INVALID`, `MISSING`, `UNRESOLVED`, or other sentinel entity type is
+  permitted.
+- An unresolved target has no ontology `EntitySnapshot`, so its
+  `prerequisite_evaluations` MUST be empty (`[]`). Prerequisite reasons
+  (`PREREQUISITE_UNMET`, `INSUFFICIENT_STATE`) are not emitted merely because
+  ontology metadata is absent; `INVALID_TARGET` describes that failure.
+- Collect-all exclusions still apply where directly knowable from an independent
+  source. For example, an unresolved target that also carries an explicit
+  `NOT_INTERESTED` preference yields `exclusion_reasons` containing both
+  `NOT_INTERESTED` and `INVALID_TARGET`, serialized in frozen enum order.
+- Structural invalid input (missing required fields, invalid enum, malformed
+  shape, duplicate canonical keys where forbidden) still FAILS input validation;
+  it is never converted into an `INVALID_TARGET` candidate.
+- Target identity, deduplication, and `candidate_id` derivation are unchanged:
+  the logical key remains `(target_entity_id, target_entity_version)`, and
+  `target_entity_type` is not part of either.
 
 ## 9. Semantic Candidate Rule
 
@@ -758,9 +788,9 @@ Invalid-target vs input invalidity (frozen):
 - **Structural invalid input FAILS validation.** Examples: missing required
   fields, an invalid enum value, duplicate canonical keys, or a malformed
   required shape.
-- A **resolvable source record whose entity/version is absent from
+- A **structurally valid source record whose entity/version is absent from
   `ontology_snapshot`** emits a normalized candidate that is `INELIGIBLE` with
-  exclusion reason `INVALID_TARGET`.
+  exclusion reason `INVALID_TARGET` and `target_entity_type = null` (§8.3).
 - Eligibility evaluation **collects all applicable exclusion reasons** and does
   not short-circuit; `exclusion_reasons` is serialized in the frozen enum order
   (§4).
@@ -1433,7 +1463,8 @@ The following are frozen by Issue #44:
   `UNDERSTOOD|RETAINED → SATISFIED`, absent → `UNKNOWN`, other states →
   `UNSATISFIED` (§6, §7).
 - **Candidate** — normalized, merged, deterministic identity, source enum,
-  exclusion reasons (§8).
+  exclusion reasons, and `target_entity_type` nullable iff the target is
+  unresolved/`INVALID_TARGET` (§8, §8.3).
 - **Prerequisite/readiness contract** — objective-relative, derived, states
   `SATISFIED|UNSATISFIED|UNKNOWN`, eligibility `ELIGIBLE|INELIGIBLE`, conservative
   UNKNOWN policy, hard-filter vs soft-feature (§7).
@@ -1499,6 +1530,18 @@ This is a simulation-only amendment: no production persistence change, no
 migration, no API change, no ranking semantics introduced, and no production
 retrieval or traversal limits frozen. The Issue #45 `interest_states` repair is
 preserved. `contract_version` is now `m3-simulation/v2`.
+
+#### Pre-consumer repair — unresolved target representation (Issue #46, v2)
+
+During Phase B implementation preflight, the `INVALID_TARGET` rule was found to
+be unrepresentable: `Candidate.target_entity_type` was non-nullable while an
+unresolved target has no ontology-derived type. v2 is repaired so
+`target_entity_type` is a required but nullable field, null **iff** the target is
+unresolved and carries `INVALID_TARGET` (§8, §8.3). This is a representation
+repair only: no candidate-generation semantics, ranking semantics, persistence,
+migration, or production API change. `contract_version` remains
+`m3-simulation/v2` because v2 exists only on the unmerged #46 branch and no
+runtime consumer has read it.
 
 ### Erratum — Issue #45 implementation evidence
 
