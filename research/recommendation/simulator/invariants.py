@@ -282,7 +282,11 @@ def _in9() -> dict:
 
 
 def _in10(core) -> dict:
-    eligible = core.metrics["eligible_candidate_count"]
+    eligible = sum(
+        1
+        for candidate in core.candidates_considered
+        if candidate["eligibility_state"] == "ELIGIBLE"
+    )
     empty = core.selected_recommendations == []
     passed = eligible > 0 or empty
     return _result(

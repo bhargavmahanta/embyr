@@ -13,7 +13,6 @@ from research.recommendation.fixtures.evaluation_expectations import (
     CONTRACT_VERSION,
     EVALUATION_EXPECTATIONS,
     INVARIANT_CODES,
-    METRIC_KEYS,
 )
 
 from .run import run_simulation
@@ -94,18 +93,12 @@ def _expectation_failures(scenario_id: str, result: dict) -> list[dict]:
             }
         )
 
-    missing_metrics = sorted(set(METRIC_KEYS) - set(result["metrics"]))
-    if missing_metrics:
-        failures.append(
-            {
-                "check": "metrics.keys",
-                "expected": list(METRIC_KEYS),
-                "actual": sorted(result["metrics"]),
-            }
-        )
-
     top_k = SCENARIOS[scenario_id]["simulation_config"]["top_k"]
-    eligible = result["metrics"]["eligible_candidate_count"]
+    eligible = sum(
+        1
+        for candidate in result["candidates_considered"]
+        if candidate["eligibility_state"] == "ELIGIBLE"
+    )
     expected_count = min(top_k, eligible)
     selected_count = len(result["ranked_recommendations"])
     if selected_count != expected_count:

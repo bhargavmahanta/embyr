@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from research.recommendation.fixtures import SCENARIO_IDS
+import copy
+
+from research.recommendation.fixtures import SCENARIOS, SCENARIO_IDS
+from research.recommendation.simulator import run_simulation
 from research.recommendation.simulator.evaluate import (
+    _expectation_failures,
     evaluate_scenario,
     render_evaluation_summary,
     run_fixture_suite,
@@ -86,3 +90,45 @@ def test_report_has_no_aggregate_quality_score():
     report = run_fixture_suite()
     forbidden = {"score", "quality", "percentage", "metric_averages", "average"}
     assert not (set(report) & forbidden)
+
+
+def test_descriptive_metrics_cannot_gate_scenario_status():
+    scenario_id = "scn-A-explicit-more-001"
+    result = run_simulation(SCENARIOS[scenario_id])
+    corrupted = copy.deepcopy(result)
+    corrupted["metrics"]["eligible_candidate_count"] = 999
+    del corrupted["metrics"]["source_coverage"]
+
+    failures = _expectation_failures(scenario_id, corrupted)
+
+    assert failures == []
+
+
+def test_top_k_expectation_uses_structural_eligible_count():
+    scenario_id = "scn-J-difficulty-appropriate-001"
+    result = run_simulation(SCENARIOS[scenario_id])
+    structural_eligible = sum(
+        1
+        for candidate in result["candidates_considered"]
+        if candidate["eligibility_state"] == "ELIGIBLE"
+    )
+    assert structural_eligible == 3
+
+    corrupted = copy.deepcopy(result)
+    corrupted["metrics"]["eligible_candidate_count"] = 999
+    assert not any(
+        failure["check"] == "top_k.selection"
+        for failure in _expectation_failures(scenario_id, corrupted)
+    )
+
+    truncated = copy.deepcopy(result)
+    truncated["ranked_recommendations"] = truncated["ranked_recommendations"][:2]
+    selection_failures = [
+        failure
+        for failure in _expectation_failures(scenario_id, truncated)
+        if failure["check"] == "top_k.selection"
+    ]
+    assert selection_failures
+    assert selection_failures[0]["expected"] == min(
+        SCENARIOS[scenario_id]["simulation_config"]["top_k"], structural_eligible
+    )

@@ -48,6 +48,16 @@ def test_invariant_diagnostics_are_deterministic():
     assert evaluate_invariants(first, second) == evaluate_invariants(first, second)
 
 
+def test_invariants_do_not_depend_on_descriptive_metrics():
+    first = _valid_core()
+    second = copy.deepcopy(first)
+    corrupted = copy.deepcopy(first)
+    corrupted.metrics["eligible_candidate_count"] = 999
+    assert evaluate_invariants(corrupted, copy.deepcopy(corrupted)) == evaluate_invariants(
+        first, second
+    )
+
+
 def test_invariants_never_raise_on_corruption():
     considered = [candidate("c1", "e1", eligibility="INELIGIBLE", exclusion_reasons=())]
     broken = core(considered, explanations=[explanation("c1", "e1")])
