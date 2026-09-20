@@ -1321,8 +1321,11 @@ InvariantResult
 
 - `invariant_results` is deterministic and independent of wall-clock time.
 - `metrics` never carries pass/fail thresholds.
-- Wall-clock timestamps may exist only inside `execution_metadata` and are
-  excluded from deterministic comparison.
+- `execution_metadata` is excluded from deterministic comparison. For M3 v5 the
+  deterministic runner emits it as `{}` and MUST NOT include wall-clock
+  timestamps, durations, hostnames, process ids, or random identifiers (§17.2).
+  Any future operator-only, non-semantic runtime metadata lives outside the M3 v5
+  deterministic runner and does not weaken §17.2.
 - `candidates_considered` is every normalized candidate the simulator evaluated,
   including both `ELIGIBLE` and `INELIGIBLE` candidates.
 - `candidates_excluded` is the `INELIGIBLE` subset of `candidates_considered`.
@@ -1397,15 +1400,26 @@ ranked_recommendations    = full_recommendation_results[:selected_count]
 - `input_fingerprint` is computed by the engine as:
 
 ```text
-input_fingerprint = "sha256:" + lowercase_hex(sha256(canonical_json(validated SimulationInput)))
+canonical_input   = canonicalize_simulation_input_for_identity(validated SimulationInput)
+input_fingerprint = "sha256:" + lowercase_hex(sha256(canonical_json(canonical_input)))
 ```
 
+The validated input is first placed into the frozen §4 canonical snapshot form:
+order-insensitive arrays (ontology entities and nested
+relationships/`domain_ids`/`objective_ids`, semantic vectors, generation-context
+anchors, learner objective/interest states, explicit preferences, explorations)
+are canonically ordered, while semantically ordered arrays (for example
+`SemanticVector.vector`) are preserved. Canonicalization is the engine's
+identity responsibility and MUST NOT mutate the caller's `SimulationInput`; it is
+not a caller ordering obligation and validation still checks structural validity
+and uniqueness only.
+
 The engine-owned canonical serializer (`research/recommendation/simulator/identity.py`
-`canonical_json`) MUST be used. The engine MUST NOT import fixture
-canonicalization from `research/recommendation/fixtures/`, and no third
-canonical serializer may be introduced. `SimulationConfig` is part of
-`SimulationInput` and therefore participates in the fingerprint. Fixture
-expectation metadata never participates.
+`canonical_json`) MUST be used; this remains one canonical JSON serializer. The
+engine MUST NOT import fixture canonicalization from
+`research/recommendation/fixtures/`, and no third canonical serializer may be
+introduced. `SimulationConfig` is part of `SimulationInput` and therefore
+participates in the fingerprint. Fixture expectation metadata never participates.
 
 
 ## 18. Production Persistence Boundary

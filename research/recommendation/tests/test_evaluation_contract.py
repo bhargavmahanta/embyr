@@ -110,9 +110,10 @@ def test_execution_metadata_has_no_mandatory_key():
 
 def test_fingerprint_rule_and_engine_ownership():
     assert "input_fingerprint = \"sha256:\" + lowercase_hex" in CONTRACT_TEXT
+    assert "canonicalize_simulation_input_for_identity" in CONTRACT_TEXT
     assert "simulator/identity.py" in CONTRACT_TEXT
     assert "MUST NOT import fixture" in CONTRACT_TEXT
-    assert "no third\ncanonical serializer may be introduced" in CONTRACT_TEXT
+    assert "no third canonical serializer may be" in CONTRACT_TEXT
 
 
 # --- metrics ----------------------------------------------------------------

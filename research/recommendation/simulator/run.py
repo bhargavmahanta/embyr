@@ -15,7 +15,7 @@ import hashlib
 from dataclasses import dataclass
 
 from .explain import build_recommendation_results
-from .identity import canonical_json
+from .identity import canonical_json, canonicalize_simulation_input_for_identity
 from .invariants import evaluate_invariants
 from .metrics import compute_metrics
 from .pipeline import generate_candidates
@@ -44,10 +44,13 @@ class CoreExecution:
 def input_fingerprint(simulation_input: dict) -> str:
     """Return ``sha256:<hex>`` over the engine canonical ``SimulationInput``.
 
-    Uses the engine-owned canonical serializer (§17.2); it never imports fixture
-    canonicalization.
+    The validated input is first placed into the contract §4 canonical snapshot
+    form (order-insensitive arrays canonically ordered), then serialized with the
+    engine-owned ``canonical_json`` (§17.2). It never imports fixture
+    canonicalization and never mutates the caller's input.
     """
-    digest = hashlib.sha256(canonical_json(simulation_input).encode("utf-8")).hexdigest()
+    canonical_input = canonicalize_simulation_input_for_identity(simulation_input)
+    digest = hashlib.sha256(canonical_json(canonical_input).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
 
