@@ -36,19 +36,18 @@ LEARNING_INTENTS = frozenset(
 )
 EXPLORATION_STATUSES = frozenset({"ACTIVE", "PAUSED", "COMPLETED"})
 
-#: v3 scoring features recognized as `feature_weights` keys (§11.1).
-SCORING_FEATURES = frozenset(
-    {
-        "readiness",
-        "difficulty_fit",
-        "explicit_interest",
-        "inferred_interest",
-        "graph_proximity",
-        "semantic_similarity",
-        "continuation_value",
-        "revisit_value",
-    }
+#: v3 scoring features recognized as `feature_weights` keys, canonical order (§11.1).
+SCORING_FEATURES = (
+    "readiness",
+    "difficulty_fit",
+    "explicit_interest",
+    "inferred_interest",
+    "graph_proximity",
+    "semantic_similarity",
+    "continuation_value",
+    "revisit_value",
 )
+SCORING_FEATURE_SET = frozenset(SCORING_FEATURES)
 #: Frozen rerank strategy vocabulary (§13.1).
 RERANK_STRATEGIES = frozenset({"DOMAIN_COVERAGE"})
 
@@ -128,7 +127,7 @@ def _validate_feature_weights_config(config: dict) -> None:
     )
     for key, value in weights.items():
         _require(
-            key in SCORING_FEATURES,
+            key in SCORING_FEATURE_SET,
             f"input.simulation_config.feature_weights has unknown key {key!r}",
         )
         weight = _number(value, f"input.simulation_config.feature_weights[{key!r}]")
