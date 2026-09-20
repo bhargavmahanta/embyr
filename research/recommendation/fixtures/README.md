@@ -100,7 +100,9 @@ structurally by `tests/test_fixture_offline.py`.
    context for GRAPH/SEMANTIC generation. Anchors are never derived from
    learner-state, inferred-interest, preference, or exploration domains, are
    unique by `(entity_id, entity_version)`, resolve in the ontology snapshot, and
-   are canonically sorted. Scenario E deliberately uses `[]`; every other
+   are canonically sorted. Scenario E deliberately uses `[]`: its two conflict
+   targets are nominated by explicit preferences alone and it carries no NEUTRAL
+   comparator target (which would be unreachable without an anchor). Every other
    scenario anchors on its scenario-local `seed`.
 6. **`REQUIRES` declares its objective (v2).** A `REQUIRES` relationship carries
    both `requirement` (HARD/SOFT) and `objective_id`, and readiness is looked up

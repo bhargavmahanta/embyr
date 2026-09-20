@@ -337,13 +337,16 @@ def _scenario_d() -> _Builder:
 
 
 def _scenario_e() -> _Builder:
+    # No generation anchor: both meaningful targets are nominated through
+    # EXPLICIT_INTEREST. A NEUTRAL control would be unreachable under v2
+    # (NEUTRAL does not nominate and there is no GRAPH/SEMANTIC anchor), so the
+    # scenario deliberately contains no neutral comparator target.
     s = _Builder("scn-E-preference-conflict-001")
     domain = s.domain(1, "Foundations")
     s.topic("seed", 4, "Seed Topic", domains=[domain])
     more_target = s.topic("more_target", 1, "Explicitly Liked Topic", domains=[domain])
     less_target = s.topic("less_target", 2, "Explicitly Disliked Topic", domains=[domain])
-    control = s.topic("control", 3, "Control Topic", domains=[domain])
-    for entity_id in (more_target, less_target, control):
+    for entity_id in (more_target, less_target):
         s.objective(entity_id, state="EXPLORING", understanding=0.5)
         s.vector(entity_id, "near")
     s.vector(s.targets["seed"]["entity_id"], "seed")
@@ -351,7 +354,6 @@ def _scenario_e() -> _Builder:
     s.inferred(less_target, POSITIVE)
     s.preference(more_target, "MORE")
     s.preference(less_target, "LESS")
-    s.preference(control, "NEUTRAL")
     s.challenge(domain, 0.5)
     return s
 

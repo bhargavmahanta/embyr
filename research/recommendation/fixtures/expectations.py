@@ -148,15 +148,11 @@ EXPECTATIONS: dict[str, dict] = {
         ["E"],
         ["IN-1", "IN-4", "IN-5"],
         [
-            _hard("scn-E-preference-conflict-001", "more_target", eligibility_state=E, explanation_codes_include=["EXPLICIT_INTEREST_MATCH"]),
-            _hard("scn-E-preference-conflict-001", "less_target", eligibility_state=E),
-            _hard("scn-E-preference-conflict-001", "control", eligibility_state=E),
+            _hard("scn-E-preference-conflict-001", "more_target", eligibility_state=E, exclusion_reasons=[], explanation_codes_include=["EXPLICIT_INTEREST_MATCH"]),
+            _hard("scn-E-preference-conflict-001", "less_target", eligibility_state=E, exclusion_reasons=[]),
             _hard("scn-E-preference-conflict-001", override_reason_code="EXPLICIT_PREFERENCE_OVERRIDES_INFERRED"),
         ],
-        [
-            _relative("scn-E-preference-conflict-001", "more_target", "control", "explicit MORE beats conflicting inferred negative, unrelated control held constant"),
-            _relative("scn-E-preference-conflict-001", "control", "less_target", "explicit LESS beats conflicting inferred positive"),
-        ],
+        [],
         ["explicit_interest_coverage"],
     ),
     "scn-F-prereq-unmet-001": _entry(

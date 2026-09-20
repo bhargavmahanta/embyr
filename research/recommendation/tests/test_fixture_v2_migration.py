@@ -242,3 +242,116 @@ def test_generation_context_is_part_of_the_fingerprint():
     without_anchor = copy.deepcopy(snapshot)
     without_anchor["generation_context"]["anchor_entities"] = []
     assert input_fingerprint(snapshot) != input_fingerprint(without_anchor)
+
+
+# ---------------------------------------------------------------------------
+# Structural reachability: every expected #46 candidate must have >=1 frozen
+# nomination source. Derived from inputs only; this is a fixture-integrity
+# check, not the candidate engine.
+# ---------------------------------------------------------------------------
+
+NOMINATING_PREFERENCES = frozenset({"MORE", "LESS", "PAUSED", "NOT_INTERESTED"})
+
+
+def _entity_key(entity: dict) -> tuple[str, int]:
+    return (entity["entity_id"], entity["entity_version"])
+
+
+def _related_to_adjacency(snapshot: dict) -> dict[tuple[str, int], set]:
+    adjacency: dict[tuple[str, int], set] = {
+        _entity_key(entity): set() for entity in snapshot["ontology_snapshot"]["entities"]
+    }
+    for entity in snapshot["ontology_snapshot"]["entities"]:
+        source = _entity_key(entity)
+        for relationship in entity["relationships"]:
+            if relationship["relationship_type"] != "RELATED_TO":
+                continue
+            target = (relationship["target_entity_id"], relationship["target_entity_version"])
+            adjacency.setdefault(source, set()).add(target)
+            adjacency.setdefault(target, set()).add(source)
+    return adjacency
+
+
+def _reachable(start: tuple[str, int], adjacency: dict) -> set:
+    seen: set = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        for neighbour in adjacency.get(node, ()):
+            if neighbour not in seen:
+                seen.add(neighbour)
+                stack.append(neighbour)
+    return seen
+
+
+def _nomination_sources(snapshot: dict) -> dict[tuple[str, int], set[str]]:
+    adjacency = _related_to_adjacency(snapshot)
+    anchors = {_entity_key(anchor) for anchor in _anchors(snapshot)}
+    vectors = {_entity_key(vector) for vector in snapshot["semantic_space"]["vectors"]}
+    anchored_vectors = anchors & vectors
+    explicit = {
+        preference["entity_id"]: preference["preference"]
+        for preference in snapshot["preference_snapshot"]["explicit_preferences"]
+    }
+    active_targets = [
+        (exploration["entity_id"], exploration["entity_version"])
+        for exploration in snapshot["exploration_history"]["explorations"]
+        if exploration["status"] == "ACTIVE"
+    ]
+    completed = {
+        (exploration["entity_id"], exploration["entity_version"])
+        for exploration in snapshot["exploration_history"]["explorations"]
+        if exploration["status"] == "COMPLETED"
+    }
+    sources: dict[tuple[str, int], set[str]] = {}
+    for entity in snapshot["ontology_snapshot"]["entities"]:
+        key = _entity_key(entity)
+        found: set[str] = set()
+        if explicit.get(key[0]) in NOMINATING_PREFERENCES:
+            found.add("EXPLICIT_INTEREST")
+        if key not in anchors and key in vectors and anchored_vectors:
+            found.add("SEMANTIC")
+        if key not in anchors:
+            if any(key in _reachable(anchor, adjacency) for anchor in anchors):
+                found.add("GRAPH")
+            if any(
+                key != target and key in _reachable(target, adjacency)
+                for target in active_targets
+            ):
+                found.add("HISTORY_CONTINUATION")
+        if key in completed:
+            found.add("REVISIT")
+        sources[key] = found
+    return sources
+
+
+def _expected_candidate_targets(scenario_id: str) -> list[dict]:
+    manifest = EXPECTATIONS[scenario_id]
+    targets = [
+        expectation["target"]
+        for expectation in manifest["hard_expectations"]
+        if "target" in expectation and "eligibility_state" in expectation
+    ]
+    for expectation in manifest["relative_expectations"]:
+        targets.append(expectation["higher_ranked_target"])
+        targets.append(expectation["lower_ranked_target"])
+    return targets
+
+
+def test_every_expected_candidate_has_a_frozen_nomination_source():
+    for scenario_id, snapshot in SCENARIOS.items():
+        sources = _nomination_sources(snapshot)
+        for target in _expected_candidate_targets(scenario_id):
+            key = (target["entity_id"], target["entity_version"])
+            assert sources[key], (scenario_id, target)
+
+
+def test_scenario_e_conflict_targets_are_reachable_without_anchor():
+    snapshot = SCENARIOS[SCENARIO_E]
+    assert _anchors(snapshot) == []
+    sources = _nomination_sources(snapshot)
+    for name in ("more_target", "less_target"):
+        target = SCENARIO_TARGETS[SCENARIO_E][name]
+        key = (target["entity_id"], target["entity_version"])
+        assert "EXPLICIT_INTEREST" in sources[key], name
+    assert "control" not in SCENARIO_TARGETS[SCENARIO_E]
