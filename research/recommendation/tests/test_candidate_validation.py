@@ -10,6 +10,7 @@ from research.recommendation.simulator import SimulationInputError, generate_can
 from research.recommendation.tests._candidate_helpers import (
     make_input,
     objective_state,
+    preference,
     requires,
     related,
     topic,
@@ -137,6 +138,29 @@ def test_ambiguous_objective_state_rejected():
             objective_state("OBJ-A", "A", "EXPLORING"),
             objective_state("OBJ-A", "A", "UNDERSTOOD"),
         ],
+    )
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_objective_state_missing_entity_version_rejected():
+    sim = _valid_input()
+    del sim["learner_state_snapshot"]["objective_states"][0]["entity_version"]
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_explicit_preference_missing_entity_version_rejected():
+    sim = make_input(entities=[topic("a")], preferences=[preference("a", "MORE")])
+    del sim["preference_snapshot"]["explicit_preferences"][0]["entity_version"]
+    with pytest.raises(SimulationInputError):
+        generate_candidates(sim)
+
+
+def test_duplicate_explicit_preference_key_rejected():
+    sim = make_input(
+        entities=[topic("a")],
+        preferences=[preference("a", "MORE"), preference("a", "LESS")],
     )
     with pytest.raises(SimulationInputError):
         generate_candidates(sim)

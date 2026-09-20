@@ -85,6 +85,7 @@ def test_learner_signal_domains_are_separate(scenario_id):
     for state in learner_state["objective_states"]:
         assert state["state"] in OBJECTIVE_STATES
         assert state["entity_id"] in entities
+        assert state["entity_version"] >= 1
 
     # interest state: inferred interest/affinity, a distinct field.
     for interest in learner_state["interest_states"]:
@@ -96,6 +97,7 @@ def test_learner_signal_domains_are_separate(scenario_id):
     for preference in snapshot["preference_snapshot"]["explicit_preferences"]:
         assert preference["preference"] in EXPLICIT_PREFERENCES
         assert preference["entity_id"] in entities
+        assert preference["entity_version"] >= 1
         assert preference["version"] >= 1
 
     challenge = learner_state["challenge_state"]

@@ -136,13 +136,20 @@ class _Builder:
         *,
         state: str | None = None,
         understanding: float | None = None,
+        entity_version: int = 1,
     ) -> str:
         self._objective_counter += 1
         objective_id = self.ids.objective(self._objective_counter)
         self._entities[entity_id]["objective_ids"].append(objective_id)
         if state is not None:
             self._objective_states.append(
-                b.objective_state(objective_id, entity_id, state, understanding)
+                b.objective_state(
+                    objective_id,
+                    entity_id,
+                    state,
+                    understanding,
+                    entity_version=entity_version,
+                )
             )
         return objective_id
 
@@ -171,8 +178,14 @@ class _Builder:
     def inferred(self, entity_id: str, profile: dict) -> None:
         self.interest(entity_id, **profile)
 
-    def preference(self, entity_id: str, preference_value: str) -> None:
-        self._preferences.append(b.explicit_preference(entity_id, preference_value))
+    def preference(
+        self, entity_id: str, preference_value: str, entity_version: int = 1
+    ) -> None:
+        self._preferences.append(
+            b.explicit_preference(
+                entity_id, preference_value, entity_version=entity_version
+            )
+        )
 
     def exploration(
         self,

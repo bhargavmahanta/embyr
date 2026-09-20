@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from research.recommendation.simulator import SimulationInputError
 from research.recommendation.simulator.readiness import (
     REASON_CODES,
     SATISFIED,
@@ -91,3 +92,42 @@ def test_no_requires_edge_yields_empty_evaluations():
     entity = topic("a")
     sim = make_input(entities=[entity], anchors=[("a", 1)])
     assert evaluate_prerequisites(("a", 1), entity, sim) == []
+
+
+def test_readiness_matches_prerequisite_version():
+    entity = topic("a", relationships=[requires("p", "OBJ-P", version=2)])
+    sim = make_input(
+        entities=[entity, topic("p", version=1), topic("p", version=2)],
+        anchors=[("a", 1)],
+        objective_states=[
+            objective_state("OBJ-P", "p", "UNDERSTOOD", entity_version=1),
+            objective_state("OBJ-P", "p", "ENCOUNTERED", entity_version=2),
+        ],
+    )
+    evaluation = evaluate_prerequisites(("a", 1), entity, sim)[0]
+    assert evaluation["state"] == UNSATISFIED
+
+
+def test_readiness_other_version_evidence_is_unknown():
+    entity = topic("a", relationships=[requires("p", "OBJ-P", version=2)])
+    sim = make_input(
+        entities=[entity, topic("p", version=1), topic("p", version=2)],
+        anchors=[("a", 1)],
+        objective_states=[objective_state("OBJ-P", "p", "UNDERSTOOD", entity_version=1)],
+    )
+    evaluation = evaluate_prerequisites(("a", 1), entity, sim)[0]
+    assert evaluation["state"] == UNKNOWN
+
+
+def test_readiness_rejects_ambiguous_full_key():
+    entity = topic("a", relationships=[requires("p", "OBJ-P")])
+    sim = make_input(
+        entities=[entity, topic("p")],
+        anchors=[("a", 1)],
+        objective_states=[
+            objective_state("OBJ-P", "p", "UNDERSTOOD"),
+            objective_state("OBJ-P", "p", "ENCOUNTERED"),
+        ],
+    )
+    with pytest.raises(SimulationInputError):
+        evaluate_prerequisites(("a", 1), entity, sim)

@@ -31,18 +31,22 @@ def classify_objective_state(state: str | None) -> str:
 
 
 def _find_objective_state(
-    objective_states: list[dict], objective_id: str, prerequisite_entity_id: str
+    objective_states: list[dict],
+    objective_id: str,
+    prerequisite_entity_id: str,
+    prerequisite_entity_version: int,
 ) -> dict | None:
     matches = [
         state
         for state in objective_states
         if state["objective_id"] == objective_id
         and state["entity_id"] == prerequisite_entity_id
+        and state["entity_version"] == prerequisite_entity_version
     ]
     if len(matches) > 1:
         raise SimulationInputError(
             "ambiguous learner objective state for "
-            f"({objective_id!r}, {prerequisite_entity_id!r})"
+            f"({objective_id!r}, {prerequisite_entity_id!r}, {prerequisite_entity_version!r})"
         )
     return matches[0] if matches else None
 
@@ -73,7 +77,13 @@ def evaluate_prerequisites(
             continue
         objective_id = relationship["objective_id"]
         prerequisite_entity_id = relationship["target_entity_id"]
-        matched = _find_objective_state(objective_states, objective_id, prerequisite_entity_id)
+        prerequisite_entity_version = relationship["target_entity_version"]
+        matched = _find_objective_state(
+            objective_states,
+            objective_id,
+            prerequisite_entity_id,
+            prerequisite_entity_version,
+        )
         state = classify_objective_state(matched["state"] if matched else None)
         evidence_summary: dict = {"objective_state": matched["state"] if matched else None}
         if matched is not None and matched.get("understanding_estimate") is not None:

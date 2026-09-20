@@ -93,6 +93,25 @@ def _iter_candidates(value):
             yield from _iter_candidates(child)
 
 
+def _iter_mappings(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _iter_mappings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_mappings(child)
+
+
+def test_contract_examples_version_learner_references():
+    for example in (json.loads(raw) for raw in _json_examples(_contract_text())):
+        for mapping in _iter_mappings(example):
+            if {"objective_id", "state", "entity_id"} <= set(mapping):
+                assert "entity_version" in mapping, mapping
+            if {"preference", "entity_id", "version"} <= set(mapping):
+                assert "entity_version" in mapping, mapping
+
+
 def test_contract_examples_are_v2():
     examples = [json.loads(raw) for raw in _json_examples(_contract_text())]
     versions = [ex["contract_version"] for ex in examples if "contract_version" in ex]
@@ -168,7 +187,7 @@ def test_interest_state_entries_use_exact_frozen_fields():
 def test_inferred_interest_never_leaks_into_objective_states():
     for scenario_id, simulation_input in SCENARIOS.items():
         for state in simulation_input["learner_state_snapshot"]["objective_states"]:
-            assert set(state) <= {"objective_id", "entity_id", "state", "understanding_estimate"}, scenario_id
+            assert set(state) <= {"objective_id", "entity_id", "entity_version", "state", "understanding_estimate"}, scenario_id
             assert not (set(state) & AFFINITY_FIELDS), scenario_id
         challenge = simulation_input["learner_state_snapshot"]["challenge_state"]
         if challenge is not None:
@@ -178,10 +197,42 @@ def test_inferred_interest_never_leaks_into_objective_states():
 def test_explicit_preference_stays_in_preference_snapshot():
     for scenario_id, simulation_input in SCENARIOS.items():
         for preference in simulation_input["preference_snapshot"]["explicit_preferences"]:
-            assert set(preference) == {"entity_id", "preference", "version"}, scenario_id
+            assert set(preference) == {"entity_id", "entity_version", "preference", "version"}, scenario_id
         for state in simulation_input["learner_state_snapshot"]["interest_states"]:
             assert "explicit_preference" not in state, scenario_id
             assert "preference" not in state, scenario_id
+
+
+def test_every_objective_state_carries_entity_version():
+    for scenario_id, simulation_input in SCENARIOS.items():
+        for state in simulation_input["learner_state_snapshot"]["objective_states"]:
+            assert isinstance(state["entity_version"], int), scenario_id
+
+
+def test_objective_state_logical_keys_are_unique_and_canonical():
+    for scenario_id, simulation_input in SCENARIOS.items():
+        keys = [
+            (state["objective_id"], state["entity_id"], state["entity_version"])
+            for state in simulation_input["learner_state_snapshot"]["objective_states"]
+        ]
+        assert len(keys) == len(set(keys)), scenario_id
+        assert keys == sorted(keys), scenario_id
+
+
+def test_every_explicit_preference_carries_entity_version():
+    for scenario_id, simulation_input in SCENARIOS.items():
+        for preference in simulation_input["preference_snapshot"]["explicit_preferences"]:
+            assert isinstance(preference["entity_version"], int), scenario_id
+
+
+def test_explicit_preference_logical_keys_are_unique_and_canonical():
+    for scenario_id, simulation_input in SCENARIOS.items():
+        keys = [
+            (preference["entity_id"], preference["entity_version"])
+            for preference in simulation_input["preference_snapshot"]["explicit_preferences"]
+        ]
+        assert len(keys) == len(set(keys)), scenario_id
+        assert keys == sorted(keys), scenario_id
 
 
 def test_target_scenarios_exercise_inferred_state():

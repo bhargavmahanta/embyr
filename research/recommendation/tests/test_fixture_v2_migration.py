@@ -44,9 +44,15 @@ def _relationships(snapshot: dict):
             yield entity, relationship
 
 
-def _objective_state(snapshot: dict, objective_id: str, entity_id: str) -> dict | None:
+def _objective_state(
+    snapshot: dict, objective_id: str, entity_id: str, entity_version: int
+) -> dict | None:
     for state in snapshot["learner_state_snapshot"]["objective_states"]:
-        if state["objective_id"] == objective_id and state["entity_id"] == entity_id:
+        if (
+            state["objective_id"] == objective_id
+            and state["entity_id"] == entity_id
+            and state["entity_version"] == entity_version
+        ):
             return state
     return None
 
@@ -159,7 +165,10 @@ def test_prerequisite_evidence_cases():
         assert len(requires) == 1, scenario_id
         relationship = requires[0]
         state = _objective_state(
-            snapshot, relationship["objective_id"], relationship["target_entity_id"]
+            snapshot,
+            relationship["objective_id"],
+            relationship["target_entity_id"],
+            relationship["target_entity_version"],
         )
         if expected_state is None:
             assert state is None
@@ -355,3 +364,47 @@ def test_scenario_e_conflict_targets_are_reachable_without_anchor():
         key = (target["entity_id"], target["entity_version"])
         assert "EXPLICIT_INTEREST" in sources[key], name
     assert "control" not in SCENARIO_TARGETS[SCENARIO_E]
+
+
+def test_objective_states_are_versioned_and_unique():
+    for scenario_id, snapshot in SCENARIOS.items():
+        keys = [
+            (state["objective_id"], state["entity_id"], state["entity_version"])
+            for state in snapshot["learner_state_snapshot"]["objective_states"]
+        ]
+        for state in snapshot["learner_state_snapshot"]["objective_states"]:
+            assert isinstance(state["entity_version"], int), scenario_id
+        assert len(keys) == len(set(keys)), scenario_id
+
+
+def test_explicit_preferences_are_versioned_and_unique():
+    for scenario_id, snapshot in SCENARIOS.items():
+        keys = [
+            (preference["entity_id"], preference["entity_version"])
+            for preference in snapshot["preference_snapshot"]["explicit_preferences"]
+        ]
+        for preference in snapshot["preference_snapshot"]["explicit_preferences"]:
+            assert isinstance(preference["entity_version"], int), scenario_id
+        assert len(keys) == len(set(keys)), scenario_id
+
+
+def test_requires_prerequisite_evidence_is_version_matched():
+    for scenario_id, snapshot in SCENARIOS.items():
+        entities = _entities(snapshot)
+        for entity, relationship in _relationships(snapshot):
+            if relationship["relationship_type"] != "REQUIRES":
+                continue
+            prerequisite_key = (
+                relationship["target_entity_id"],
+                relationship["target_entity_version"],
+            )
+            assert prerequisite_key in entities, (scenario_id, prerequisite_key)
+            for state in snapshot["learner_state_snapshot"]["objective_states"]:
+                if state["objective_id"] != relationship["objective_id"]:
+                    continue
+                if state["entity_id"] != relationship["target_entity_id"]:
+                    continue
+                assert state["entity_version"] == relationship["target_entity_version"], (
+                    scenario_id,
+                    state,
+                )

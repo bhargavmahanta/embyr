@@ -116,10 +116,10 @@ Canonical array ordering (frozen) removes every unordered-array ambiguity:
 - Arrays of objects are sorted ascending by their stable identity key:
   `entities` by `(entity_id, entity_version)`; `relationships` by
   `(target_entity_id, target_entity_version, relationship_type)`; `vectors` by
-  `(entity_id, entity_version)`; `objective_states` by `objective_id`;
+  `(entity_id, entity_version)`;   `objective_states` by `(objective_id, entity_id, entity_version)`;
   `interest_states` by `(entity_id, entity_version)`;
   `anchor_entities` by `(entity_id, entity_version)`;
-  `explorations` by `exploration_id`; `explicit_preferences` by `entity_id`;
+  `explorations` by `exploration_id`; `explicit_preferences` by `(entity_id, entity_version)`;
   `prerequisite_evaluations` by `(objective_id, prerequisite_entity_id)`;
   `candidates_considered` by `candidate_id`; `ranked_recommendations` by
   `final_rank`; `invariant_results` by `invariant_code`.
@@ -203,6 +203,7 @@ LearnerStateSnapshot
 ObjectiveStateSnapshot
 - objective_id                string
 - entity_id                   string
+- entity_version              integer
 - state                       string        # derived objective/entity state vocabulary
 - understanding_estimate      number|null   # optional, synthetic
 
@@ -230,6 +231,7 @@ PreferenceSnapshot
 
 ExplicitPreferenceEntry
 - entity_id                   string
+- entity_version              integer       # ontology version selected in this snapshot
 - preference                  string        # NEUTRAL|MORE|LESS|PAUSED|NOT_INTERESTED
 - version                     integer
 ```
@@ -398,14 +400,17 @@ Objective-relative lookup (frozen):
 
 - A `REQUIRES` relationship carries an explicit `objective_id` (§6). The
   prerequisite state is derived from the learner's objective state matched by
-  **both** `objective_id` AND the prerequisite entity identity
+  `objective_id` AND the prerequisite entity identity
   (`entity_id`, `entity_version`); it is never inferred from arbitrary
   objective-state rows.
+- `ObjectiveStateSnapshot` carries `entity_version` (§5), so versioned
+  prerequisite evidence is representable. The logical objective-state key is
+  `(objective_id, entity_id, entity_version)`.
 - `PrerequisiteEvaluation.objective_id` copies the `REQUIRES` edge's
   `objective_id`.
 - If no matching learner objective state exists → `UNKNOWN`.
 - If the input contains duplicate/ambiguous learner objective state for the same
-  logical `(objective_id, prerequisite entity identity)` → the input FAILS
+  logical `(objective_id, entity_id, entity_version)` → the input FAILS
   validation.
 
 Readiness state mapping (frozen, no numeric threshold):
@@ -1010,6 +1015,7 @@ Identifiers below are fixed synthetic UUIDs.
       {
         "objective_id": "40000000-0000-4000-8000-000000000001",
         "entity_id": "20000000-0000-4000-8000-000000000001",
+        "entity_version": 1,
         "state": "EXPLORING"
       }
     ],
@@ -1371,6 +1377,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
           "source": "EXPLICIT_INTEREST",
           "provenance": {
             "entity_id": "20000000-0000-4000-8000-000000000003",
+            "entity_version": 1,
             "preference": "MORE",
             "version": 1
           }
@@ -1402,6 +1409,7 @@ must succeed with an empty ranked set and all invariants `PASS`.
           "source": "EXPLICIT_INTEREST",
           "provenance": {
             "entity_id": "20000000-0000-4000-8000-000000000003",
+            "entity_version": 1,
             "preference": "MORE",
             "version": 1
           }
@@ -1542,6 +1550,24 @@ repair only: no candidate-generation semantics, ranking semantics, persistence,
 migration, or production API change. `contract_version` remains
 `m3-simulation/v2` because v2 exists only on the unmerged #46 branch and no
 runtime consumer has read it.
+
+#### Pre-consumer repair — versioned learner references (Issue #46, v2)
+
+Exact-head engine review found two representation gaps, both repaired within
+unmerged v2:
+
+1. `ExplicitPreferenceEntry` gained a required `entity_version` (§5). A
+   simulation preference resolves the entity-scoped production preference onto
+   an explicit ontology version; no version fallback, "latest", or "highest"
+   inference is permitted.
+2. `ObjectiveStateSnapshot` gained a required `entity_version` (§5), so
+   prerequisite evidence can match the versioned prerequisite entity identity
+   `(objective_id, entity_id, entity_version)` (§7).
+
+Canonical ordering for `explicit_preferences` and `objective_states` is updated
+accordingly (§4). This is a simulation-only representation repair: no ranking
+semantics, persistence, migration, or production API change.
+`contract_version` remains `m3-simulation/v2`.
 
 ### Erratum — Issue #45 implementation evidence
 

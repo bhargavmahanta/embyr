@@ -188,10 +188,19 @@ def objective_state(
     entity_id: str,
     state: str,
     understanding_estimate: float | None = None,
+    *,
+    entity_version: int,
 ) -> dict:
     if state not in OBJECTIVE_STATES:
         raise ValueError(f"unknown objective state: {state!r}")
-    entry: dict = {"objective_id": objective_id, "entity_id": entity_id, "state": state}
+    if not isinstance(entity_version, int) or entity_version < 1:
+        raise ValueError("objective state entity_version must be a positive integer")
+    entry: dict = {
+        "objective_id": objective_id,
+        "entity_id": entity_id,
+        "entity_version": int(entity_version),
+        "state": state,
+    }
     if understanding_estimate is not None:
         entry["understanding_estimate"] = float(understanding_estimate)
     return entry
@@ -251,12 +260,21 @@ def learner_state_snapshot(
     }
 
 
-def explicit_preference(entity_id: str, preference: str, version: int = 1) -> dict:
+def explicit_preference(
+    entity_id: str, preference: str, version: int = 1, *, entity_version: int
+) -> dict:
     if preference not in EXPLICIT_PREFERENCES:
         raise ValueError(f"unknown explicit preference: {preference!r}")
     if version < 1:
         raise ValueError("preference version must be >= 1")
-    return {"entity_id": entity_id, "preference": preference, "version": int(version)}
+    if not isinstance(entity_version, int) or entity_version < 1:
+        raise ValueError("explicit preference entity_version must be a positive integer")
+    return {
+        "entity_id": entity_id,
+        "entity_version": int(entity_version),
+        "preference": preference,
+        "version": int(version),
+    }
 
 
 def preference_snapshot(snapshot_version: str, explicit_preferences: list[dict]) -> dict:

@@ -24,10 +24,6 @@ CANDIDATE_SOURCES = (
 #: Explicit preferences that nominate an EXPLICIT_INTEREST candidate (§8.1).
 NOMINATING_PREFERENCES = ("MORE", "LESS", "PAUSED", "NOT_INTERESTED")
 
-#: Simulation entities are versioned; explicit preferences are entity-scoped
-#: and carry no entity_version, so they apply to the canonical version 1.
-EXPLICIT_PREFERENCE_ENTITY_VERSION = 1
-
 
 def _nomination(target: TargetKey, source: str, provenance: dict) -> dict:
     return {
@@ -157,14 +153,15 @@ def explicit_interest_nominations(simulation_input: dict) -> list[dict]:
     nominations: list[dict] = []
     preferences = sorted(
         simulation_input["preference_snapshot"]["explicit_preferences"],
-        key=lambda entry: entry["entity_id"],
+        key=lambda entry: (entry["entity_id"], entry["entity_version"]),
     )
     for preference in preferences:
         if preference["preference"] not in NOMINATING_PREFERENCES:
             continue
-        target = (preference["entity_id"], EXPLICIT_PREFERENCE_ENTITY_VERSION)
+        target = (preference["entity_id"], preference["entity_version"])
         provenance = {
             "entity_id": preference["entity_id"],
+            "entity_version": preference["entity_version"],
             "preference": preference["preference"],
             "version": preference["version"],
         }

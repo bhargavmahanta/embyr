@@ -222,6 +222,30 @@ def test_explicit_does_not_nominate_without_preferences():
     assert explicit_interest_nominations(sim) == []
 
 
+def test_explicit_nominates_carried_entity_version():
+    sim = make_input(
+        entities=[topic("a", version=2)],
+        preferences=[preference("a", "MORE", entity_version=2)],
+    )
+    nominations = explicit_interest_nominations(sim)
+    assert [(n["target_entity_id"], n["target_entity_version"]) for n in nominations] == [("a", 2)]
+    assert nominations[0]["provenance"]["entity_version"] == 2
+
+
+def test_explicit_versions_coexist_deterministically():
+    sim = make_input(
+        entities=[topic("a", version=1), topic("a", version=2)],
+        preferences=[
+            preference("a", "MORE", entity_version=2),
+            preference("a", "LESS", entity_version=1),
+        ],
+    )
+    nominations = explicit_interest_nominations(sim)
+    assert [
+        (n["target_entity_id"], n["target_entity_version"]) for n in nominations
+    ] == [("a", 1), ("a", 2)]
+
+
 # ---------------------------------------------------------------------------
 # HISTORY_CONTINUATION
 # ---------------------------------------------------------------------------

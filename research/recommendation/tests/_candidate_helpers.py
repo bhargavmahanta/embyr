@@ -10,6 +10,7 @@ LEARNER_ID = "10000000-0000-4000-8000-000000000001"
 def topic(
     entity_id: str,
     *,
+    version: int = 1,
     entity_type: str = "TOPIC",
     title: str | None = None,
     relationships=(),
@@ -19,7 +20,7 @@ def topic(
 ) -> dict:
     return b.entity(
         entity_id,
-        1,
+        version,
         entity_type,
         title or entity_id,
         domain_ids=list(domains),
@@ -66,16 +67,24 @@ def make_input(
     )
 
 
-def objective_state(objective_id: str, entity_id: str, state: str, understanding: float | None = None) -> dict:
-    return b.objective_state(objective_id, entity_id, state, understanding)
+def objective_state(
+    objective_id: str,
+    entity_id: str,
+    state: str,
+    understanding: float | None = None,
+    entity_version: int = 1,
+) -> dict:
+    return b.objective_state(
+        objective_id, entity_id, state, understanding, entity_version=entity_version
+    )
 
 
-def preference(entity_id: str, value: str) -> dict:
-    return b.explicit_preference(entity_id, value)
+def preference(entity_id: str, value: str, entity_version: int = 1, version: int = 1) -> dict:
+    return b.explicit_preference(entity_id, value, version, entity_version=entity_version)
 
 
-def exploration(exploration_id: str, entity_id: str, status: str, intent: str = "DIRECT_INTEREST", **kwargs) -> dict:
-    return b.exploration(exploration_id, entity_id, 1, intent, status, **kwargs)
+def exploration(exploration_id: str, entity_id: str, status: str, intent: str = "DIRECT_INTEREST", version: int = 1, **kwargs) -> dict:
+    return b.exploration(exploration_id, entity_id, version, intent, status, **kwargs)
 
 
 def vector(entity_id: str, values, version: int = 1) -> dict:

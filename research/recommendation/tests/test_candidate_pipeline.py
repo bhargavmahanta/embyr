@@ -48,6 +48,17 @@ def test_unresolved_preference_target_is_invalid_target():
     assert candidate["exclusion_reasons"] == ["INVALID_TARGET"]
 
 
+def test_unresolved_preference_version_is_preserved():
+    sim = make_input(
+        entities=[topic("a")],
+        preferences=[preference("ghost", "MORE", entity_version=3)],
+    )
+    candidate = candidate_by_target(generate_candidates(sim), "ghost", version=3)
+    assert candidate["target_entity_type"] is None
+    assert candidate["exclusion_reasons"] == ["INVALID_TARGET"]
+    assert candidate["feature_inputs"]["explicit_preference"] == "MORE"
+
+
 def test_unresolved_revisit_target_is_invalid_target():
     sim = make_input(entities=[topic("a")], explorations=[exploration("e1", "ghost", "COMPLETED")])
     candidate = candidate_by_target(generate_candidates(sim), "ghost")

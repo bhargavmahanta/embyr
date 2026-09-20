@@ -165,14 +165,17 @@ def _validate_learner_state(sim: dict) -> None:
         _field(state, "objective_states", "learner_state_snapshot"),
         "learner_state_snapshot.objective_states",
     )
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, int]] = set()
     for index, raw_state in enumerate(objective_states):
         ctx = f"learner_state_snapshot.objective_states[{index}]"
         entry = _mapping(raw_state, ctx)
         objective_id = _text(_field(entry, "objective_id", ctx), f"{ctx}.objective_id")
         entity_id = _text(_field(entry, "entity_id", ctx), f"{ctx}.entity_id")
+        entity_version = _integer(
+            _field(entry, "entity_version", ctx), f"{ctx}.entity_version"
+        )
         _enum(_field(entry, "state", ctx), OBJECTIVE_STATES, f"{ctx}.state")
-        key = (objective_id, entity_id)
+        key = (objective_id, entity_id, entity_version)
         _require(key not in seen, f"ambiguous learner objective state for {key!r}")
         seen.add(key)
     challenge = state.get("challenge_state")
@@ -194,17 +197,21 @@ def _validate_preferences(sim: dict) -> None:
         _field(snapshot, "explicit_preferences", "preference_snapshot"),
         "preference_snapshot.explicit_preferences",
     )
-    seen: set[str] = set()
+    seen: set[tuple[str, int]] = set()
     for index, raw_preference in enumerate(preferences):
         ctx = f"preference_snapshot.explicit_preferences[{index}]"
         entry = _mapping(raw_preference, ctx)
         entity_id = _text(_field(entry, "entity_id", ctx), f"{ctx}.entity_id")
+        entity_version = _integer(
+            _field(entry, "entity_version", ctx), f"{ctx}.entity_version"
+        )
         _enum(
             _field(entry, "preference", ctx), EXPLICIT_PREFERENCES, f"{ctx}.preference"
         )
         _integer(_field(entry, "version", ctx), f"{ctx}.version")
-        _require(entity_id not in seen, f"duplicate explicit preference for {entity_id!r}")
-        seen.add(entity_id)
+        key = (entity_id, entity_version)
+        _require(key not in seen, f"duplicate explicit preference for {key!r}")
+        seen.add(key)
 
 
 def _validate_explorations(sim: dict) -> None:
