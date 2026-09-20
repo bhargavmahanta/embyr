@@ -117,6 +117,7 @@ Canonical array ordering (frozen) removes every unordered-array ambiguity:
   `entities` by `(entity_id, entity_version)`; `relationships` by
   `(target_entity_id, target_entity_version, relationship_type)`; `vectors` by
   `(entity_id, entity_version)`; `objective_states` by `objective_id`;
+  `interest_states` by `(entity_id, entity_version)`;
   `explorations` by `exploration_id`; `explicit_preferences` by `entity_id`;
   `prerequisite_evaluations` by `(objective_id, prerequisite_entity_id)`;
   `candidates_considered` by `candidate_id`; `ranked_recommendations` by
@@ -173,6 +174,7 @@ LearnerStateSnapshot
 - snapshot_version            string
 - objective_states            ObjectiveStateSnapshot[]
 - challenge_state             ChallengeStateSnapshot|null
+- interest_states             LearnerInterestStateSnapshot[]
 
 ObjectiveStateSnapshot
 - objective_id                string
@@ -183,6 +185,18 @@ ObjectiveStateSnapshot
 ChallengeStateSnapshot
 - area_id                     string
 - ability_estimate            number
+
+LearnerInterestStateSnapshot
+- entity_id                   string
+- entity_version              integer
+- recent_affinity             number
+- long_term_affinity          number
+- user_initiated_strength     number
+- algorithm_exposure_strength number
+- voluntary_revisit_count     integer
+- last_interaction_at         string|null
+- computed_at                 string
+- model_version               string
 ```
 
 ```text
@@ -225,6 +239,16 @@ marked optional, their enum values reuse the frozen API and LLD vocabularies,
 and their arrays follow the canonical ordering in §4. `RerankConfig.strategy`
 names a deterministic strategy; it does not freeze MMR or any specific
 algorithm.
+
+`LearnerStateSnapshot.interest_states` is the simulation analogue of the LLD §27
+`learner_interest_state` domain: derived/inferred learner-interest state. It
+stays distinct from `PreferenceSnapshot.explicit_preferences` (explicit user
+intent), from `LearnerStateSnapshot.objective_states` (understanding/readiness),
+and from `LearnerStateSnapshot.challenge_state` (ability context). Field names
+follow the LLD domain; `entity_version` is added because simulation entities are
+versioned and the canonical identity key is `(entity_id, entity_version)`. An
+input with no inferred-interest state uses `interest_states: []`; omission and
+`[]` are not separate semantic states.
 
 ## 6. Ontology Snapshot and Semantic Space
 
@@ -802,7 +826,8 @@ Identifiers below are fixed synthetic UUIDs.
     "challenge_state": {
       "area_id": "30000000-0000-4000-8000-000000000001",
       "ability_estimate": 0.35
-    }
+    },
+    "interest_states": []
   },
   "preference_snapshot": {
     "snapshot_version": "prefs-001",
@@ -1232,6 +1257,19 @@ The following are frozen by Issue #44:
 Deliberately **not** frozen here and deferred to evaluation in later M3 issues:
 numeric weights, embedding provider, embedding dimension, ANN strategy, the
 diversity algorithm, and any revisit-vs-exploration weighting.
+
+### Erratum — Issue #45 implementation evidence
+
+The original `m3-simulation/v1` `LearnerStateSnapshot` omitted the carrier for
+`learner_interest_state` even though §10, §11, and §21 already required explicit
+and inferred interest to remain separate. #45 fixture construction exposed the
+omission before any recommendation engine (#46-#49) or external consumer read
+the contract. The v1 input shape is corrected to require
+`interest_states: LearnerInterestStateSnapshot[]` (§5).
+
+This is a representation repair only: no recommendation semantics, ranking
+weights, persistence schema, or production migration changed, and
+`contract_version` remains `m3-simulation/v1`.
 
 Changes to this contract after Issue #44 require evidence from implementation,
 security, performance, cost, or product constraints.

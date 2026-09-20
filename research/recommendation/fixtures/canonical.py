@@ -39,7 +39,7 @@ def sort_objective_states(states: list[dict]) -> list[dict]:
 
 
 def sort_interest_states(states: list[dict]) -> list[dict]:
-    return sorted(states, key=lambda item: item["entity_id"])
+    return sorted(states, key=lambda item: (item["entity_id"], item["entity_version"]))
 
 
 def sort_explorations(explorations: list[dict]) -> list[dict]:

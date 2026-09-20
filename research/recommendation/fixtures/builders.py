@@ -181,10 +181,16 @@ def interest_state(
     user_initiated_strength: float,
     algorithm_exposure_strength: float,
     voluntary_revisit_count: int = 0,
+    last_interaction_at: str | None = None,
     computed_at: str | None = None,
     model_version: str = INTEREST_MODEL_VERSION,
 ) -> dict:
-    """Inferred interest / affinity for one entity (LLD §27)."""
+    """Inferred interest / affinity for one entity.
+
+    Simulation analogue of the LLD §27 ``learner_interest_state`` domain. Field
+    names follow the LLD/migration domain; ``entity_version`` is added because
+    simulation entities are versioned.
+    """
     if voluntary_revisit_count < 0:
         raise ValueError("voluntary_revisit_count must be >= 0")
     return {
@@ -195,8 +201,9 @@ def interest_state(
         "user_initiated_strength": float(user_initiated_strength),
         "algorithm_exposure_strength": float(algorithm_exposure_strength),
         "voluntary_revisit_count": int(voluntary_revisit_count),
-        "model_version": model_version,
+        "last_interaction_at": last_interaction_at,
         "computed_at": computed_at or sim_time(0),
+        "model_version": model_version,
     }
 
 

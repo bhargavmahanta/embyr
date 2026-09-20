@@ -83,12 +83,15 @@ structurally by `tests/test_fixture_offline.py`.
 3. **`execution_metadata` is omitted from `SimulationInput`.** It is excluded
    from comparison and fingerprint by the contract, and the input schema does
    not declare it.
-4. **`interest_states` is additive.** The frozen §5 `LearnerStateSnapshot`
-   enumerates `objective_states` and `challenge_state` but does not name an input
-   representation for inferred interest, even though §10/§11 require explicit
-   and inferred interest to remain separate. `interest_states` is taken from the
-   authoritative LLD §27 `learner_interest_state` domain; no frozen field or
-   semantic is altered.
+4. **`interest_states` implements the explicit v1 erratum.** The original
+   `m3-simulation/v1` `LearnerStateSnapshot` enumerated only `objective_states`
+   and `challenge_state`, so it had no carrier for inferred interest even though
+   the contract already required explicit and inferred interest to remain
+   separate. #45 fixture construction exposed the omission, the contract was
+   amended (see the §25 erratum), and `interest_states` is now a **required**
+   field of the frozen snapshot. It is the simulation analogue of the LLD §27
+   `learner_interest_state` domain. `contract_version` remains
+   `m3-simulation/v1`; only the input representation was repaired.
 
 ## Validation
 
