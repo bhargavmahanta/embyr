@@ -131,3 +131,23 @@ def test_readiness_rejects_ambiguous_full_key():
     )
     with pytest.raises(SimulationInputError):
         evaluate_prerequisites(("a", 1), entity, sim)
+
+
+def test_prerequisite_evaluations_sorted_by_objective_then_prerequisite():
+    entity = topic(
+        "a",
+        relationships=[requires("p_b", "OBJ-A"), requires("p_a", "OBJ-Z")],
+    )
+    sim = make_input(
+        entities=[entity, topic("p_a"), topic("p_b")],
+        anchors=[("a", 1)],
+        objective_states=[
+            objective_state("OBJ-A", "p_b", "UNDERSTOOD"),
+            objective_state("OBJ-Z", "p_a", "UNDERSTOOD"),
+        ],
+    )
+    evaluations = evaluate_prerequisites(("a", 1), entity, sim)
+    assert [(e["objective_id"], e["prerequisite_entity_id"]) for e in evaluations] == [
+        ("OBJ-A", "p_b"),
+        ("OBJ-Z", "p_a"),
+    ]

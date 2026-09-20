@@ -550,10 +550,16 @@ ANN strategy.
 For each anchor in `generation_context.anchor_entities` that has a semantic
 vector:
 
-- compare it to **every other** ontology entity that has a valid vector
-  (exhaustive, deterministic comparison);
-- exclude the anchor itself (an anchor is never nominated by its own semantic
-  retrieval).
+- compare it to **every other structurally valid semantic-vector record**
+  (exhaustive, deterministic comparison); the candidate universe is the semantic
+  vector records, not only entities already resolved in the ontology;
+- exclude the anchor identity itself (an anchor is never nominated by its own
+  semantic retrieval).
+
+A structurally valid vector record whose `(entity_id, entity_version)` does not
+resolve in `ontology_snapshot` still nominates; it proceeds to
+normalization/eligibility as an unresolved target and becomes `INVALID_TARGET`
+(§8.3, §16). Trace preservation does not make an absent entity valid.
 
 M3 applies **no threshold, no top-K, no ANN, and no randomness**. If no anchor
 has a semantic vector, SEMANTIC emits no nominations.
@@ -1551,10 +1557,10 @@ migration, or production API change. `contract_version` remains
 `m3-simulation/v2` because v2 exists only on the unmerged #46 branch and no
 runtime consumer has read it.
 
-#### Pre-consumer repair — versioned learner references (Issue #46, v2)
+#### Pre-consumer repair — versioned learner references and trace alignment (Issue #46, v2)
 
-Exact-head engine review found two representation gaps, both repaired within
-unmerged v2:
+Exact-head engine review found three representation gaps and one runtime
+alignment issue, all repaired within unmerged v2:
 
 1. `ExplicitPreferenceEntry` gained a required `entity_version` (§5). A
    simulation preference resolves the entity-scoped production preference onto
@@ -1563,6 +1569,13 @@ unmerged v2:
 2. `ObjectiveStateSnapshot` gained a required `entity_version` (§5), so
    prerequisite evidence can match the versioned prerequisite entity identity
    `(objective_id, entity_id, entity_version)` (§7).
+3. §9.1 now states the semantic candidate universe is structurally valid
+   semantic-vector records, so a valid vector record absent from the ontology
+   yields an `INVALID_TARGET` candidate instead of being silently dropped
+   (§8.3, §16).
+4. `prerequisite_evaluations` canonical order remains
+   `(objective_id, prerequisite_entity_id)` (§4); this is a runtime alignment,
+   not a schema change.
 
 Canonical ordering for `explicit_preferences` and `objective_states` is updated
 accordingly (§4). This is a simulation-only representation repair: no ranking

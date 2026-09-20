@@ -98,4 +98,5 @@ def evaluate_prerequisites(
                 "reason_codes": [REASON_CODES[state]],
             }
         )
+    evaluations.sort(key=lambda evaluation: (evaluation["objective_id"], evaluation["prerequisite_entity_id"]))
     return evaluations
