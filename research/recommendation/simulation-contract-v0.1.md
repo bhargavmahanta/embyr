@@ -111,6 +111,27 @@ The simulator must be deterministic and offline.
 - Floating-point values must be serialized deterministically; the contract does
   not require a specific numeric precision beyond reproducibility across runs.
 
+Canonical array ordering (frozen) removes every unordered-array ambiguity:
+
+- Arrays of objects are sorted ascending by their stable identity key:
+  `entities` by `(entity_id, entity_version)`; `relationships` by
+  `(target_entity_id, target_entity_version, relationship_type)`; `vectors` by
+  `(entity_id, entity_version)`; `objective_states` by `objective_id`;
+  `explorations` by `exploration_id`; `explicit_preferences` by `entity_id`;
+  `prerequisite_evaluations` by `(objective_id, prerequisite_entity_id)`;
+  `candidates_considered` by `candidate_id`; `ranked_recommendations` by
+  `final_rank`; `invariant_results` by `invariant_code`.
+- Vocabularies with a frozen enum order are sorted by that enum order:
+  `source_paths` and `candidate_sources` by CandidateSource order (§8, §14);
+  `explanation_codes` by ExplanationCode order (§15); `exclusion_reasons` by
+  ExclusionCode order (§16).
+- Unordered identifier arrays (`domain_ids`, `objective_ids`) are sorted
+  ascending lexicographically.
+- `SemanticVector.vector` preserves dimension order; it is an ordered tuple, not
+  a sortable set.
+- Equivalent snapshots must serialize to identical canonical bytes and therefore
+  the same `input_fingerprint`.
+
 ## 5. SimulationInput
 
 `SimulationInput` is versioned. It uses synthetic, stable learner identity and
@@ -146,6 +167,64 @@ SimulationConfig
 
 `feature_weights` values are simulation configuration. They are never learner
 truth and are never presented as a learner attribute.
+
+```text
+LearnerStateSnapshot
+- snapshot_version            string
+- objective_states            ObjectiveStateSnapshot[]
+- challenge_state             ChallengeStateSnapshot|null
+
+ObjectiveStateSnapshot
+- objective_id                string
+- entity_id                   string
+- state                       string        # derived objective/entity state vocabulary
+- understanding_estimate      number|null   # optional, synthetic
+
+ChallengeStateSnapshot
+- area_id                     string
+- ability_estimate            number
+```
+
+```text
+PreferenceSnapshot
+- snapshot_version            string
+- explicit_preferences        ExplicitPreferenceEntry[]
+
+ExplicitPreferenceEntry
+- entity_id                   string
+- preference                  string        # NEUTRAL|MORE|LESS|PAUSED|NOT_INTERESTED
+- version                     integer
+```
+
+```text
+ExplorationHistory
+- snapshot_version            string
+- explorations                ExplorationRecord[]
+
+ExplorationRecord
+- exploration_id              string
+- entity_id                   string
+- entity_version              integer
+- learning_intent             string
+- status                      string        # ACTIVE|PAUSED|COMPLETED
+- started_at                  string|null
+- returned_at                 string|null
+- completed_at                string|null
+- paused_at                   string|null
+```
+
+```text
+RerankConfig
+- strategy                    string        # named deterministic strategy; MMR not required
+- parameters                  map<string, number>   # optional; simulation-only
+- top_k                       integer|null
+```
+
+These referenced types are frozen for M3. Their fields are required unless
+marked optional, their enum values reuse the frozen API and LLD vocabularies,
+and their arrays follow the canonical ordering in §4. `RerankConfig.strategy`
+names a deterministic strategy; it does not freeze MMR or any specific
+algorithm.
 
 ## 6. Ontology Snapshot and Semantic Space
 
@@ -492,7 +571,7 @@ EXPLICIT_PREFERENCE_OVERRIDES_INFERRED   # justified by §10 precedence
 - Human-readable rendering is optional and, if present, must be deterministic and
   template-based. No LLM is required.
 - No psychological, personality, or identity inference is permitted.
-- A `PASS` recommendation must carry at least one explanation code.
+- Every final recommendation must carry at least one explanation code.
 
 ## 16. Exclusion Contract
 
@@ -543,8 +622,13 @@ InvariantResult
 
 ## 18. Production Persistence Boundary
 
-The simulation trace is a **richer strict superset** of the information
-production recommendations persist. It is **not** a new production schema.
+The simulation trace carries strictly more detail than the production
+recommendation row, but it is **not** a field-for-field strict superset of
+production recommendation persistence. Production-only presentation and
+lifecycle fields (`mode`, `distance_band`, `ranking_model_version`,
+`presentation`, `presented_at`, `decision`) are not simulation concepts, and
+simulation-only fields are not persisted. The trace is **not** a new production
+schema.
 
 Production recommendations persist:
 
@@ -1089,8 +1173,15 @@ must succeed with an empty ranked set and all invariants `PASS`.
   ],
   "ranked_recommendations": [],
   "invariant_results": [
+    {"invariant_code": "IN-1", "status": "PASS", "diagnostics": {}},
     {"invariant_code": "IN-2", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-3", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-4", "status": "PASS", "diagnostics": {}},
+    {"invariant_code": "IN-5", "status": "PASS", "diagnostics": {"traces_incomplete": 0}},
     {"invariant_code": "IN-6", "status": "PASS", "diagnostics": {"exclusions_without_reason": 0}},
+    {"invariant_code": "IN-7", "status": "PASS", "diagnostics": {"ranks": []}},
+    {"invariant_code": "IN-8", "status": "PASS", "diagnostics": {"duplicate_targets": 0}},
+    {"invariant_code": "IN-9", "status": "PASS", "diagnostics": {"external_calls": 0}},
     {"invariant_code": "IN-10", "status": "PASS", "diagnostics": {"empty_is_valid": true}}
   ],
   "metrics": {
@@ -1127,8 +1218,9 @@ The following are frozen by Issue #44:
 - **Exclusion codes** — minimal machine-readable vocabulary (§16).
 - **SimulationResult** — fingerprint, candidates, recommendations, invariants,
   metrics, excluded execution metadata (§17).
-- **Persistence boundary** — simulation trace is a strict superset of production
-  information, not a new production schema; no migration (§18).
+- **Persistence boundary** — simulation trace is richer than production
+  recommendation provenance but is not a field-for-field superset, and is not a
+  new production schema; no migration (§18).
 - **Hard invariants** — IN-1 through IN-10, `PASS|FAIL` with diagnostics (§19).
 - **Descriptive metrics** — thirteen informational metrics, no thresholds; NDCG,
   MAP, Recall@K, Precision@K excluded (§20).
