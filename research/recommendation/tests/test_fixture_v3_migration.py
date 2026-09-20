@@ -1,11 +1,11 @@
-"""m3-simulation/v4 migration integrity: generation context and objective_id.
+"""m3-simulation/v5 migration integrity: generation context and objective_id.
 
 Covers the retained Issue #46 candidate contract (explicit
 ``CandidateGenerationContext`` anchors and the explicit ``objective_id`` required
-for ``REQUIRES`` relationships) under the v4 contract version. These are
+for ``REQUIRES`` relationships) under the v5 contract version. These are
 fixture/input integrity checks, not a candidate engine. (The filename retains
-the historical ``v3`` migration name; the v3 -> v4 bump is explanation-only and
-does not alter these input-integrity semantics.)
+the historical ``v3`` migration name; the v3 -> v4 -> v5 bumps are additive
+semantic freezes and do not alter these input-integrity semantics.)
 """
 
 from __future__ import annotations
@@ -60,9 +60,9 @@ def _objective_state(
     return None
 
 
-def test_all_fixtures_are_v4():
+def test_all_fixtures_are_v5():
     for scenario_id in SCENARIO_IDS:
-        assert SCENARIOS[scenario_id]["contract_version"] == "m3-simulation/v4", scenario_id
+        assert SCENARIOS[scenario_id]["contract_version"] == "m3-simulation/v5", scenario_id
 
 
 def test_anchors_are_unique_and_canonically_sorted():
