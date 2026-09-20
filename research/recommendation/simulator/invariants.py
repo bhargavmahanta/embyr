@@ -99,6 +99,23 @@ def _nondeterministic_attributes(tree: ast.AST) -> set[str]:
     }
 
 
+def _forbidden_imported_symbols(tree: ast.AST) -> set[str]:
+    """Fully-qualified names of ``ImportFrom`` symbols in the forbidden policy.
+
+    Detects ``from time import time`` (origin ``time.time``), including aliases
+    (``from time import time as clock`` still reports ``time.time``), so a bare
+    ``Name`` call cannot bypass the guard. Uses the imported origin, never the
+    local alias text.
+    """
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name in FORBIDDEN_ATTRIBUTES:
+                    symbols.add(f"{node.module}.{alias.name}")
+    return symbols
+
+
 def scan_source(source: str, filename: str = "<source>") -> list[str]:
     """Return deterministic forbidden findings for one Python source string.
 
@@ -109,6 +126,10 @@ def scan_source(source: str, filename: str = "<source>") -> list[str]:
         f"{filename}:import:{root}"
         for root in sorted(_import_roots(tree) & FORBIDDEN_MODULE_ROOTS)
     ]
+    findings.extend(
+        f"{filename}:import:{symbol}"
+        for symbol in sorted(_forbidden_imported_symbols(tree))
+    )
     findings.extend(
         f"{filename}:attr:{attr}"
         for attr in sorted(_nondeterministic_attributes(tree))
@@ -256,9 +277,17 @@ def _in6(core) -> dict:
 def _in7(core) -> dict:
     ranks = [entry["final_rank"] for entry in core.full_ranked_candidates]
     expected = list(range(1, len(ranks) + 1))
-    selected_ranks = [result["final_rank"] for result in core.selected_recommendations]
-    prefix_ok = selected_ranks == list(range(1, len(selected_ranks) + 1))
-    return _result("IN-7", ranks == expected and prefix_ok, {"ranks": ranks})
+    selected = core.selected_recommendations
+    full_results = core.full_recommendation_results
+    prefix_ok = (
+        len(selected) <= len(full_results)
+        and selected == full_results[: len(selected)]
+    )
+    return _result(
+        "IN-7",
+        ranks == expected and prefix_ok,
+        {"ranks": ranks, "selected_count": len(selected)},
+    )
 
 
 def _in8(core) -> dict:

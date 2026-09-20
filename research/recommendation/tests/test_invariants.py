@@ -152,6 +152,46 @@ def test_in7_fails_on_non_contiguous_ranks():
     assert _by_code(evaluate_invariants(broken, copy.deepcopy(broken)))["IN-7"]["status"] == "FAIL"
 
 
+def _in7_status(considered, full_ranked, explanations, selected):
+    execution = core(
+        considered,
+        full_ranked=full_ranked,
+        explanations=explanations,
+        selected=selected,
+    )
+    return _by_code(evaluate_invariants(execution, copy.deepcopy(execution)))["IN-7"]["status"]
+
+
+def test_in7_fails_when_selected_extends_past_full_population():
+    considered = [candidate("c1", "e1"), candidate("c2", "e2")]
+    status = _in7_status(
+        considered,
+        [ranked("c1", "e1", rank=1)],
+        [explanation("c1", "e1", rank=1)],
+        [explanation("c1", "e1", rank=1), explanation("c2", "e2", rank=2)],
+    )
+    assert status == "FAIL"
+
+
+def test_in7_fails_when_selected_substitutes_a_rank_identity():
+    considered = [candidate("c1", "e1"), candidate("c2", "e2")]
+    status = _in7_status(
+        considered,
+        [ranked("c1", "e1", rank=1), ranked("c2", "e2", rank=2)],
+        [explanation("c1", "e1", rank=1), explanation("c2", "e2", rank=2)],
+        [explanation("c2", "e2", rank=1)],
+    )
+    assert status == "FAIL"
+
+
+def test_in7_passes_for_exact_prefix_and_full_selection():
+    considered = [candidate("c1", "e1"), candidate("c2", "e2")]
+    full_ranked = [ranked("c1", "e1", rank=1), ranked("c2", "e2", rank=2)]
+    full = [explanation("c1", "e1", rank=1), explanation("c2", "e2", rank=2)]
+    assert _in7_status(considered, full_ranked, full, full[:1]) == "PASS"
+    assert _in7_status(considered, full_ranked, full, full) == "PASS"
+
+
 def test_in8_fails_on_duplicate_final_targets():
     considered = [candidate("c1", "e1"), candidate("c2", "e1")]
     broken = core(

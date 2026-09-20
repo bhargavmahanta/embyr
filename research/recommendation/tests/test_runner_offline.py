@@ -31,6 +31,22 @@ def test_scan_source_detects_synthetic_violations():
     assert scan_source("import math\nvalue = math.sqrt(4.0)\n", "x.py") == []
 
 
+def test_scan_source_detects_forbidden_importfrom_symbols():
+    assert scan_source("from time import time\ntime()\n", "x.py") == [
+        "x.py:import:time.time"
+    ]
+    assert scan_source("from time import time as clock\nclock()\n", "x.py") == [
+        "x.py:import:time.time"
+    ]
+    assert scan_source("from uuid import uuid4\nuuid4()\n", "x.py") == [
+        "x.py:import:uuid.uuid4"
+    ]
+    assert scan_source("from random import choice\nchoice([1, 2])\n", "x.py") == [
+        "x.py:import:random.choice"
+    ]
+    assert scan_source("from math import sqrt\nsqrt(4)\n", "x.py") == []
+
+
 def test_forbidden_policy_includes_core_external_roots():
     for root in ("requests", "httpx", "socket", "openai", "supabase", "psycopg"):
         assert root in FORBIDDEN_MODULE_ROOTS
