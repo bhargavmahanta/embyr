@@ -1,4 +1,4 @@
-"""RLS-scoped, repeatable-read production recommendation input snapshot.
+"""RLS-scoped, read-only repeatable-read recommendation input snapshot.
 
 The snapshot contains production data only. Retrieval and the adapter to M3's
 simulation-shaped pure functions belong to later M4 stages.
@@ -16,19 +16,23 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import set_current_user
-from app.recommendation.inputs import objective_state_entry, select_anchors
+from app.recommendation.inputs import (
+    objective_state_entry, ontology_document_text, select_anchors,
+)
 
 INPUT_VERSION = "recommendation-input/v1"
 
 # Global ontology reads happen in the same database snapshot as user-scoped
-# reads. Historical versions remain available for active/revisit references.
+# reads. Exploration history preserves old versions separately from this
+# current, deliverable entity corpus.
 QUERIES = {
     "entities": """
         select e.id as entity_id, e.canonical_key, e.entity_type, e.status,
                e.current_version, v.version as entity_version, v.title,
                v.summary, v.difficulty_prior, v.estimated_effort_minutes
           from public.learning_entities e
-          join public.learning_entity_versions v on v.entity_id = e.id
+          join public.learning_entity_versions v
+            on v.entity_id = e.id and v.version = e.current_version
          where e.current_version is not null
            and e.status in ('REVIEWED', 'PUBLISHED')
          order by e.id, v.version
@@ -51,16 +55,21 @@ QUERIES = {
           from public.ontology_edges order by source_entity_id, target_entity_id, id
     """,
     "embeddings": """
-        select entity_id, entity_version, embedding::text as vector,
-               embedding_provider, embedding_model, embedding_dimension,
-               embedding_input_version, embedding_input_type
-          from public.entity_embeddings
-         where embedding_provider = 'voyage-ai'
-           and embedding_model = 'voyage-4'
-           and embedding_dimension = 1024
-           and embedding_input_version = 'entity-document/v1'
-           and embedding_input_type = 'document'
-         order by entity_id, entity_version
+        select b.entity_id, b.entity_version, b.embedding::text as vector,
+               b.embedding_provider, b.embedding_model, b.embedding_dimension,
+               b.embedding_input_version, b.embedding_input_type,
+               b.embedding_input_fingerprint
+          from public.entity_embeddings b
+          join public.learning_entities e on e.id = b.entity_id
+           and e.current_version = b.entity_version
+         where e.status in ('REVIEWED', 'PUBLISHED')
+           and e.current_version is not null
+           and b.embedding_provider = 'voyage-ai'
+           and b.embedding_model = 'voyage-4'
+           and b.embedding_dimension = 1024
+           and b.embedding_input_version = 'ontology-entity/v1'
+           and b.embedding_input_type = 'document'
+         order by b.entity_id, b.entity_version
     """,
     "preferences": """
         select p.entity_id, e.current_version as entity_version,
@@ -150,6 +159,20 @@ def build_production_snapshot(
         (row["entity_id"], row["entity_version"])
         for row in converted["entities"]
     }
+    entity_by_version = {
+        (row["entity_id"], row["entity_version"]): row
+        for row in converted["entities"]
+    }
+    embeddings = []
+    for row in converted["embeddings"]:
+        entity = entity_by_version.get((row["entity_id"], row["entity_version"]))
+        if entity is None:
+            continue
+        document = ontology_document_text(entity["title"], entity["summary"])
+        expected = "sha256:" + hashlib.sha256(document.encode("utf-8")).hexdigest()
+        if row.get("embedding_input_fingerprint") == expected:
+            embeddings.append(row)
+    converted["embeddings"] = embeddings
     objective_states = [
         entry
         for row in converted["objective_states"]
@@ -186,7 +209,7 @@ def build_production_snapshot(
 async def assemble_production_snapshot(
     factory: async_sessionmaker[AsyncSession], user_id: UUID
 ) -> ProductionInputSnapshot:
-    """Read all required input domains in one RLS-scoped repeatable-read tx.
+    """Read all required input domains in one RLS-scoped read-only transaction.
 
     The returned data is detached. No provider or other network call is made
     while the transaction is open.
@@ -194,6 +217,7 @@ async def assemble_production_snapshot(
     async with factory() as session:
         async with session.begin():
             await session.execute(text("set transaction isolation level repeatable read"))
+            await session.execute(text("set transaction read only"))
             await set_current_user(session, user_id)
             rows: dict[str, list[Mapping[str, Any]]] = {}
             for name, query in QUERIES.items():

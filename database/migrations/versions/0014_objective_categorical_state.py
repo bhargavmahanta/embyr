@@ -20,7 +20,7 @@ def upgrade() -> None:
         sa.Column("categorical_state", sa.Text(), nullable=True),
     )
     op.create_check_constraint(
-        "ck_learner_objective_state_categorical_state",
+        op.f("ck_learner_objective_state_categorical_state"),
         "learner_objective_state",
         "categorical_state is null or categorical_state in "
         "('ENCOUNTERED', 'EXPLORING', 'DEVELOPING', 'UNDERSTOOD', "
@@ -30,7 +30,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "ck_learner_objective_state_categorical_state",
+        op.f("ck_learner_objective_state_categorical_state"),
         "learner_objective_state",
         type_="check",
     )
