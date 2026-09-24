@@ -88,6 +88,12 @@ class LearnerObjectiveState(Base):
             "evidence_count >= 0",
             name="evidence_count",
         ),
+        sa.CheckConstraint(
+            "categorical_state is null or categorical_state in "
+            "('ENCOUNTERED', 'EXPLORING', 'DEVELOPING', 'UNDERSTOOD', "
+            "'REVISITING', 'RETAINED', 'PAUSED')",
+            name="categorical_state",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -98,6 +104,7 @@ class LearnerObjectiveState(Base):
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     objective_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     understanding_estimate: Mapped[float] = mapped_column(sa.Double)
+    categorical_state: Mapped[str | None] = mapped_column(sa.Text)
     evaluation_confidence: Mapped[float | None] = mapped_column(sa.Double)
     support_required: Mapped[bool] = mapped_column(
         sa.Boolean, server_default=sa.text("false")
