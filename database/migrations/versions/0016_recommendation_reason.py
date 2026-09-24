@@ -1,6 +1,6 @@
 """Allow M3's valid zero-explanation outcome to persist without fallback copy.
 
-Revision ID: 0016_nullable_recommendation_reason
+Revision ID: 0016_recommendation_reason
 Revises: 0015_recommendation_retrieval
 """
 from collections.abc import Sequence
@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "0016_nullable_recommendation_reason"
+revision: str = "0016_recommendation_reason"
 down_revision: str | None = "0015_recommendation_retrieval"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
