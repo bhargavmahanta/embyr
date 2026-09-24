@@ -16,7 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import set_current_user
-from app.recommendation.inputs import objective_state_entry, select_anchors
+from app.recommendation.inputs import (
+    objective_state_entry, ontology_document_text, select_anchors,
+)
 
 INPUT_VERSION = "recommendation-input/v1"
 
@@ -53,16 +55,21 @@ QUERIES = {
           from public.ontology_edges order by source_entity_id, target_entity_id, id
     """,
     "embeddings": """
-        select entity_id, entity_version, embedding::text as vector,
-               embedding_provider, embedding_model, embedding_dimension,
-               embedding_input_version, embedding_input_type
-          from public.entity_embeddings
-         where embedding_provider = 'voyage-ai'
-           and embedding_model = 'voyage-4'
-           and embedding_dimension = 1024
-           and embedding_input_version = 'entity-document/v1'
-           and embedding_input_type = 'document'
-         order by entity_id, entity_version
+        select b.entity_id, b.entity_version, b.embedding::text as vector,
+               b.embedding_provider, b.embedding_model, b.embedding_dimension,
+               b.embedding_input_version, b.embedding_input_type,
+               b.embedding_input_fingerprint
+          from public.entity_embeddings b
+          join public.learning_entities e on e.id = b.entity_id
+           and e.current_version = b.entity_version
+         where e.status in ('REVIEWED', 'PUBLISHED')
+           and e.current_version is not null
+           and b.embedding_provider = 'voyage-ai'
+           and b.embedding_model = 'voyage-4'
+           and b.embedding_dimension = 1024
+           and b.embedding_input_version = 'ontology-entity/v1'
+           and b.embedding_input_type = 'document'
+         order by b.entity_id, b.entity_version
     """,
     "preferences": """
         select p.entity_id, e.current_version as entity_version,
@@ -152,6 +159,20 @@ def build_production_snapshot(
         (row["entity_id"], row["entity_version"])
         for row in converted["entities"]
     }
+    entity_by_version = {
+        (row["entity_id"], row["entity_version"]): row
+        for row in converted["entities"]
+    }
+    embeddings = []
+    for row in converted["embeddings"]:
+        entity = entity_by_version.get((row["entity_id"], row["entity_version"]))
+        if entity is None:
+            continue
+        document = ontology_document_text(entity["title"], entity["summary"])
+        expected = "sha256:" + hashlib.sha256(document.encode("utf-8")).hexdigest()
+        if row.get("embedding_input_fingerprint") == expected:
+            embeddings.append(row)
+    converted["embeddings"] = embeddings
     objective_states = [
         entry
         for row in converted["objective_states"]

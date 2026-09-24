@@ -171,3 +171,60 @@ def test_seeded_snapshot_current_versions_unknown_state_and_rls(migrated_connect
     },)
     assert len(snapshot.interest_states) == 1
     assert len(snapshot.challenge_states) == 1
+
+
+def test_embedding_snapshot_ignores_history_and_stale_document_text(migrated_connection):
+    import hashlib
+
+    from app.recommendation.inputs import ontology_document_text
+
+    connection = migrated_connection
+    entity_id = _entity(connection, versions=(1, 2))
+    vector = "[" + ",".join(["1"] + ["0"] * 1023) + "]"
+    insert = text("""
+        insert into entity_embeddings
+          (entity_id, entity_version, embedding_model, embedding,
+           embedding_provider, embedding_dimension, embedding_input_version,
+           embedding_input_type, embedding_input_fingerprint)
+        values (:entity_id, :version, 'voyage-4', cast(:vector as vector(1024)),
+                'voyage-ai', 1024, 'ontology-entity/v1', 'document', :fingerprint)
+    """)
+    for version in (1, 2):
+        document = ontology_document_text(f"Title {version}", f"Summary {version}")
+        connection.execute(insert, {
+            "entity_id": entity_id, "version": version, "vector": vector,
+            "fingerprint": "sha256:" + hashlib.sha256(document.encode()).hexdigest(),
+        })
+
+    user_id = uuid4()
+
+    def snapshot():
+        rows = {
+            name: list(connection.execute(text(query), {"user_id": user_id}).mappings())
+            for name, query in QUERIES.items()
+        }
+        return build_production_snapshot(user_id, rows)
+
+    original = snapshot()
+    assert [(item["entity_id"], item["entity_version"])
+            for item in original.embeddings] == [(str(entity_id), 2)]
+    connection.execute(text("""
+        update entity_embeddings set embedding = cast(:vector as vector(1024))
+         where entity_id = :entity_id and entity_version = 1
+    """), {"entity_id": entity_id,
+           "vector": "[" + ",".join(["0", "1"] + ["0"] * 1022) + "]"})
+    assert snapshot().fingerprint == original.fingerprint
+
+    connection.execute(text("""
+        update learning_entity_versions set title = 'Updated title'
+         where entity_id = :entity_id and version = 2
+    """), {"entity_id": entity_id})
+    stale = snapshot()
+    assert stale.embeddings == ()
+    updated_document = ontology_document_text("Updated title", "Summary 2")
+    connection.execute(text("""
+        update entity_embeddings set embedding_input_fingerprint = :fingerprint
+         where entity_id = :entity_id and entity_version = 2
+    """), {"entity_id": entity_id,
+           "fingerprint": "sha256:" + hashlib.sha256(updated_document.encode()).hexdigest()})
+    assert len(snapshot().embeddings) == 1
