@@ -44,9 +44,23 @@ QUERIES = {
          order by entity_id, entity_version, id
     """,
     "edges": """
-        select id as edge_id, source_entity_id, target_entity_id,
-               relationship_type, strength, context, confidence, status
+        select id as edge_id, source_entity_id, source_entity_version,
+               target_entity_id, target_entity_version, objective_id,
+               requirement, relationship_type, strength, context,
+               confidence, status
           from public.ontology_edges order by source_entity_id, target_entity_id, id
+    """,
+    "embeddings": """
+        select entity_id, entity_version, embedding::text as vector,
+               embedding_provider, embedding_model, embedding_dimension,
+               embedding_input_version, embedding_input_type
+          from public.entity_embeddings
+         where embedding_provider = 'voyage-ai'
+           and embedding_model = 'voyage-4'
+           and embedding_dimension = 1024
+           and embedding_input_version = 'entity-document/v1'
+           and embedding_input_type = 'document'
+         order by entity_id, entity_version
     """,
     "preferences": """
         select p.entity_id, e.current_version as entity_version,
@@ -116,6 +130,7 @@ class ProductionInputSnapshot:
     domains: tuple[dict[str, Any], ...]
     objectives: tuple[dict[str, Any], ...]
     edges: tuple[dict[str, Any], ...]
+    embeddings: tuple[dict[str, Any], ...]
     objective_states: tuple[dict[str, Any], ...]
     interest_states: tuple[dict[str, Any], ...]
     challenge_states: tuple[dict[str, Any], ...]
@@ -158,6 +173,7 @@ def build_production_snapshot(
         domains=tuple(converted["domains"]),
         objectives=tuple(converted["objectives"]),
         edges=tuple(converted["edges"]),
+        embeddings=tuple(converted["embeddings"]),
         objective_states=tuple(objective_states),
         interest_states=tuple(converted["interest_states"]),
         challenge_states=tuple(converted["challenge_states"]),

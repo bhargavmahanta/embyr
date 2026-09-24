@@ -127,24 +127,23 @@ def test_objective_requires_an_existing_entity_version(migrated_connection):
         )
 
 
-def test_embeddings_are_versioned_by_model(migrated_connection):
+def test_embeddings_use_one_versioned_voyage_identity(migrated_connection):
     entity_id = _insert_entity(migrated_connection)
     _insert_version(migrated_connection, entity_id, 1)
+    vector = "[" + ",".join(["0.1"] + ["0"] * 1023) + "]"
     statement = text(
         """
         insert into entity_embeddings
-          (entity_id, entity_version, embedding_model, embedding)
-        values (:entity_id, 1, :model, '[0.1,0.2,0.3]'::vector)
+          (entity_id, entity_version, embedding_model, embedding,
+           embedding_provider, embedding_dimension, embedding_input_version,
+           embedding_input_type)
+        values (:entity_id, 1, :model, cast(:vector as vector(1024)),
+                'voyage-ai', 1024, 'entity-document/v1', 'document')
         """
     )
-
-    migrated_connection.execute(
-        statement, {"entity_id": entity_id, "model": "model-a"}
-    )
-    migrated_connection.execute(
-        statement, {"entity_id": entity_id, "model": "model-b"}
-    )
+    params = {"entity_id": entity_id, "model": "voyage-4", "vector": vector}
+    migrated_connection.execute(statement, params)
     with pytest.raises(IntegrityError), migrated_connection.begin_nested():
-        migrated_connection.execute(
-            statement, {"entity_id": entity_id, "model": "model-a"}
-        )
+        migrated_connection.execute(statement, params)
+    with pytest.raises(IntegrityError), migrated_connection.begin_nested():
+        migrated_connection.execute(statement, {**params, "model": "other-model"})

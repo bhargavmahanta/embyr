@@ -18,6 +18,7 @@ def test_retrieval_v1_has_the_reviewed_identity_and_initial_bounds():
         "provider": "voyage-ai", "model": "voyage-4", "dimension": 1024,
         "metric": "cosine", "document_input_type": "document",
         "query_input_type": "query", "query_input_version": "semantic-query/v1",
+        "document_input_version": "entity-document/v1",
     }
     assert policy["semantic"] == {
         "search": "exact", "minimum_cosine_similarity": 0.55,

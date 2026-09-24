@@ -7,7 +7,8 @@
     "metric": "cosine",
     "document_input_type": "document",
     "query_input_type": "query",
-    "query_input_version": "semantic-query/v1"
+    "query_input_version": "semantic-query/v1",
+    "document_input_version": "entity-document/v1"
   },
   "semantic": {
     "search": "exact",

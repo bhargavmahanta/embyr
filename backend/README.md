@@ -118,3 +118,12 @@ Abandoned `AUTHORIZED` uploads, `REJECTED` uploads, and export result objects
 are reconciled by the same future worker/maintenance scope. Issue #35 documents
 this contract and does not modify `maintenance_delete_account`, `0011a`, or the
 worker deletion architecture.
+
+## Recommendation engine packaging
+
+The backend wheel includes the frozen M3 pure simulator package and the versioned
+recommendation policy JSON files. Build from the repository checkout so the
+`research/recommendation/simulator` source is present. Runtime query embeddings
+use `EMBYR_VOYAGE_API_KEY` when semantic retrieval is enabled. Document
+embeddings are derived data keyed by `entity-document/v1`; ontology ingestion
+must refresh them when a selected entity version changes.
