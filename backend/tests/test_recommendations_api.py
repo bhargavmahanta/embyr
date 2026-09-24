@@ -60,6 +60,40 @@ def test_next_requires_idempotency_key():
     assert response.json()["code"] == "MISSING_IDEMPOTENCY_KEY"
 
 
+def test_wrong_query_embedding_count_returns_controlled_503(monkeypatch):
+    from types import SimpleNamespace
+    import app.api.recommendations as api
+
+    async def find(*args, **kwargs):
+        return None
+
+    async def assemble(*args, **kwargs):
+        entity_id = str(uuid4())
+        return SimpleNamespace(
+            anchor_entities=({"entity_id": entity_id, "entity_version": 1},),
+            embeddings=({"entity_id": entity_id},),
+            entities=({"entity_id": entity_id, "entity_version": 1,
+                       "title": "Anchor", "summary": "A topic"},),
+        )
+
+    class WrongCountEmbedder:
+        async def embed_queries(self, texts):
+            assert texts == ["TITLE: Anchor\nSUMMARY: A topic"]
+            return []
+
+    monkeypatch.setattr(api, "find_idempotent_result", find)
+    monkeypatch.setattr(api, "assemble_production_snapshot", assemble)
+    app = _app()
+    app.state.query_embedder = WrongCountEmbedder()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/recommendations/next", json={"mode": "CONTINUE"},
+            headers={"Idempotency-Key": "bad-vectors"},
+        )
+    assert response.status_code == 503
+    assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
+
+
 def test_empty_result_is_persisted_as_replayable_200(monkeypatch):
     import app.api.recommendations as api
 

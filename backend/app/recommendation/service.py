@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+from app.integrations.voyage import EmbeddingProviderError
 from app.recommendation.inputs import semantic_query_text
 from app.recommendation.ranking import ProductionRanking, rank_recommendations
 from app.recommendation.retrieval import retrieve_candidates
@@ -50,7 +51,7 @@ async def generate_recommendation(
 ) -> tuple[ProductionRanking, str | None]:
     """Call an external embedder only after the snapshot transaction has closed."""
     vectors = {}
-    if mode in {"EXPLORE", "SURPRISE"} and snapshot.anchor_entities and snapshot.embeddings:
+    if snapshot.anchor_entities and snapshot.embeddings:
         if embedder is None:
             raise RuntimeError("semantic query embedder is unavailable")
         entities = {
@@ -67,10 +68,10 @@ async def generate_recommendation(
         ]
         embedded = await embedder.embed_queries(texts)
         if len(embedded) != len(anchors):
-            raise ValueError("query embedding count mismatch")
+            raise EmbeddingProviderError("query embedding count mismatch")
         vectors = dict(zip(anchors, embedded, strict=True))
-    candidates = retrieve_candidates(snapshot, vectors, mode=mode)
-    ranking = rank_recommendations(snapshot, candidates)
+    candidates = retrieve_candidates(snapshot, vectors)
+    ranking = rank_recommendations(snapshot, candidates, mode=mode)
     if ranking.selected is None:
         return ranking, None
     selected_candidate = next(
