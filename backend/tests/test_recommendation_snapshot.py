@@ -83,11 +83,14 @@ def test_snapshot_reads_set_isolation_and_rls_identity_before_data():
     import asyncio
 
     calls, snapshot = asyncio.run(_collect_snapshot_queries())
-    assert calls[0][0] == "set transaction isolation level repeatable read"
-    assert "set_config('app.user_id'" in calls[1][0]
-    assert calls[1][1] == {"user_id": str(USER)}
-    assert len(calls) == len(QUERIES) + 2
-    for statement, params in calls[2:]:
+    assert calls[0][0].lower().split() == [
+        "set", "transaction", "isolation", "level", "repeatable", "read"
+    ]
+    assert calls[1][0].lower().split() == ["set", "transaction", "read", "only"]
+    assert "set_config('app.user_id'" in calls[2][0]
+    assert calls[2][1] == {"user_id": str(USER)}
+    assert len(calls) == len(QUERIES) + 3
+    for statement, params in calls[3:]:
         if " :user_id" in statement:
             assert params == {"user_id": USER}
     assert snapshot.anchor_entities == ()

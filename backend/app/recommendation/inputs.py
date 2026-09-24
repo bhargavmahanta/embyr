@@ -13,7 +13,7 @@ OBJECTIVE_STATES = frozenset({
     "ENCOUNTERED", "EXPLORING", "DEVELOPING", "UNDERSTOOD",
     "REVISITING", "RETAINED", "PAUSED",
 })
-QUERY_INPUT_VERSION = "semantic-query/v1"
+QUERY_INPUT_VERSION = "semantic-query-text/v1"
 
 
 def objective_state_entry(row: Mapping[str, Any]) -> dict[str, str | int] | None:
@@ -59,7 +59,7 @@ def select_anchors(
 
 
 def semantic_query_text(title: str, summary: str) -> str:
-    """The deterministic, per-anchor ``semantic-query/v1`` recipe."""
+    """The deterministic, per-anchor ``semantic-query-text/v1`` recipe."""
     if not title or not summary:
         raise ValueError("semantic query requires an anchor title and summary")
-    return f"{title}\n\n{summary}"
+    return f"TITLE: {title}\nSUMMARY: {summary}"

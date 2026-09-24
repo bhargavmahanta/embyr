@@ -17,7 +17,8 @@ def test_retrieval_v1_has_the_reviewed_identity_and_initial_bounds():
     assert policy["embedding"] == {
         "provider": "voyage-ai", "model": "voyage-4", "dimension": 1024,
         "metric": "cosine", "document_input_type": "document",
-        "query_input_type": "query", "query_input_version": "semantic-query/v1",
+        "query_input_type": "query", "query_input_version": "semantic-query-text/v1",
+        "query_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}",
         "document_input_version": "entity-document/v1",
     }
     assert policy["semantic"] == {
