@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 from uuid import UUID
 
+import pytest
+
 from app.recommendation.retrieval import retrieve_candidates
 from app.recommendation.inputs import ontology_document_text
 from app.recommendation.snapshot import QUERIES, build_production_snapshot
@@ -311,3 +313,19 @@ def test_historical_source_requires_is_ignored_for_current_candidates():
     candidates = retrieve_candidates(snapshot, {})
     assert any(item["target_entity_id"] == str(B) and
                item["target_entity_version"] == 2 for item in candidates)
+
+
+def test_current_source_requires_with_unresolved_target_fails_closed():
+    from dataclasses import replace
+
+    snapshot = _snapshot()
+    malformed_edge = {
+        "source_entity_id": str(B), "source_entity_version": 1,
+        "target_entity_id": str(A), "target_entity_version": None,
+        "relationship_type": "REQUIRES", "objective_id": str(OBJECTIVE),
+        "requirement": "HARD", "status": "ACTIVE",
+    }
+    snapshot = replace(snapshot, edges=(*snapshot.edges, malformed_edge))
+
+    with pytest.raises(ValueError, match="lacks target version"):
+        retrieve_candidates(snapshot, {})
