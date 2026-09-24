@@ -146,11 +146,12 @@ class DecisionOutcome:
     recommendation_id: UUID
     decision: str
     exploration_id: UUID | None
+    decided_at: datetime
 
 
 async def persist_decision(
     session: AsyncSession, *, user_id: UUID, recommendation: dict,
-    decision: str, command_id: UUID,
+    decision: str, command_id: UUID, reason: str | None = None,
 ) -> DecisionOutcome:
     """Write decision, new Exploration, and ledger events in caller transaction."""
     if decision not in {"ACCEPT", "SKIP"}:
@@ -188,6 +189,9 @@ async def persist_decision(
             "entity_id": recommendation["entity_id"],
             "exploration_id": exploration_id,
             "learning_intent": intent, "occurred_at": now,
-            "metadata": json.dumps({"recommendation_id": str(recommendation["id"])}),
+            "metadata": json.dumps({
+                "recommendation_id": str(recommendation["id"]),
+                **({"skip_reason": reason} if decision == "SKIP" and reason else {}),
+            }),
         })
-    return DecisionOutcome(recommendation["id"], decision, exploration_id)
+    return DecisionOutcome(recommendation["id"], decision, exploration_id, now)

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import router
+from app.api.recommendations import router as recommendations_router
 from app.api.uploads import router as uploads_router
 from app.auth.verifier import SupabaseTokenVerifier
 from app.config import Settings
@@ -40,6 +41,7 @@ def create_app(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     verifier: SupabaseTokenVerifier | None = None,
     storage: StorageService | None = None,
+    query_embedder: object | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Embyr API", lifespan=_lifespan)
@@ -71,10 +73,12 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.verifier = verifier
     app.state.storage = storage
+    app.state.query_embedder = query_embedder
     app.state.storage_owned = storage_owned
     app.state.engine = engine
 
     register_exception_handlers(app)
     app.include_router(router)
     app.include_router(uploads_router)
+    app.include_router(recommendations_router)
     return app

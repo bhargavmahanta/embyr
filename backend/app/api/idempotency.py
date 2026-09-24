@@ -183,7 +183,7 @@ async def find_idempotent_result(
     """Read-only replay lookup used to short-circuit a repeated command."""
     existing = (
         await session.execute(
-            _SELECT_SQL,
+            text(str(_SELECT_SQL) + " and expires_at > now()"),
             {"user_id": user_id, "idempotency_key": idempotency_key},
         )
     ).first()
