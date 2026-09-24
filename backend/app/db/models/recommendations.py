@@ -79,7 +79,7 @@ class Recommendation(Base):
     distance_band: Mapped[str] = mapped_column(sa.Text)
     ranking_model_version: Mapped[str] = mapped_column(sa.Text)
     score_components: Mapped[Any] = mapped_column(JSONB)
-    reason_code: Mapped[str] = mapped_column(sa.Text)
+    reason_code: Mapped[str | None] = mapped_column(sa.Text)
     presentation_version: Mapped[str] = mapped_column(sa.Text)
     presentation: Mapped[Any] = mapped_column(JSONB)
     presented_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))

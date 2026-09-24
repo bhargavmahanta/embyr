@@ -29,7 +29,7 @@ WORKER_ROLE = "app_worker"
 MAINTENANCE_ROLE = "app_maintenance"
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account"
 CLIENT_ROLES = ("anon", "authenticated", "service_role")
-HEAD = "0015_recommendation_retrieval"
+HEAD = "0016_recommendation_reason"
 
 LEARNER_TABLES = (
     "user_devices",
