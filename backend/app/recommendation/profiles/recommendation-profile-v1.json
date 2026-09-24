@@ -1,0 +1,19 @@
+{
+  "profile_version": "recommendation-profile/v1",
+  "semantic_contract": "m3-simulation/v5",
+  "top_k": 1,
+  "feature_weights": {
+    "readiness": 0.14,
+    "difficulty_fit": 0.18,
+    "explicit_interest": 0.22,
+    "inferred_interest": 0.08,
+    "graph_proximity": 0.12,
+    "semantic_similarity": 0.14,
+    "continuation_value": 0.07,
+    "revisit_value": 0.05
+  },
+  "rerank": {
+    "strategy": "DOMAIN_COVERAGE",
+    "diversity_weight": 0.08
+  }
+}

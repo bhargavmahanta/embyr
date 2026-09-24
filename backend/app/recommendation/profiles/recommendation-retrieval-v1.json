@@ -1,0 +1,26 @@
+{
+  "policy_version": "recommendation-retrieval/v1",
+  "embedding": {
+    "provider": "voyage-ai",
+    "model": "voyage-4",
+    "dimension": 1024,
+    "metric": "cosine",
+    "document_input_type": "document",
+    "query_input_type": "query",
+    "query_input_version": "semantic-query-text/v1",
+    "query_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}"
+  },
+  "semantic": {
+    "search": "exact",
+    "minimum_cosine_similarity": 0.55,
+    "max_candidates": 40,
+    "query_per_anchor": true
+  },
+  "graph": {
+    "relationship": "RELATED_TO",
+    "bidirectional": true,
+    "max_hops": 2,
+    "max_candidates": 100,
+    "tie_break": "shortest_hop_then_lexicographic_entity_version_path"
+  }
+}

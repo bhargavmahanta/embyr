@@ -1,0 +1,37 @@
+{
+  "copy_version": "recommendation-copy/v1",
+  "templates": {
+    "EXPLICIT_INTEREST_MATCH": {
+      "hook": "Something you asked to explore",
+      "reason": "You said you wanted to explore more around this."
+    },
+    "RELATED_TO_RECENT_EXPLORATION": {
+      "hook": "Keep exploring this thread",
+      "reason": "This connects to something you're currently exploring."
+    },
+    "PREREQUISITES_SATISFIED": {
+      "hook": "Build on what you know",
+      "reason": "The foundations this builds on are already in place."
+    },
+    "GOOD_DIFFICULTY_FIT": {
+      "hook": "A challenge at your pace",
+      "reason": "Its estimated difficulty looks close to your current level."
+    },
+    "SEMANTICALLY_RELATED": {
+      "hook": "Follow a related idea",
+      "reason": "This is meaningfully related to things you're already exploring."
+    },
+    "REVISIT_OPPORTUNITY": {
+      "hook": "Return to something familiar",
+      "reason": "You've explored this before and it may be worth returning to."
+    },
+    "DIVERSITY_ADJUSTMENT": {
+      "hook": "Try a different direction",
+      "reason": "This adds some variety to what you're being recommended."
+    },
+    "EXPLICIT_PREFERENCE_OVERRIDES_INFERRED": {
+      "hook": "Your stated choice comes first",
+      "reason": "What you said you want takes priority over inferred interest."
+    }
+  }
+}
