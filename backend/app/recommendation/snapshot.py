@@ -1,4 +1,4 @@
-"""RLS-scoped, repeatable-read production recommendation input snapshot.
+"""RLS-scoped, read-only repeatable-read recommendation input snapshot.
 
 The snapshot contains production data only. Retrieval and the adapter to M3's
 simulation-shaped pure functions belong to later M4 stages.
@@ -21,14 +21,16 @@ from app.recommendation.inputs import objective_state_entry, select_anchors
 INPUT_VERSION = "recommendation-input/v1"
 
 # Global ontology reads happen in the same database snapshot as user-scoped
-# reads. Historical versions remain available for active/revisit references.
+# reads. Exploration history preserves old versions separately from this
+# current, deliverable entity corpus.
 QUERIES = {
     "entities": """
         select e.id as entity_id, e.canonical_key, e.entity_type, e.status,
                e.current_version, v.version as entity_version, v.title,
                v.summary, v.difficulty_prior, v.estimated_effort_minutes
           from public.learning_entities e
-          join public.learning_entity_versions v on v.entity_id = e.id
+          join public.learning_entity_versions v
+            on v.entity_id = e.id and v.version = e.current_version
          where e.current_version is not null
            and e.status in ('REVIEWED', 'PUBLISHED')
          order by e.id, v.version
@@ -170,7 +172,7 @@ def build_production_snapshot(
 async def assemble_production_snapshot(
     factory: async_sessionmaker[AsyncSession], user_id: UUID
 ) -> ProductionInputSnapshot:
-    """Read all required input domains in one RLS-scoped repeatable-read tx.
+    """Read all required input domains in one RLS-scoped read-only transaction.
 
     The returned data is detached. No provider or other network call is made
     while the transaction is open.
@@ -178,6 +180,7 @@ async def assemble_production_snapshot(
     async with factory() as session:
         async with session.begin():
             await session.execute(text("set transaction isolation level repeatable read"))
+            await session.execute(text("set transaction read only"))
             await set_current_user(session, user_id)
             rows: dict[str, list[Mapping[str, Any]]] = {}
             for name, query in QUERIES.items():
