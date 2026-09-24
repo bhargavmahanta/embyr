@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from uuid import uuid4
+import hashlib
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 
 
 def _insert_entity(connection, entity_type: str = "TOPIC"):
@@ -136,14 +137,91 @@ def test_embeddings_use_one_versioned_voyage_identity(migrated_connection):
         insert into entity_embeddings
           (entity_id, entity_version, embedding_model, embedding,
            embedding_provider, embedding_dimension, embedding_input_version,
-           embedding_input_type)
+           embedding_input_type, embedding_input_fingerprint)
         values (:entity_id, 1, :model, cast(:vector as vector(1024)),
-                'voyage-ai', 1024, 'entity-document/v1', 'document')
+                'voyage-ai', 1024, 'ontology-entity/v1', 'document', :fingerprint)
         """
     )
-    params = {"entity_id": entity_id, "model": "voyage-4", "vector": vector}
+    params = {
+        "entity_id": entity_id, "model": "voyage-4", "vector": vector,
+        "fingerprint": "sha256:" + hashlib.sha256(
+            b"TITLE: Version 1\nSUMMARY: Summary"
+        ).hexdigest(),
+    }
     migrated_connection.execute(statement, params)
     with pytest.raises(IntegrityError), migrated_connection.begin_nested():
         migrated_connection.execute(statement, params)
     with pytest.raises(IntegrityError), migrated_connection.begin_nested():
         migrated_connection.execute(statement, {**params, "model": "other-model"})
+    for column, value in (
+        ("embedding_input_version", "other-recipe/v1"),
+        ("embedding_input_type", "query"),
+        ("embedding_input_fingerprint", "not-a-sha256-digest"),
+    ):
+        with pytest.raises(IntegrityError), migrated_connection.begin_nested():
+            migrated_connection.execute(
+                text(f"update entity_embeddings set {column} = :value where entity_id = :id"),
+                {"value": value, "id": entity_id},
+            )
+    with pytest.raises(DataError), migrated_connection.begin_nested():
+        migrated_connection.execute(
+            text("update entity_embeddings set embedding = '[1,0,0,0]'::vector "
+                 "where entity_id = :id"),
+            {"id": entity_id},
+        )
+
+
+def test_requires_exact_versioned_objective_and_named_constraints(migrated_connection):
+    connection = migrated_connection
+    source, target, unrelated = (_insert_entity(connection) for _ in range(3))
+    for entity in (source, target, unrelated):
+        _insert_version(connection, entity, 1)
+    _insert_version(connection, target, 2)
+    objective = connection.execute(text("""
+        insert into learning_objectives
+          (entity_id, entity_version, objective_type, description, importance)
+        values (:entity_id, 1, 'UNDERSTANDING', 'Understand', 0.5)
+        returning id
+    """), {"entity_id": target}).scalar_one()
+    other_objective = connection.execute(text("""
+        insert into learning_objectives
+          (entity_id, entity_version, objective_type, description, importance)
+        values (:entity_id, 1, 'UNDERSTANDING', 'Understand', 0.5)
+        returning id
+    """), {"entity_id": unrelated}).scalar_one()
+    statement = text("""
+        insert into ontology_edges
+          (source_entity_id, source_entity_version, target_entity_id,
+           target_entity_version, objective_id, requirement,
+           relationship_type, confidence, status)
+        values (:source, :source_version, :target, :target_version, :objective,
+                :requirement, 'REQUIRES', 0.8, 'ACTIVE')
+    """)
+    valid = {
+        "source": source, "source_version": 1,
+        "target": target, "target_version": 1,
+        "objective": objective, "requirement": "HARD",
+    }
+    connection.execute(statement, valid)
+    connection.execute(statement, {**valid, "requirement": "SOFT"})
+    for invalid in (
+        {**valid, "source_version": 2},
+        {**valid, "target_version": 2},
+        {**valid, "objective": other_objective},
+        {**valid, "requirement": "OPTIONAL"},
+    ):
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(statement, invalid)
+
+    names = set(connection.execute(text("""
+        select conname from pg_constraint
+         where conrelid in ('public.ontology_edges'::regclass,
+                            'public.entity_embeddings'::regclass,
+                            'public.learning_objectives'::regclass)
+    """)).scalars())
+    assert "ck_ontology_edges_requires_identity" in names
+    assert "ck_entity_embeddings_voyage_v1_identity" in names
+    assert "fk_ontology_edges_objective_target_version" in names
+    assert "fk_ontology_edges_source_version" in names
+    assert "fk_ontology_edges_target_version" in names
+    assert "uq_learning_objectives_id_entity_version" in names
