@@ -149,6 +149,7 @@ class DecisionOutcome:
     recommendation_id: UUID
     decision: str
     exploration_id: UUID | None
+    decided_at: datetime
 
 
 async def persist_decision(
@@ -193,4 +194,4 @@ async def persist_decision(
             "learning_intent": intent, "occurred_at": now,
             "metadata": json.dumps({"recommendation_id": str(recommendation["id"])}),
         })
-    return DecisionOutcome(recommendation["id"], decision, exploration_id)
+    return DecisionOutcome(recommendation["id"], decision, exploration_id, now)

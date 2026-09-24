@@ -68,10 +68,12 @@ class UserDevice(Base):
 class IdempotencyRecord(Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (
-        sa.UniqueConstraint(
+        sa.Index(
+            "uq_idempotency_records_active_user_key",
             "user_id",
             "idempotency_key",
-            name="uq_idempotency_records_user_id_key",
+            unique=True,
+            postgresql_where=sa.text("retired_at is null"),
         ),
         sa.UniqueConstraint(
             "user_id", "id", name="uq_idempotency_records_user_id_id"
@@ -102,6 +104,7 @@ class IdempotencyRecord(Base):
         sa.DateTime(timezone=True), server_default=sa.func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
 
 
 class Job(Base):

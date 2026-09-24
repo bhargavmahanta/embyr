@@ -255,7 +255,7 @@ Skip request:
 {"decision": "SKIP", "reason": "NOT_TODAY"}
 ```
 
-The skip is recorded as an event but does not become strong negative-interest evidence by itself.
+SKIP returns HTTP 200 with `{ "recommendation_id": "uuid", "decision": "SKIP" }`. The optional `reason` is at most 64 characters and contributes to the request fingerprint, but is not durably retained in M4 v1. The skip is recorded as an event but does not become strong negative-interest evidence by itself. ACCEPT returns the new `Exploration` DTO with the same `started_at` committed for the exploration and its decision event. The v1 intent mapping is CONTINUE → RELATED_EXPLORATION, REVISIT → RETENTION_REVISIT, EXPLORE → DIRECT_INTEREST, and SURPRISE → SERENDIPITY; CREATE → PRACTICAL_SUPPORT applies when practical recommendations are introduced.
 
 ## 8. Explorations and Reflections
 

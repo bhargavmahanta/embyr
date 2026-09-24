@@ -46,6 +46,15 @@ class IdempotencyReservation:
     response_body: dict[str, Any] | None
 
 
+_RETIRE_EXPIRED_SQL = text(
+    """
+    update public.idempotency_records
+       set retired_at = now()
+     where user_id = :user_id and idempotency_key = :idempotency_key
+       and retired_at is null and expires_at <= now()
+    """
+)
+
 _RESERVE_SQL = text(
     """
     insert into public.idempotency_records
@@ -53,16 +62,8 @@ _RESERVE_SQL = text(
     values
       (:user_id, :idempotency_key, :command_name, :request_fingerprint,
        now() + make_interval(secs => :ttl_seconds))
-    on conflict (user_id, idempotency_key) do update
-      set command_name = excluded.command_name,
-          request_fingerprint = excluded.request_fingerprint,
-          result_type = null,
-          result_id = null,
-          response_status = null,
-          response_body = null,
-          created_at = now(),
-          expires_at = excluded.expires_at
-      where idempotency_records.expires_at <= now()
+    on conflict (user_id, idempotency_key) where retired_at is null
+      do nothing
     returning id
     """
 )
@@ -73,6 +74,7 @@ _SELECT_SQL = text(
            response_status, response_body
       from public.idempotency_records
      where user_id = :user_id and idempotency_key = :idempotency_key
+       and retired_at is null
     """
 )
 
@@ -83,7 +85,7 @@ _UPDATE_RESULT_SQL = text(
            result_id = :result_id,
            response_status = :response_status,
            response_body = cast(:response_body as jsonb)
-     where id = :record_id and user_id = :user_id
+     where id = :record_id and user_id = :user_id and retired_at is null
     """
 )
 
@@ -141,6 +143,10 @@ async def reserve_idempotent_command(
         "request_fingerprint": fingerprint,
         "ttl_seconds": int(IDEMPOTENCY_TTL.total_seconds()),
     }
+    # Retire only the expired active generation. Its UUID and result remain
+    # available to historical ledger events; the partial unique index guards
+    # concurrent insertion of the next active generation.
+    await session.execute(_RETIRE_EXPIRED_SQL, params)
     inserted = (await session.execute(_RESERVE_SQL, params)).first()
     if inserted is not None:
         return IdempotencyReservation(
@@ -183,7 +189,7 @@ async def find_idempotent_result(
     """Read-only replay lookup used to short-circuit a repeated command."""
     existing = (
         await session.execute(
-            _SELECT_SQL,
+            text(str(_SELECT_SQL) + " and expires_at > now()"),
             {"user_id": user_id, "idempotency_key": idempotency_key},
         )
     ).first()
