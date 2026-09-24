@@ -6,3 +6,4 @@ will live here. Accepted decisions are recorded separately as ADRs.
 ## Frozen designs
 
 - [Core Data Model LLD v0.1](core-data-model-lld-v0.1.md)
+- [M4 Recommendation Integration](m4-recommendation-integration.md)

@@ -19,6 +19,7 @@ used.
 | `EMBYR_SUPABASE_STORAGE_BUCKET` | yes | Private Storage bucket name (for example `embyr-media`). |
 | `EMBYR_SUPABASE_STORAGE_SECRET_KEY` | yes | Server-only modern Supabase secret key (`sb_secret_...`); sent on the `apikey` header only. |
 | `EMBYR_STORAGE_DOWNLOAD_URL_TTL_SECONDS` | no | Signed download URL lifetime in seconds; defaults to `300`. |
+| `EMBYR_VOYAGE_API_KEY` | conditional | Required when the recommendation corpus has document embeddings and EXPLORE/SURPRISE generates semantic query embeddings. |
 
 ## Authentication trust model
 
@@ -127,3 +128,7 @@ recommendation policy JSON files. Build from the repository checkout so the
 use `EMBYR_VOYAGE_API_KEY` when semantic retrieval is enabled. Document
 embeddings are derived data keyed by `entity-document/v1`; ontology ingestion
 must refresh them when a selected entity version changes.
+
+## Recommendation integration
+
+The synchronous v1 path, data versions, trace retention, and verification gate are described in [M4 Recommendation Integration](../docs/architecture/m4-recommendation-integration.md). The checked-in `recommendation-profile/v1` sets the initial M3 feature weights; it is not a calibrated quality claim.
