@@ -88,7 +88,7 @@ A faithful M3 prerequisite mapping cannot be computed from `learner_objective_st
 | `mode`, `distance_band` | `mode` copies the request. `distance_band` uses the owner-reviewed `distance-band/v1` policy below; neither changes M3 ranking. |
 | `ranking_model_version` | Immutable identity of the reviewed ranking/configuration profile, tied to M3 contract lineage. |
 | `score_components` | Bounded selected-result scoring provenance, excluding raw learner snapshots and vectors. |
-| `reason_code` | First applicable M3 explanation code in canonical order, or NULL if there are no codes. Migration `0016_nullable_recommendation_reason` permits the zero-code case. |
+| `reason_code` | First applicable M3 explanation code in canonical order, or NULL if there are no codes. Migration `0016_recommendation_reason` permits the zero-code case. |
 | `presentation_version`, `presentation` | `recommendation-copy/v1` static hook/reason for the primary code, plus all machine explanation codes and bounded ranked-versus-shown provenance. Zero codes yield null hook/reason, with no generic fallback. |
 | `presented_at` | Time the persisted recommendation is delivered. |
 | `decision`, `decided_at` | Optional ACCEPT or SKIP and its time; no other recommendation lifecycle states are frozen. |
