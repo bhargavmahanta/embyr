@@ -143,6 +143,30 @@ class OntologyEdge(Base):
             "confidence >= 0 and confidence <= 1", name="ontology_edges_confidence"
         ),
         sa.CheckConstraint(
+            "(relationship_type = 'REQUIRES' and source_entity_version is not null "
+            "and target_entity_version is not null and objective_id is not null "
+            "and requirement in ('HARD', 'SOFT')) or "
+            "(relationship_type <> 'REQUIRES' and objective_id is null "
+            "and requirement is null)",
+            name="requires_identity",
+        ),
+        sa.ForeignKeyConstraint(
+            ["source_entity_id", "source_entity_version"],
+            ["learning_entity_versions.entity_id", "learning_entity_versions.version"],
+            name="fk_ontology_edges_source_version",
+        ),
+        sa.ForeignKeyConstraint(
+            ["target_entity_id", "target_entity_version"],
+            ["learning_entity_versions.entity_id", "learning_entity_versions.version"],
+            name="fk_ontology_edges_target_version",
+        ),
+        sa.ForeignKeyConstraint(
+            ["objective_id", "target_entity_id", "target_entity_version"],
+            ["learning_objectives.id", "learning_objectives.entity_id",
+             "learning_objectives.entity_version"],
+            name="fk_ontology_edges_objective_target_version",
+        ),
+        sa.CheckConstraint(
             "relationship_type in ('REQUIRES', 'BUILDS_ON', 'PART_OF', "
             "'RELATED_TO', 'CONTRASTS_WITH', 'APPLIES_TO', 'LEADS_TO', "
             "'EXAMPLE_OF', 'BELONGS_TO', 'CAN_BE_EXPLORED_AS')",
@@ -172,6 +196,10 @@ class OntologyEdge(Base):
         PGUUID(as_uuid=True), sa.ForeignKey("learning_entities.id")
     )
     relationship_type: Mapped[str] = mapped_column(sa.Text)
+    source_entity_version: Mapped[int | None] = mapped_column(sa.Integer)
+    target_entity_version: Mapped[int | None] = mapped_column(sa.Integer)
+    objective_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    requirement: Mapped[str | None] = mapped_column(sa.Text)
     strength: Mapped[str | None] = mapped_column(sa.Text)
     context: Mapped[str | None] = mapped_column(sa.Text)
     confidence: Mapped[float] = mapped_column(sa.Double)
@@ -197,6 +225,10 @@ class LearningObjective(Base):
         ),
         sa.UniqueConstraint(
             "entity_id", "id", name="uq_learning_objectives_entity_id_id"
+        ),
+        sa.UniqueConstraint(
+            "id", "entity_id", "entity_version",
+            name="uq_learning_objectives_id_entity_version",
         ),
         sa.CheckConstraint(
             "importance >= 0 and importance <= 1",
@@ -286,6 +318,13 @@ class EntityEmbedding(Base):
             "entity_version",
             name="uq_entity_embeddings_entity_model_version",
         ),
+        sa.CheckConstraint(
+            "embedding_provider = 'voyage-ai' and embedding_model = 'voyage-4' "
+            "and embedding_dimension = 1024 and embedding_input_type = 'document' "
+            "and embedding_input_version = 'ontology-entity/v1' "
+            "and embedding_input_fingerprint ~ '^sha256:[0-9a-f]{64}$'",
+            name="voyage_v1_identity",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -295,8 +334,13 @@ class EntityEmbedding(Base):
     )
     entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     entity_version: Mapped[int] = mapped_column(sa.Integer)
-    embedding: Mapped[Any] = mapped_column(Vector())
+    embedding: Mapped[Any] = mapped_column(Vector(1024))
     embedding_model: Mapped[str] = mapped_column(sa.Text)
+    embedding_provider: Mapped[str] = mapped_column(sa.Text)
+    embedding_dimension: Mapped[int] = mapped_column(sa.Integer)
+    embedding_input_version: Mapped[str] = mapped_column(sa.Text)
+    embedding_input_type: Mapped[str] = mapped_column(sa.Text)
+    embedding_input_fingerprint: Mapped[str] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now()
     )

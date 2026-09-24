@@ -118,3 +118,24 @@ Abandoned `AUTHORIZED` uploads, `REJECTED` uploads, and export result objects
 are reconciled by the same future worker/maintenance scope. Issue #35 documents
 this contract and does not modify `maintenance_delete_account`, `0011a`, or the
 worker deletion architecture.
+
+## Recommendation engine packaging
+
+The backend wheel includes the frozen M3 pure simulator package and the versioned
+recommendation policy JSON files. Build from the repository checkout so the
+`research/recommendation/simulator` source is present. Runtime query embeddings
+use `EMBYR_VOYAGE_API_KEY` when semantic retrieval is enabled. Document
+embeddings are derived data keyed by `ontology-entity/v1`. Their exact input is
+the UTF-8 text `TITLE: {canonical_title}\nSUMMARY: {canonical_summary}` and
+their stored `embedding_input_fingerprint` is its `sha256:` digest. The input
+snapshot excludes a vector whose fingerprint no longer matches current text.
+Ontology ingestion must refresh document embeddings when title or summary
+changes.
+
+For a database with legacy REQUIRES edges, upgrade first to
+`0015_retrieval_expand`. Preserve the rows and explicitly fill
+each edge's source and target versions, exact target-version objective ID, and
+HARD/SOFT requirement. Clear the old derived embedding corpus before upgrading
+to final `0015_recommendation_retrieval`; regenerate Voyage `voyage-4` 1024-D
+document embeddings and their input fingerprints afterward. The final revision
+refuses uncurated REQUIRES edges or uncleared old embeddings.

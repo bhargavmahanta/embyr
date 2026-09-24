@@ -19,6 +19,8 @@ def test_retrieval_v1_has_the_reviewed_identity_and_initial_bounds():
         "metric": "cosine", "document_input_type": "document",
         "query_input_type": "query", "query_input_version": "semantic-query-text/v1",
         "query_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}",
+        "document_input_version": "ontology-entity/v1",
+        "document_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}",
     }
     assert policy["semantic"] == {
         "search": "exact", "minimum_cosine_similarity": 0.55,

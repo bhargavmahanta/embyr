@@ -26,8 +26,11 @@ test = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
+where = [".", ".."]
+include = ["app*", "research", "research.recommendation", "research.recommendation.simulator"]
+
+[tool.setuptools.package-data]
+"app.recommendation" = ["profiles/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers"

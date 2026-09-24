@@ -64,6 +64,7 @@ class Settings:
     storage_bucket: str | None = None
     storage_secret_key: str | None = None
     storage_download_url_ttl_seconds: int = DEFAULT_STORAGE_DOWNLOAD_URL_TTL_SECONDS
+    voyage_api_key: str | None = None
 
     @property
     def resolved_jwks_url(self) -> str:
@@ -134,6 +135,7 @@ class Settings:
             storage_download_url_ttl_seconds=_parse_download_ttl(
                 source.get("EMBYR_STORAGE_DOWNLOAD_URL_TTL_SECONDS")
             ),
+            voyage_api_key=source.get("EMBYR_VOYAGE_API_KEY"),
         )
         # Fail fast when the issuer cannot produce a bounded project origin.
         settings.supabase_project_origin

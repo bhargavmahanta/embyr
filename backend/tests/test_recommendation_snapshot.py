@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from uuid import UUID
+import hashlib
 
 from app.recommendation.snapshot import QUERIES, INPUT_VERSION, build_production_snapshot
+from app.recommendation.inputs import ontology_document_text
 
 USER = UUID("11111111-1111-1111-1111-111111111111")
 ENTITY = UUID("22222222-2222-2222-2222-222222222222")
@@ -94,3 +96,33 @@ def test_snapshot_reads_set_isolation_and_rls_identity_before_data():
         if " :user_id" in statement:
             assert params == {"user_id": USER}
     assert snapshot.anchor_entities == ()
+
+
+def test_document_fingerprint_controls_semantic_snapshot_membership():
+    rows = {name: [] for name in QUERIES}
+    rows["entities"] = [{
+        "entity_id": ENTITY, "entity_version": 2, "current_version": 2,
+        "status": "REVIEWED", "title": "Original", "summary": "Summary",
+    }]
+    document = ontology_document_text("Original", "Summary")
+    rows["embeddings"] = [{
+        "entity_id": ENTITY, "entity_version": 2, "vector": "[1,0]",
+        "embedding_input_fingerprint": "sha256:" + hashlib.sha256(
+            document.encode("utf-8")
+        ).hexdigest(),
+    }]
+    matched = build_production_snapshot(USER, rows)
+    assert len(matched.embeddings) == 1
+
+    rows["entities"][0]["title"] = "Updated"
+    stale = build_production_snapshot(USER, rows)
+    assert stale.embeddings == ()
+    without_embedding = {**rows, "embeddings": []}
+    assert stale.fingerprint == build_production_snapshot(USER, without_embedding).fingerprint
+
+    document = ontology_document_text("Updated", "Summary")
+    rows["embeddings"][0]["embedding_input_fingerprint"] = (
+        "sha256:" + hashlib.sha256(document.encode("utf-8")).hexdigest()
+    )
+    refreshed = build_production_snapshot(USER, rows)
+    assert len(refreshed.embeddings) == 1
