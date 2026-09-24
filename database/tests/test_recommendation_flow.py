@@ -50,7 +50,9 @@ async def test_onboarded_interest_to_recommendation_accept_exploration(migrated_
             values (:user_id, :entity_id, 'MORE')
         """), {"user_id": user_id, "entity_id": entity_id})
 
-    async_engine = create_async_engine(str(migrated_engine.url), poolclass=NullPool)
+    async_engine = create_async_engine(
+        migrated_engine.url.render_as_string(hide_password=False), poolclass=NullPool
+    )
     factory = async_sessionmaker(async_engine, expire_on_commit=False)
     try:
         snapshot = await assemble_production_snapshot(factory, user_id)
@@ -141,9 +143,3 @@ async def test_onboarded_interest_to_recommendation_accept_exploration(migrated_
                 )
     finally:
         await async_engine.dispose()
-        with migrated_engine.begin() as connection:
-            connection.execute(text("delete from public.app_users where id = :id"), {"id": user_id})
-            connection.execute(text("""
-                update public.learning_entities set current_version = null where id = :id
-            """), {"id": entity_id})
-            connection.execute(text("delete from public.learning_entities where id = :id"), {"id": entity_id})
