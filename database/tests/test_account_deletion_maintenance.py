@@ -1084,4 +1084,4 @@ def test_downgrade_restores_previous_trigger_and_removes_function(database_url):
         assert _function_row(connection) is not None
         assert connection.execute(
             text("select version_num from alembic_version")
-        ).scalar_one() == "0013_default_acl_hardening"
+        ).scalar_one() == "0014_objective_categorical_state"
