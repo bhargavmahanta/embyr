@@ -229,7 +229,13 @@ Request:
 }
 ```
 
-Returns one persisted `Recommendation`.
+Returns one persisted `Recommendation` as the response body when a learning entity is eligible. In the first M4 release, generated targets are learning entities only. If no candidate is eligible, returns HTTP 200 with an explicit empty body; no recommendation row is created:
+
+```json
+{"recommendation": null}
+```
+
+The empty result is a durable idempotent outcome and replays as the same HTTP 200 body. `CREATE` returns this empty result until practical targets are supported. `hook` and `reason` may both be null when M3 produces no explanation codes. Nonempty responses retain the `Recommendation` DTO shape above; machine explanation codes remain private provenance in v0.1.
 
 ### `POST /api/v1/recommendations/{recommendation_id}/decision`
 

@@ -1,0 +1,13 @@
+{
+  "policy_version": "distance-band/v1",
+  "meaning": "conceptual/retrieval distance from current learner curiosity",
+  "precedence": ["COMFORT", "ADJACENT", "FRONTIER", "WILD"],
+  "comfort_sources": ["HISTORY_CONTINUATION", "REVISIT", "EXPLICIT_INTEREST"],
+  "adjacent": {"graph_hops": 1, "minimum_cosine_similarity": 0.80},
+  "frontier": {"graph_hops": 2, "minimum_cosine_similarity": 0.65, "maximum_cosine_similarity_exclusive": 0.80},
+  "wild": {"minimum_cosine_similarity": 0.55, "maximum_cosine_similarity_exclusive": 0.65},
+  "no_qualifying_signal": "ADJACENT",
+  "uses_readiness": false,
+  "uses_difficulty_fit": false,
+  "uses_final_score_or_rank": false
+}
