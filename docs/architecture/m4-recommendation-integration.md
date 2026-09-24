@@ -46,4 +46,4 @@ Focused backend tests cover the input mapper, five retrieval sources, M3 adapter
 python -m pytest database/tests/test_recommendation_flow.py -q
 ```
 
-The database gate and live Voyage call were unavailable during initial implementation because no Docker daemon or disposable database was available. They must pass before the milestone is called production-validated. The full M3 regression suite is reserved for a shared simulator semantics change or the final milestone gate.
+After starting Docker Desktop, the disposable PostgreSQL flow passed. The adjacent recommendation schema, ontology, and RLS selection passed (68 tests), as did the backend suite (132 tests) and the frozen M3 suite (856 tests). A live Voyage request, corpus refresh operation, scale benchmark, and hosted rollout were not exercised; those remain deployment and calibration work, not evidence of recommendation quality.
