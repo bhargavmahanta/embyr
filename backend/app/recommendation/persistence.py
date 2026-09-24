@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from research.recommendation.simulator.explain import EXPLANATION_CODES
 
 COPY_PATH = Path(__file__).with_name("profiles") / "recommendation-copy-v1.json"
+RANKING_MODEL_VERSION = "recommendation-profile/v1"
 INTENT_BY_MODE = {
     "CONTINUE": "RELATED_EXPLORATION",
     "REVISIT": "RETENTION_REVISIT",
@@ -118,6 +119,8 @@ async def persist_selected_recommendation(
     mode: str, distance_band: str, ranking_model_version: str,
     presented_at: datetime | None = None,
 ) -> UUID:
+    if ranking_model_version != RANKING_MODEL_VERSION:
+        raise ValueError("unsupported recommendation ranking profile")
     if mode not in INTENT_BY_MODE:
         raise ValueError("unsupported recommendation mode")
     if distance_band not in {"COMFORT", "ADJACENT", "FRONTIER", "WILD"}:
@@ -162,7 +165,7 @@ class DecisionOutcome:
 
 async def persist_decision(
     session: AsyncSession, *, user_id: UUID, recommendation: dict,
-    decision: str, command_id: UUID, reason: str | None = None,
+    decision: str, command_id: UUID,
 ) -> DecisionOutcome:
     """Write decision, new Exploration, and ledger events in caller transaction."""
     if decision not in {"ACCEPT", "SKIP"}:
@@ -200,9 +203,6 @@ async def persist_decision(
             "entity_id": recommendation["entity_id"],
             "exploration_id": exploration_id,
             "learning_intent": intent, "occurred_at": now,
-            "metadata": json.dumps({
-                "recommendation_id": str(recommendation["id"]),
-                **({"skip_reason": reason} if decision == "SKIP" and reason else {}),
-            }),
+            "metadata": json.dumps({"recommendation_id": str(recommendation["id"])}),
         })
     return DecisionOutcome(recommendation["id"], decision, exploration_id, now)

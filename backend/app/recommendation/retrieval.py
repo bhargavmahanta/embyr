@@ -25,13 +25,6 @@ from research.recommendation.simulator.sources import (
 from app.recommendation.snapshot import ProductionInputSnapshot
 
 PROFILE_PATH = Path(__file__).with_name("profiles") / "recommendation-retrieval-v1.json"
-MODE_SOURCES = {
-    "CONTINUE": frozenset({"HISTORY_CONTINUATION"}),
-    "REVISIT": frozenset({"REVISIT"}),
-    "EXPLORE": frozenset({"GRAPH", "SEMANTIC", "EXPLICIT_INTEREST"}),
-    "SURPRISE": frozenset({"GRAPH", "SEMANTIC"}),
-    "CREATE": frozenset(),
-}
 Key = tuple[str, int]
 
 
@@ -87,14 +80,24 @@ def _entity_view(snapshot: ProductionInputSnapshot) -> tuple[dict[Key, dict], di
         relationship = edge["relationship_type"]
         if relationship not in {"RELATED_TO", "REQUIRES"}:
             continue
-        source = _key(
-            edge["source_entity_id"],
-            edge["source_entity_version"] or current.get(edge["source_entity_id"]),
-        ) if edge["source_entity_version"] or current.get(edge["source_entity_id"]) else None
-        target = _key(
-            edge["target_entity_id"],
-            edge["target_entity_version"] or current.get(edge["target_entity_id"]),
-        ) if edge["target_entity_version"] or current.get(edge["target_entity_id"]) else None
+        if relationship == "REQUIRES":
+            source_version = edge["source_entity_version"]
+            if source_version is None:
+                if edge["source_entity_id"] in current:
+                    raise ValueError("current REQUIRES edge lacks source version")
+                continue
+            source = _key(edge["source_entity_id"], source_version)
+            if source not in entities:
+                continue  # Historical dependent versions cannot constrain current candidates.
+            target_version = edge["target_entity_version"]
+            if target_version is None:
+                raise ValueError("current REQUIRES edge lacks target version")
+            target = _key(edge["target_entity_id"], target_version)
+        else:
+            source_version = edge["source_entity_version"] or current.get(edge["source_entity_id"])
+            target_version = edge["target_entity_version"] or current.get(edge["target_entity_id"])
+            source = _key(edge["source_entity_id"], source_version) if source_version else None
+            target = _key(edge["target_entity_id"], target_version) if target_version else None
         if source is None or target is None or source not in entities or target not in entities:
             if relationship == "REQUIRES":
                 raise ValueError("active REQUIRES edge has unresolved versioned endpoint")
@@ -231,28 +234,27 @@ def _semantic_nominations(
 def retrieve_candidates(
     snapshot: ProductionInputSnapshot,
     query_embeddings: Mapping[Key, list[float]],
-    *, mode: str,
-    policy: dict | None = None,
+    *, policy: dict | None = None,
 ) -> list[dict]:
     """Return deterministic M3 Candidate dictionaries from real production inputs."""
-    if mode not in MODE_SOURCES:
-        raise ValueError(f"unsupported recommendation mode: {mode!r}")
-    if mode == "CREATE":
-        return []
     policy = policy or load_retrieval_policy()
     entities, view = _entity_view(snapshot)
-    permitted = MODE_SOURCES[mode]
-    nominations = []
-    if "GRAPH" in permitted:
-        nominations.extend(_graph_nominations(view, entities, policy))
-    if "SEMANTIC" in permitted:
-        nominations.extend(_semantic_nominations(snapshot, query_embeddings, policy))
-    if "EXPLICIT_INTEREST" in permitted:
-        nominations.extend(explicit_interest_nominations(view))
-    if "HISTORY_CONTINUATION" in permitted:
-        nominations.extend(history_continuation_nominations(view))
-    if "REVISIT" in permitted:
-        nominations.extend(revisit_nominations(view))
+    current_revisits = [
+        exploration for exploration in snapshot.explorations
+        if exploration["status"] == "COMPLETED"
+        and _key(exploration["entity_id"], exploration["entity_version"]) in entities
+    ]
+    revisit_view = {
+        **view,
+        "exploration_history": {"explorations": current_revisits},
+    }
+    nominations = [
+        *_graph_nominations(view, entities, policy),
+        *_semantic_nominations(snapshot, query_embeddings, policy),
+        *explicit_interest_nominations(view),
+        *history_continuation_nominations(view),
+        *revisit_nominations(revisit_view),
+    ]
     preferences = {
         _key(p["entity_id"], p["entity_version"]): p["preference"]
         for p in snapshot.explicit_preferences
@@ -261,8 +263,6 @@ def retrieve_candidates(
     for normalized in normalize_nominations(nominations):
         target = _key(normalized["target_entity_id"], normalized["target_entity_version"])
         entity = entities.get(target)
-        if entity is not None and entity["difficulty_prior"] is None:
-            entity = None
         prerequisites = evaluate_prerequisites(target, entity, view)
         candidates.append(build_candidate(
             normalized, entity, preferences.get(target), prerequisites,

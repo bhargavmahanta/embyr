@@ -65,6 +65,29 @@ class _Session:
 
 
 @pytest.mark.asyncio
+async def test_persistence_accepts_reviewed_profile_and_rejects_false_identity():
+    selected = {
+        "target_entity_id": str(uuid4()), "target_entity_version": 2,
+        "explanation_codes": [], "candidate_sources": ["GRAPH"],
+        "final_rank": 3, "ordering_score": 0.4,
+        "score_trace": {"component_scores": {}, "pre_rerank_score": 0.4},
+        "rerank_trace": {"diversity_adjustment": 0.0},
+    }
+    session = _Session()
+    with pytest.raises(ValueError, match="ranking profile"):
+        await persist_selected_recommendation(
+            session, user_id=uuid4(), selected=selected, mode="EXPLORE",
+            distance_band="ADJACENT", ranking_model_version="fake-profile/v99",
+        )
+    assert session.writes == []
+    await persist_selected_recommendation(
+        session, user_id=uuid4(), selected=selected, mode="EXPLORE",
+        distance_band="ADJACENT", ranking_model_version="recommendation-profile/v1",
+    )
+    assert session.writes[0][1]["ranking_model_version"] == "recommendation-profile/v1"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("decision, mode, expected_intent, expected_events", [
     ("ACCEPT", "CONTINUE", "RELATED_EXPLORATION", ["RECOMMENDATION_ACCEPTED", "EXPLORATION_STARTED"]),
     ("SKIP", "REVISIT", "RETENTION_REVISIT", ["RECOMMENDATION_SKIPPED"]),

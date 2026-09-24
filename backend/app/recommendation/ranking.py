@@ -6,6 +6,7 @@ used: production identity and request context are not synthetic fixtures.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,21 +14,32 @@ from typing import Any
 from research.recommendation.simulator.explain import build_recommendation_results
 from research.recommendation.simulator.rerank import apply_rerank
 from research.recommendation.simulator.scoring import score_candidate
-from research.recommendation.simulator.validation import SCORING_FEATURE_SET
 
 from app.recommendation.snapshot import ProductionInputSnapshot
 
 PROFILE_PATH = Path(__file__).with_name("profiles") / "recommendation-profile-v1.json"
+FROZEN_PROFILE = {
+    "profile_version": "recommendation-profile/v1",
+    "semantic_contract": "m3-simulation/v5",
+    "top_k": 1,
+    "feature_weights": {
+        "readiness": 0.14,
+        "difficulty_fit": 0.18,
+        "explicit_interest": 0.22,
+        "inferred_interest": 0.08,
+        "graph_proximity": 0.12,
+        "semantic_similarity": 0.14,
+        "continuation_value": 0.07,
+        "revisit_value": 0.05,
+    },
+    "rerank": {"strategy": "DOMAIN_COVERAGE", "diversity_weight": 0.08},
+}
+MODES = frozenset({"CONTINUE", "REVISIT", "EXPLORE", "SURPRISE", "CREATE"})
 
 
 def load_profile() -> dict[str, Any]:
     profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-    if (
-        profile["profile_version"] != "recommendation-profile/v1"
-        or profile["semantic_contract"] != "m3-simulation/v5"
-        or profile["top_k"] != 1
-        or set(profile["feature_weights"]) != SCORING_FEATURE_SET
-    ):
+    if profile != FROZEN_PROFILE or type(profile.get("top_k")) is not int:
         raise ValueError("unsupported production ranking profile")
     return profile
 
@@ -56,7 +68,12 @@ def _entities(snapshot: ProductionInputSnapshot) -> dict[tuple[str, int], dict]:
 
 
 def _challenge_for(snapshot: ProductionInputSnapshot, entity: dict) -> dict | None:
-    states = {row["area_id"]: row for row in snapshot.challenge_states}
+    states = {}
+    for row in snapshot.challenge_states:
+        ability = row["ability_estimate"]
+        if (isinstance(ability, (int, float)) and not isinstance(ability, bool)
+                and math.isfinite(ability) and 0.0 <= ability <= 1.0):
+            states[row["area_id"]] = row
     domains = entity["domain_ids"]
     primary = sorted(
         row["domain_id"] for row in snapshot.domains
@@ -66,6 +83,22 @@ def _challenge_for(snapshot: ProductionInputSnapshot, entity: dict) -> dict | No
         if area_id in states:
             return dict(states[area_id])
     return None
+
+
+def _matches_mode(result: dict, mode: str) -> bool:
+    sources = set(result["candidate_sources"])
+    if mode == "CONTINUE":
+        return "HISTORY_CONTINUATION" in sources
+    if mode == "REVISIT":
+        return "REVISIT" in sources
+    if mode == "EXPLORE":
+        return bool(sources & {"GRAPH", "SEMANTIC", "EXPLICIT_INTEREST"})
+    if mode == "SURPRISE":
+        return (
+            bool(sources & {"GRAPH", "SEMANTIC"})
+            and "EXPLICIT_INTEREST" not in sources
+        )
+    return False  # CREATE has no entity candidate in v1.
 
 
 def _ranked_shape(entry: dict) -> dict:
@@ -83,10 +116,12 @@ def _ranked_shape(entry: dict) -> dict:
 def rank_recommendations(
     snapshot: ProductionInputSnapshot,
     candidates: list[dict],
-    *, profile: dict | None = None,
+    *, mode: str,
 ) -> ProductionRanking:
-    """Score once, rerank once, and select the one-item M3 ordered prefix."""
-    profile = profile or load_profile()
+    """Rank and explain the full population, then select the first mode survivor."""
+    if mode not in MODES:
+        raise ValueError(f"unsupported recommendation mode: {mode!r}")
+    profile = load_profile()
     eligible = [item for item in candidates if item["eligibility_state"] == "ELIGIBLE"]
     if not eligible:
         return ProductionRanking(
@@ -116,15 +151,16 @@ def rank_recommendations(
         item["pre_rerank_rank"] = rank
     apply_rerank(scored, entities, profile["rerank"])
     results = build_recommendation_results([_ranked_shape(item) for item in scored])
-    selected = results[0]
-    selected_candidate = next(
-        item for item in eligible if item["candidate_id"] == selected["candidate_id"]
-    )
-    if any(
-        evaluation["requirement"] == "HARD" and evaluation["state"] != "SATISFIED"
-        for evaluation in selected_candidate["prerequisite_evaluations"]
-    ):
-        raise ValueError("ineligible hard prerequisite reached recommendation selection")
+    selected = next((result for result in results if _matches_mode(result, mode)), None)
+    if selected is not None:
+        selected_candidate = next(
+            item for item in eligible if item["candidate_id"] == selected["candidate_id"]
+        )
+        if any(
+            evaluation["requirement"] == "HARD" and evaluation["state"] != "SATISFIED"
+            for evaluation in selected_candidate["prerequisite_evaluations"]
+        ):
+            raise ValueError("ineligible hard prerequisite reached recommendation selection")
     return ProductionRanking(
         selected=selected, ranked=tuple(results), candidate_count=len(candidates),
         eligible_count=len(eligible), excluded_count=len(candidates) - len(eligible),

@@ -31,6 +31,14 @@ _TITLE_SQL = text("""
     select title from public.learning_entity_versions
      where entity_id = :entity_id and version = :entity_version
 """)
+_CURRENT_TARGET_SQL = text("""
+    select 1 from public.learning_entities as entity
+    join public.learning_entity_versions as version
+      on version.entity_id = entity.id and version.version = :entity_version
+    where entity.id = :entity_id
+      and entity.status in ('REVIEWED', 'PUBLISHED')
+      and entity.current_version = :entity_version
+""")
 
 
 class NextRequest(BaseModel):
@@ -118,6 +126,15 @@ async def next_recommendation(
         result_type, result_id = "EMPTY_RECOMMENDATION", reservation.record_id
     else:
         assert band is not None
+        current = await session.scalar(_CURRENT_TARGET_SQL, {
+            "entity_id": UUID(ranking.selected["target_entity_id"]),
+            "entity_version": ranking.selected["target_entity_version"],
+        })
+        if current is None:
+            raise AppError(
+                code="RECOMMENDATION_GENERATION_UNAVAILABLE", status=503,
+                title="Recommendation generation unavailable",
+            )
         presented_at = datetime.now(timezone.utc)
         try:
             recommendation_id = await persist_selected_recommendation(
@@ -173,7 +190,7 @@ async def decide_recommendation(
         raise AppError(code="RECOMMENDATION_ALREADY_DECIDED", status=409, title="Recommendation already decided")
     outcome = await persist_decision(
         session, user_id=user_id, recommendation=recommendation,
-        decision=body.decision, command_id=reservation.record_id, reason=body.reason,
+        decision=body.decision, command_id=reservation.record_id,
     )
     if outcome.exploration_id is None:
         response = {"recommendation_id": str(recommendation_id), "decision": "SKIP"}
