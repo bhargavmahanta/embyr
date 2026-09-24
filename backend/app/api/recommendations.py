@@ -20,7 +20,7 @@ from app.auth.principal import AuthenticatedPrincipal
 from app.db.session import set_current_user
 from app.integrations.voyage import EmbeddingProviderError, VoyageQueryEmbedder
 from app.recommendation.persistence import (
-    INTENT_BY_MODE, load_recommendation, persist_decision,
+    INTENT_BY_MODE, StaleRecommendationTarget, load_recommendation, persist_decision,
     persist_selected_recommendation, selected_provenance,
 )
 from app.recommendation.service import generate_recommendation
@@ -119,11 +119,18 @@ async def next_recommendation(
     else:
         assert band is not None
         presented_at = datetime.now(timezone.utc)
-        recommendation_id = await persist_selected_recommendation(
-            session, user_id=user_id, selected=ranking.selected,
-            mode=body.mode, distance_band=band,
-            ranking_model_version=ranking.profile_version, presented_at=presented_at,
-        )
+        try:
+            recommendation_id = await persist_selected_recommendation(
+                session, user_id=user_id, selected=ranking.selected,
+                mode=body.mode, distance_band=band,
+                ranking_model_version=ranking.profile_version, presented_at=presented_at,
+            )
+        except StaleRecommendationTarget as error:
+            raise AppError(
+                code="RECOMMENDATION_TARGET_CHANGED", status=409,
+                title="Recommendation target changed",
+                detail="Retry with a new Idempotency-Key to generate from current ontology state.",
+            ) from error
         response = _recommendation_dto(
             recommendation_id=recommendation_id, selected=ranking.selected,
             snapshot=snapshot, mode=body.mode, band=band, presented_at=presented_at,

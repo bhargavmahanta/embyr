@@ -31,6 +31,10 @@ class SelectedProvenance:
     score_components: dict[str, Any]
 
 
+class StaleRecommendationTarget(ValueError):
+    """The selected ontology target is no longer deliverable at write time."""
+
+
 def selected_provenance(selected: dict) -> SelectedProvenance:
     """Keep only bounded selected-result evidence and reviewed static copy."""
     copy = json.loads(COPY_PATH.read_text(encoding="utf-8"))
@@ -66,10 +70,15 @@ _INSERT_SQL = text("""
       (id, user_id, entity_id, entity_version, mode, distance_band,
        ranking_model_version, score_components, reason_code,
        presentation_version, presentation, presented_at)
-    values
-      (:id, :user_id, :entity_id, :entity_version, :mode, :distance_band,
+    select
+       :id, :user_id, :entity_id, :entity_version, :mode, :distance_band,
        :ranking_model_version, cast(:score_components as jsonb), :reason_code,
-       :presentation_version, cast(:presentation as jsonb), :presented_at)
+       :presentation_version, cast(:presentation as jsonb), :presented_at
+      from public.learning_entities e
+      join public.learning_entity_versions v
+        on v.entity_id = e.id and v.version = :entity_version
+     where e.id = :entity_id and e.status in ('REVIEWED', 'PUBLISHED')
+    returning id
 """)
 _LOAD_SQL = text("""
     select id, user_id, entity_id, entity_version, challenge_id,
@@ -115,7 +124,7 @@ async def persist_selected_recommendation(
         raise ValueError("unsupported distance band")
     provenance = selected_provenance(selected)
     recommendation_id = uuid4()
-    await session.execute(_INSERT_SQL, {
+    inserted = (await session.execute(_INSERT_SQL, {
         "id": recommendation_id, "user_id": user_id,
         "entity_id": UUID(selected["target_entity_id"]),
         "entity_version": selected["target_entity_version"],
@@ -126,7 +135,9 @@ async def persist_selected_recommendation(
         "presentation_version": provenance.presentation_version,
         "presentation": json.dumps(provenance.presentation),
         "presented_at": presented_at or datetime.now(timezone.utc),
-    })
+    })).first()
+    if inserted is None:
+        raise StaleRecommendationTarget("selected ontology entity is no longer deliverable")
     return recommendation_id
 
 
