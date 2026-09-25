@@ -98,7 +98,14 @@ def test_wrong_query_embedding_count_returns_controlled_503(monkeypatch):
     assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
 
 
-def test_malformed_voyage_payload_returns_controlled_503(monkeypatch):
+@pytest.mark.parametrize("body", [
+    pytest.param(b"[]", id="invalid-top-level"),
+    pytest.param(
+        b'{"model":"voyage-4","data":' + b"9" * 5000 + b"}",
+        id="oversized-json-integer",
+    ),
+])
+def test_malformed_voyage_payload_returns_controlled_503(monkeypatch, body):
     from types import SimpleNamespace
     import app.api.recommendations as api
 
@@ -116,7 +123,7 @@ def test_malformed_voyage_payload_returns_controlled_503(monkeypatch):
 
     def malformed_response(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "https://api.voyageai.com/v1/embeddings"
-        return httpx.Response(200, json=[])
+        return httpx.Response(200, content=body)
 
     monkeypatch.setattr(api, "find_idempotent_result", find)
     monkeypatch.setattr(api, "assemble_production_snapshot", assemble)

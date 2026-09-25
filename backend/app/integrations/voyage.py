@@ -1,7 +1,6 @@
 """Voyage AI adapter for the versioned M4 query embedding policy."""
 from __future__ import annotations
 
-import json
 import math
 
 import httpx
@@ -92,7 +91,10 @@ class VoyageQueryEmbedder:
             else:
                 response = await send(self._client)
             response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise EmbeddingProviderError("Voyage query embedding failed") from error
+        try:
             payload = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        except ValueError as error:
             raise EmbeddingProviderError("Voyage query embedding failed") from error
         return _validated_vectors(payload, len(texts))

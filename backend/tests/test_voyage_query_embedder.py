@@ -143,6 +143,19 @@ def test_http_and_json_failures_raise_provider_error(response):
     assert "private provider error" not in str(raised.value)
 
 
+def test_oversized_json_integer_decode_failure_raises_provider_error():
+    body = b'{"model":"voyage-4","data":' + b"9" * 5000 + b"}"
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, content=body)
+        )) as client:
+            await VoyageQueryEmbedder("test-key", client).embed_queries(["TITLE: X\nSUMMARY: Y"])
+
+    with pytest.raises(EmbeddingProviderError):
+        asyncio.run(run())
+
+
 def test_each_batch_is_validated_and_malformed_later_batch_fails():
     calls = []
 
