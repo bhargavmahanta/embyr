@@ -22,6 +22,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ProgrammingError
 
+from conftest import provision_runtime_roles
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = REPOSITORY_ROOT / "database" / "tools" / "issue33_hosted_verifier.py"
 ALEMBIC_INI = REPOSITORY_ROOT / "database" / "alembic.ini"
@@ -85,6 +87,33 @@ def client_roles(database_url):
         for role in created:
             conn.execute(text(f"drop role if exists {role}"))
     engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def frozen_fk_engine(database_url, verifier):
+    """Migrate a separate disposable database to the verifier's frozen 0013 revision."""
+    database_name = f"embyr_p33_fk_test_{uuid4().hex}"
+    frozen_url = make_url(database_url).set(database=database_name).render_as_string(
+        hide_password=False
+    )
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    engine = None
+    created = False
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'create database "{database_name}"'))
+        created = True
+        engine = create_engine(frozen_url)
+        provision_runtime_roles(engine)
+        command.upgrade(_alembic_config(frozen_url), verifier.FINAL_REVISION)
+        yield engine
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if created:
+            with admin.connect() as conn:
+                conn.execute(text(f'drop database "{database_name}" with (force)'))
+        admin.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -530,11 +559,24 @@ def test_final_zero_data_gate_detects_residual_row(
 
 
 def test_orphan_relationship_inventory_matches_database(
-    migrated_engine, verifier, clean_application_data
+    frozen_fk_engine, verifier
 ):
-    actual = verifier.database_foreign_keys(migrated_engine)
+    actual = verifier.database_foreign_keys(frozen_fk_engine)
     assert set(actual) == set(verifier.EXPECTED_FOREIGN_KEYS)
     assert len(verifier.EXPECTED_FOREIGN_KEYS) == len(set(verifier.EXPECTED_FOREIGN_KEYS))
+
+
+def test_frozen_fk_database_revision_and_migration_boundary(
+    frozen_fk_engine, verifier
+):
+    with frozen_fk_engine.connect() as conn:
+        revision = conn.execute(text("select version_num from alembic_version")).scalar_one()
+    assert revision == verifier.FINAL_REVISION == "0013_default_acl_hardening"
+    assert {
+        "fk_ontology_edges_source_version",
+        "fk_ontology_edges_target_version",
+        "fk_ontology_edges_objective_target_version",
+    }.isdisjoint(verifier.database_foreign_keys(frozen_fk_engine))
 
 
 def test_orphan_checker_clean(migrated_engine, verifier, clean_application_data):
@@ -828,25 +870,25 @@ def test_default_acl_detects_inherited_client_execute(
 
 
 def test_foreign_key_contract_matches_database(
-    migrated_engine, verifier, clean_application_data
+    frozen_fk_engine, verifier
 ):
-    actual = verifier.database_foreign_key_contract(migrated_engine)
+    actual = verifier.database_foreign_key_contract(frozen_fk_engine)
     expected = {spec.name: spec for spec in verifier.EXPECTED_FOREIGN_KEY_CONTRACT}
     assert len(expected) == len(verifier.EXPECTED_FOREIGN_KEY_CONTRACT)
     assert actual == expected
 
 
 def test_foreign_key_contract_detects_same_name_drift(
-    migrated_engine, verifier, clean_application_data
+    frozen_fk_engine, verifier
 ):
-    with migrated_engine.connect() as conn:
+    with frozen_fk_engine.connect() as conn:
         definition = conn.execute(
             text(
                 "select pg_get_constraintdef(oid) from pg_constraint "
                 "where conname = 'fk_jobs_user_id_app_users'"
             )
         ).scalar_one()
-    with migrated_engine.begin() as conn:
+    with frozen_fk_engine.begin() as conn:
         conn.execute(
             text("alter table public.jobs drop constraint fk_jobs_user_id_app_users")
         )
@@ -857,12 +899,12 @@ def test_foreign_key_contract_detects_same_name_drift(
             )
         )
     try:
-        violations = verifier.foreign_key_violations(migrated_engine)
+        violations = verifier.foreign_key_violations(frozen_fk_engine)
         drifted = [v for v in violations if v.table == "fk_jobs_user_id_app_users"]
         assert drifted, violations
         assert any(v.field for v in drifted), drifted
     finally:
-        with migrated_engine.begin() as conn:
+        with frozen_fk_engine.begin() as conn:
             conn.execute(
                 text(
                     "alter table public.jobs "
@@ -875,17 +917,17 @@ def test_foreign_key_contract_detects_same_name_drift(
                     f"fk_jobs_user_id_app_users {definition}"
                 )
             )
-    assert verifier.foreign_key_violations(migrated_engine) == []
+    assert verifier.foreign_key_violations(frozen_fk_engine) == []
 
 
 def test_final_skips_orphan_checker_when_fk_contract_fails(
-    monkeypatch, migrated_engine, verifier, clean_application_data
+    monkeypatch, frozen_fk_engine, verifier
 ):
     def _explode(obj):  # pragma: no cover - must never run
         raise AssertionError("orphan checker ran before FK contract passed")
 
     monkeypatch.setattr(verifier, "orphan_violations", _explode)
-    with migrated_engine.begin() as conn:
+    with frozen_fk_engine.begin() as conn:
         conn.execute(
             text("alter table public.jobs drop constraint fk_jobs_user_id_app_users")
         )
@@ -896,9 +938,9 @@ def test_final_skips_orphan_checker_when_fk_contract_fails(
             )
         )
     try:
-        assert verifier.final_foreign_key_violations(migrated_engine)
+        assert verifier.final_foreign_key_violations(frozen_fk_engine)
     finally:
-        with migrated_engine.begin() as conn:
+        with frozen_fk_engine.begin() as conn:
             conn.execute(
                 text(
                     "alter table public.jobs "
@@ -912,7 +954,13 @@ def test_final_skips_orphan_checker_when_fk_contract_fails(
                     "references public.app_users (id) on delete cascade"
                 )
             )
-    assert verifier.foreign_key_violations(migrated_engine) == []
+    assert verifier.foreign_key_violations(frozen_fk_engine) == []
+
+
+def test_current_head_remains_after_frozen_fk_tests(migrated_engine, frozen_fk_engine):
+    with migrated_engine.connect() as conn:
+        revision = conn.execute(text("select version_num from alembic_version")).scalar_one()
+    assert revision == "0017_idempotency_key_reuse"
 
 
 # ---------------------------------------------------------------------------
