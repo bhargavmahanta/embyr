@@ -79,6 +79,7 @@ _INSERT_SQL = text("""
       join public.learning_entity_versions v
         on v.entity_id = e.id and v.version = :entity_version
      where e.id = :entity_id and e.status in ('REVIEWED', 'PUBLISHED')
+       and e.current_version = :entity_version
     returning id
 """)
 _LOAD_SQL = text("""

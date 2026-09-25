@@ -123,6 +123,7 @@ async def test_changed_ontology_target_cannot_be_persisted():
     class StaleSession:
         async def execute(self, statement, params):
             assert "e.status in ('REVIEWED', 'PUBLISHED')" in str(statement)
+            assert "e.current_version = :entity_version" in str(statement)
             return NoRows()
 
     selected = {

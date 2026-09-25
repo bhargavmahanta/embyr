@@ -144,9 +144,8 @@ async def next_recommendation(
             )
         except StaleRecommendationTarget as error:
             raise AppError(
-                code="RECOMMENDATION_TARGET_CHANGED", status=409,
-                title="Recommendation target changed",
-                detail="Retry with a new Idempotency-Key to generate from current ontology state.",
+                code="RECOMMENDATION_GENERATION_UNAVAILABLE", status=503,
+                title="Recommendation generation unavailable",
             ) from error
         response = _recommendation_dto(
             recommendation_id=recommendation_id, selected=ranking.selected,
