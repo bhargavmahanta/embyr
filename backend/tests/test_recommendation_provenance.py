@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 
 from app.recommendation.persistence import (
-    persist_decision, persist_selected_recommendation, selected_provenance,
+    StaleRecommendationTarget, persist_decision,
+    persist_selected_recommendation, selected_provenance,
 )
 
 
@@ -111,3 +112,30 @@ async def test_decision_writes_atomic_outcome_shape(decision, mode, expected_int
     assert all(event["learning_intent"] == expected_intent for event in events)
     assert len(explorations) == (1 if decision == "ACCEPT" else 0)
     assert outcome.exploration_id == (explorations[0]["id"] if explorations else None)
+
+
+@pytest.mark.asyncio
+async def test_changed_ontology_target_cannot_be_persisted():
+    class NoRows:
+        def first(self):
+            return None
+
+    class StaleSession:
+        async def execute(self, statement, params):
+            assert "e.status in ('REVIEWED', 'PUBLISHED')" in str(statement)
+            assert "e.current_version = :entity_version" in str(statement)
+            return NoRows()
+
+    selected = {
+        "target_entity_id": str(uuid4()), "target_entity_version": 1,
+        "explanation_codes": [], "candidate_sources": [], "final_rank": 1,
+        "ordering_score": 0.0,
+        "score_trace": {"component_scores": {}, "pre_rerank_score": 0.0},
+        "rerank_trace": {"diversity_adjustment": 0.0},
+    }
+    with pytest.raises(StaleRecommendationTarget):
+        await persist_selected_recommendation(
+            StaleSession(), user_id=uuid4(), selected=selected,
+            mode="EXPLORE", distance_band="ADJACENT",
+            ranking_model_version="recommendation-profile/v1",
+        )

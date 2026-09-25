@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api.deps import get_principal, get_session
 from app.api.idempotency import IdempotencyReservation
@@ -204,7 +205,8 @@ def test_decision_cannot_address_other_users_recommendation(monkeypatch):
     assert response.json()["code"] == "RECOMMENDATION_NOT_FOUND"
 
 
-def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
+@pytest.mark.parametrize("stale", [False, True], ids=["current", "stale"])
+def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch, stale):
     import app.api.recommendations as api
     from types import SimpleNamespace
 
@@ -235,6 +237,8 @@ def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
         return _reservation()
 
     async def persist(*args, **kwargs):
+        if stale:
+            raise api.StaleRecommendationTarget("selected target changed")
         stored.append(kwargs)
         return recommendation_id
 
@@ -256,6 +260,11 @@ def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
             "/api/v1/recommendations/next", json={"mode": "EXPLORE"},
             headers={"Idempotency-Key": "next-1"},
         )
+    if stale:
+        assert response.status_code == 503
+        assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
+        assert stored == []
+        return
     assert response.status_code == 200
     assert response.json()["id"] == str(recommendation_id)
     assert response.json()["hook"] == "Something you asked to explore"
