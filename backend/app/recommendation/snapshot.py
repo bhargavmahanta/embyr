@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.session import set_current_user
 from app.recommendation.inputs import (
-    objective_state_entry, ontology_document_text, select_anchors,
+    challenge_state_entry, objective_state_entry, ontology_document_text, select_anchors,
 )
 
 INPUT_VERSION = "recommendation-input/v1"
@@ -177,6 +177,11 @@ def build_production_snapshot(
         entry
         for row in converted["objective_states"]
         if (entry := objective_state_entry(row)) is not None
+    ]
+    converted["challenge_states"] = [
+        entry
+        for row in converted["challenge_states"]
+        if (entry := challenge_state_entry(row)) is not None
     ]
     anchors = select_anchors(
         available, converted["explorations"], converted["preferences"]
