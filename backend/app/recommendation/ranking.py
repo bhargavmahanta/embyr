@@ -6,7 +6,6 @@ used: production identity and request context are not synthetic fixtures.
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from research.recommendation.simulator.explain import build_recommendation_resul
 from research.recommendation.simulator.rerank import apply_rerank
 from research.recommendation.simulator.scoring import score_candidate
 
+from app.recommendation.inputs import challenge_state_entry
 from app.recommendation.snapshot import ProductionInputSnapshot
 
 PROFILE_PATH = Path(__file__).with_name("profiles") / "recommendation-profile-v1.json"
@@ -70,10 +70,8 @@ def _entities(snapshot: ProductionInputSnapshot) -> dict[tuple[str, int], dict]:
 def _challenge_for(snapshot: ProductionInputSnapshot, entity: dict) -> dict | None:
     states = {}
     for row in snapshot.challenge_states:
-        ability = row["ability_estimate"]
-        if (isinstance(ability, (int, float)) and not isinstance(ability, bool)
-                and math.isfinite(ability) and 0.0 <= ability <= 1.0):
-            states[row["area_id"]] = row
+        if (entry := challenge_state_entry(row)) is not None:
+            states[entry["area_id"]] = entry
     domains = entity["domain_ids"]
     primary = sorted(
         row["domain_id"] for row in snapshot.domains

@@ -6,6 +6,7 @@ from arbitrary learner facts or a mastery threshold from numeric evidence.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import math
 from typing import Any
 from uuid import UUID
 
@@ -36,6 +37,15 @@ def objective_state_entry(row: Mapping[str, Any]) -> dict[str, str | int] | None
     }
 
 
+def challenge_state_entry(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Keep only usable ability evidence without altering its stored value."""
+    ability = row["ability_estimate"]
+    if (isinstance(ability, bool) or not isinstance(ability, (int, float))
+            or not 0.0 <= ability <= 1.0 or not math.isfinite(ability)):
+        return None
+    return dict(row)
+
+
 def select_anchors(
     available_entity_versions: Iterable[tuple[UUID, int]],
     explorations: Iterable[Mapping[str, Any]],
@@ -61,8 +71,8 @@ def select_anchors(
 
 def semantic_query_text(title: str, summary: str) -> str:
     """The deterministic, per-anchor ``semantic-query-text/v1`` recipe."""
-    if not title or not summary:
-        raise ValueError("semantic query requires an anchor title and summary")
+    if not isinstance(title, str) or not isinstance(summary, str):
+        raise TypeError("semantic query title and summary must be strings")
     return f"TITLE: {title}\nSUMMARY: {summary}"
 
 

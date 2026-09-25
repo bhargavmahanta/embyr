@@ -4,6 +4,7 @@ import pytest
 from uuid import UUID
 
 from app.integrations.voyage import EmbeddingProviderError
+from app.recommendation.inputs import ontology_document_text, semantic_query_text
 from app.recommendation.snapshot import QUERIES, build_production_snapshot
 from app.recommendation.service import generate_recommendation
 from app.recommendation.service import distance_band
@@ -22,7 +23,7 @@ def test_distance_band_v1(paths, expected):
     assert distance_band(paths) == expected
 
 
-def _production_snapshot():
+def _production_snapshot(*, anchor_title="Anchor", anchor_summary="A topic"):
     anchor = UUID("22222222-2222-2222-2222-222222222222")
     target = UUID("33333333-3333-3333-3333-333333333333")
     rows = {name: [] for name in QUERIES}
@@ -33,6 +34,8 @@ def _production_snapshot():
          "estimated_effort_minutes": 15}
         for entity_id, title in ((anchor, "Anchor"), (target, "Target"))
     ]
+    rows["entities"][0]["title"] = anchor_title
+    rows["entities"][0]["summary"] = anchor_summary
     rows["preferences"] = [
         {"entity_id": anchor, "entity_version": 1, "preference": "MORE", "version": 1}
     ]
@@ -103,3 +106,27 @@ async def test_wrong_query_vector_count_is_provider_failure():
         await generate_recommendation(
             _production_snapshot(), mode="CONTINUE", embedder=_Embedder(count=0)
         )
+
+
+@pytest.mark.parametrize(("title", "summary", "expected"), [
+    ("", "A topic", "TITLE: \nSUMMARY: A topic"),
+    ("Anchor", "", "TITLE: Anchor\nSUMMARY: "),
+    ("", "", "TITLE: \nSUMMARY: "),
+])
+@pytest.mark.asyncio
+async def test_empty_anchor_text_uses_exact_query_recipe(title, summary, expected):
+    embedder = _Embedder()
+    ranking, _ = await generate_recommendation(
+        _production_snapshot(anchor_title=title, anchor_summary=summary),
+        mode="EXPLORE", embedder=embedder,
+    )
+    assert semantic_query_text(title, summary) == expected
+    assert ontology_document_text(title, summary) == expected
+    assert embedder.calls == [[expected]]
+    assert ranking.selected is not None
+
+
+@pytest.mark.parametrize(("title", "summary"), [(None, "Summary"), ("Title", 42)])
+def test_semantic_query_rejects_non_string_fields(title, summary):
+    with pytest.raises(TypeError, match="must be strings"):
+        semantic_query_text(title, summary)

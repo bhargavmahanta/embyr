@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from uuid import UUID
 import hashlib
+import pytest
 
 from app.recommendation.snapshot import QUERIES, INPUT_VERSION, build_production_snapshot
 from app.recommendation.inputs import ontology_document_text
@@ -126,3 +127,35 @@ def test_document_fingerprint_controls_semantic_snapshot_membership():
     )
     refreshed = build_production_snapshot(USER, rows)
     assert len(refreshed.embeddings) == 1
+
+
+@pytest.mark.parametrize("ability", [
+    float("nan"), float("inf"), float("-inf"), 1200.0, -3.0, True,
+    None, "0.4",
+])
+def test_unusable_challenge_evidence_is_absent_from_snapshot_and_fingerprint(ability):
+    rows = {name: [] for name in QUERIES}
+    source = {"area_id": ENTITY, "ability_estimate": ability, "model_version": "projector-v1"}
+    rows["challenge_states"] = [source]
+    first = build_production_snapshot(USER, rows)
+    second = build_production_snapshot(USER, rows)
+    empty = build_production_snapshot(USER, {name: [] for name in QUERIES})
+    assert first.challenge_states == ()
+    assert first.fingerprint == second.fingerprint == empty.fingerprint
+    assert rows["challenge_states"] == [source]
+    assert set(source) == {"area_id", "ability_estimate", "model_version"}
+    assert source["area_id"] == ENTITY
+    assert source["model_version"] == "projector-v1"
+    assert source["ability_estimate"] is ability
+
+
+def test_valid_challenge_evidence_is_copied_without_clamping_or_source_mutation():
+    rows = {name: [] for name in QUERIES}
+    source = {"area_id": ENTITY, "ability_estimate": 0.4, "model_version": "projector-v1"}
+    rows["challenge_states"] = [source]
+    snapshot = build_production_snapshot(USER, rows)
+    assert snapshot.challenge_states == ({
+        "area_id": str(ENTITY), "ability_estimate": 0.4, "model_version": "projector-v1",
+    },)
+    assert rows["challenge_states"] == [source]
+    assert source["area_id"] == ENTITY
