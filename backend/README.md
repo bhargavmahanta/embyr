@@ -19,7 +19,7 @@ used.
 | `EMBYR_SUPABASE_STORAGE_BUCKET` | yes | Private Storage bucket name (for example `embyr-media`). |
 | `EMBYR_SUPABASE_STORAGE_SECRET_KEY` | yes | Server-only modern Supabase secret key (`sb_secret_...`); sent on the `apikey` header only. |
 | `EMBYR_STORAGE_DOWNLOAD_URL_TTL_SECONDS` | no | Signed download URL lifetime in seconds; defaults to `300`. |
-| `EMBYR_VOYAGE_API_KEY` | conditional | Required when the recommendation corpus has document embeddings and EXPLORE/SURPRISE generates semantic query embeddings. |
+| `EMBYR_VOYAGE_API_KEY` | conditional | Required when a recommendation snapshot has both query anchors and valid current document embeddings, so semantic query embeddings are needed regardless of request mode. |
 
 ## Authentication trust model
 
