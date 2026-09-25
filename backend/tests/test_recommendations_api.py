@@ -1,16 +1,19 @@
 """Focused recommendation HTTP contract checks without a database service."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 from app.api.deps import get_principal, get_session
 from app.api.idempotency import IdempotencyReservation
 from app.auth.principal import AuthenticatedPrincipal, ExternalIdentity
 from app.config import Settings
+from app.integrations.voyage import VoyageQueryEmbedder
 from app.main import create_app
 from app.recommendation.persistence import DecisionOutcome
 from app.recommendation.ranking import ProductionRanking
@@ -91,6 +94,50 @@ def test_wrong_query_embedding_count_returns_controlled_503(monkeypatch):
             "/api/v1/recommendations/next", json={"mode": "CONTINUE"},
             headers={"Idempotency-Key": "bad-vectors"},
         )
+    assert response.status_code == 503
+    assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("body", [
+    pytest.param(b"[]", id="invalid-top-level"),
+    pytest.param(
+        b'{"model":"voyage-4","data":' + b"9" * 5000 + b"}",
+        id="oversized-json-integer",
+    ),
+])
+def test_malformed_voyage_payload_returns_controlled_503(monkeypatch, body):
+    from types import SimpleNamespace
+    import app.api.recommendations as api
+
+    async def find(*args, **kwargs):
+        return None
+
+    async def assemble(*args, **kwargs):
+        entity_id = str(uuid4())
+        return SimpleNamespace(
+            anchor_entities=({"entity_id": entity_id, "entity_version": 1},),
+            embeddings=({"entity_id": entity_id},),
+            entities=({"entity_id": entity_id, "entity_version": 1,
+                       "title": "Anchor", "summary": "A topic"},),
+        )
+
+    def malformed_response(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://api.voyageai.com/v1/embeddings"
+        return httpx.Response(200, content=body)
+
+    monkeypatch.setattr(api, "find_idempotent_result", find)
+    monkeypatch.setattr(api, "assemble_production_snapshot", assemble)
+    provider_client = httpx.AsyncClient(transport=httpx.MockTransport(malformed_response))
+    app = _app()
+    app.state.query_embedder = VoyageQueryEmbedder("test-key", provider_client)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/recommendations/next", json={"mode": "CONTINUE"},
+                headers={"Idempotency-Key": "malformed-voyage"},
+            )
+    finally:
+        asyncio.run(provider_client.aclose())
     assert response.status_code == 503
     assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
 

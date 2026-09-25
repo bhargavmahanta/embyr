@@ -15,6 +15,45 @@ class EmbeddingProviderError(RuntimeError):
     pass
 
 
+def _validated_vectors(payload: object, expected_count: int) -> list[list[float]]:
+    """Validate a Voyage batch before using provider-controlled fields."""
+    if not isinstance(payload, dict):
+        raise EmbeddingProviderError("Voyage returned an invalid embedding response")
+    if payload.get("model") != MODEL:
+        raise EmbeddingProviderError("Voyage returned an unexpected model identity")
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise EmbeddingProviderError("Voyage returned invalid embedding data")
+    if len(data) != expected_count:
+        raise EmbeddingProviderError("Voyage returned the wrong number of embeddings")
+
+    ordered: list[list[float] | None] = [None] * expected_count
+    for item in data:
+        if not isinstance(item, dict):
+            raise EmbeddingProviderError("Voyage returned an invalid embedding entry")
+        index = item.get("index")
+        if type(index) is not int or not 0 <= index < expected_count or ordered[index] is not None:
+            raise EmbeddingProviderError("Voyage returned invalid embedding indices")
+        embedding = item.get("embedding")
+        if not isinstance(embedding, list) or len(embedding) != DIMENSION:
+            raise EmbeddingProviderError("Voyage returned invalid embedding dimensions or values")
+        vector = []
+        for value in embedding:
+            if type(value) not in (int, float):
+                raise EmbeddingProviderError("Voyage returned invalid embedding dimensions or values")
+            try:
+                component = float(value)
+            except OverflowError as error:
+                raise EmbeddingProviderError("Voyage returned invalid embedding dimensions or values") from error
+            if not math.isfinite(component):
+                raise EmbeddingProviderError("Voyage returned invalid embedding dimensions or values")
+            vector.append(component)
+        ordered[index] = vector
+    if any(vector is None for vector in ordered):
+        raise EmbeddingProviderError("Voyage returned invalid embedding indices")
+    return [vector for vector in ordered if vector is not None]
+
+
 class VoyageQueryEmbedder:
     def __init__(self, api_key: str, client: httpx.AsyncClient | None = None):
         if not api_key:
@@ -52,22 +91,10 @@ class VoyageQueryEmbedder:
             else:
                 response = await send(self._client)
             response.raise_for_status()
-            payload = response.json()
-            if payload.get("model") != MODEL:
-                raise EmbeddingProviderError("Voyage returned an unexpected model identity")
-            data = payload["data"]
-            if len(data) != len(texts):
-                raise EmbeddingProviderError("Voyage returned the wrong number of embeddings")
-            ordered = sorted(data, key=lambda item: item["index"])
-            if [item["index"] for item in ordered] != list(range(len(texts))):
-                raise EmbeddingProviderError("Voyage returned invalid embedding indices")
-            vectors = [item["embedding"] for item in ordered]
-            if any(
-                len(vector) != DIMENSION
-                or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in vector)
-                for vector in vectors
-            ):
-                raise EmbeddingProviderError("Voyage returned invalid embedding dimensions or values")
-            return [[float(value) for value in vector] for vector in vectors]
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        except httpx.HTTPError as error:
             raise EmbeddingProviderError("Voyage query embedding failed") from error
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise EmbeddingProviderError("Voyage query embedding failed") from error
+        return _validated_vectors(payload, len(texts))
