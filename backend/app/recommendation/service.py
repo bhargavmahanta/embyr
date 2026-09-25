@@ -7,22 +7,48 @@ from typing import Protocol
 
 from app.integrations.voyage import EmbeddingProviderError
 from app.recommendation.inputs import semantic_query_text
+from app.recommendation.profile_validation import exact_profile_equal
 from app.recommendation.ranking import ProductionRanking, rank_recommendations
 from app.recommendation.retrieval import retrieve_candidates
 from app.recommendation.snapshot import ProductionInputSnapshot
 
 BAND_PATH = Path(__file__).with_name("profiles") / "distance-band-v1.json"
+FROZEN_DISTANCE_BAND_POLICY = {
+    "policy_version": "distance-band/v1",
+    "meaning": "conceptual/retrieval distance from current learner curiosity",
+    "precedence": ["COMFORT", "ADJACENT", "FRONTIER", "WILD"],
+    "comfort_sources": ["HISTORY_CONTINUATION", "REVISIT", "EXPLICIT_INTEREST"],
+    "adjacent": {"graph_hops": 1, "minimum_cosine_similarity": 0.80},
+    "frontier": {
+        "graph_hops": 2, "minimum_cosine_similarity": 0.65,
+        "maximum_cosine_similarity_exclusive": 0.80,
+    },
+    "wild": {
+        "minimum_cosine_similarity": 0.55,
+        "maximum_cosine_similarity_exclusive": 0.65,
+    },
+    "no_qualifying_signal": "ADJACENT",
+    "uses_readiness": False,
+    "uses_difficulty_fit": False,
+    "uses_final_score_or_rank": False,
+}
 
 
 class QueryEmbedder(Protocol):
     async def embed_queries(self, texts: list[str]) -> list[list[float]]: ...
 
 
+def load_distance_band_policy() -> dict:
+    """Read only the reviewed distance-band/v1 definition."""
+    policy = json.loads(BAND_PATH.read_text(encoding="utf-8"))
+    if not exact_profile_equal(policy, FROZEN_DISTANCE_BAND_POLICY):
+        raise ValueError("unsupported distance-band policy")
+    return policy
+
+
 def distance_band(source_paths: list[dict]) -> str:
     """Apply distance-band/v1 to the selected candidate's transient source paths."""
-    policy = json.loads(BAND_PATH.read_text(encoding="utf-8"))
-    if policy["policy_version"] != "distance-band/v1":
-        raise ValueError("unsupported distance-band policy")
+    policy = load_distance_band_policy()
     bands: set[str] = set()
     for path in source_paths:
         source, provenance = path["source"], path["provenance"]

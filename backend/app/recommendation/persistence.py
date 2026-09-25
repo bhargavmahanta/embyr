@@ -12,8 +12,46 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from research.recommendation.simulator.explain import EXPLANATION_CODES
+from app.recommendation.profile_validation import exact_profile_equal
 
 COPY_PATH = Path(__file__).with_name("profiles") / "recommendation-copy-v1.json"
+FROZEN_COPY_POLICY = {
+    "copy_version": "recommendation-copy/v1",
+    "templates": {
+        "EXPLICIT_INTEREST_MATCH": {
+            "hook": "Something you asked to explore",
+            "reason": "You said you wanted to explore more around this.",
+        },
+        "RELATED_TO_RECENT_EXPLORATION": {
+            "hook": "Keep exploring this thread",
+            "reason": "This connects to something you're currently exploring.",
+        },
+        "PREREQUISITES_SATISFIED": {
+            "hook": "Build on what you know",
+            "reason": "The foundations this builds on are already in place.",
+        },
+        "GOOD_DIFFICULTY_FIT": {
+            "hook": "A challenge at your pace",
+            "reason": "Its estimated difficulty looks close to your current level.",
+        },
+        "SEMANTICALLY_RELATED": {
+            "hook": "Follow a related idea",
+            "reason": "This is meaningfully related to things you're already exploring.",
+        },
+        "REVISIT_OPPORTUNITY": {
+            "hook": "Return to something familiar",
+            "reason": "You've explored this before and it may be worth returning to.",
+        },
+        "DIVERSITY_ADJUSTMENT": {
+            "hook": "Try a different direction",
+            "reason": "This adds some variety to what you're being recommended.",
+        },
+        "EXPLICIT_PREFERENCE_OVERRIDES_INFERRED": {
+            "hook": "Your stated choice comes first",
+            "reason": "What you said you want takes priority over inferred interest.",
+        },
+    },
+}
 RANKING_MODEL_VERSION = "recommendation-profile/v1"
 INTENT_BY_MODE = {
     "CONTINUE": "RELATED_EXPLORATION",
@@ -36,11 +74,17 @@ class StaleRecommendationTarget(ValueError):
     """The selected ontology target is no longer deliverable at write time."""
 
 
+def load_copy_policy() -> dict:
+    """Read only the reviewed recommendation-copy/v1 definition."""
+    copy = json.loads(COPY_PATH.read_text(encoding="utf-8"))
+    if not exact_profile_equal(copy, FROZEN_COPY_POLICY):
+        raise ValueError("unsupported recommendation copy version")
+    return copy
+
+
 def selected_provenance(selected: dict) -> SelectedProvenance:
     """Keep only bounded selected-result evidence and reviewed static copy."""
-    copy = json.loads(COPY_PATH.read_text(encoding="utf-8"))
-    if copy["copy_version"] != "recommendation-copy/v1":
-        raise ValueError("unsupported recommendation copy version")
+    copy = load_copy_policy()
     supplied = selected["explanation_codes"]
     if len(supplied) != len(set(supplied)) or set(supplied) - set(EXPLANATION_CODES):
         raise ValueError("invalid M3 explanation codes")

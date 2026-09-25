@@ -23,14 +23,35 @@ from research.recommendation.simulator.sources import (
 )
 
 from app.recommendation.snapshot import ProductionInputSnapshot
+from app.recommendation.profile_validation import exact_profile_equal
 
 PROFILE_PATH = Path(__file__).with_name("profiles") / "recommendation-retrieval-v1.json"
+FROZEN_RETRIEVAL_POLICY = {
+    "policy_version": "recommendation-retrieval/v1",
+    "embedding": {
+        "provider": "voyage-ai", "model": "voyage-4", "dimension": 1024,
+        "metric": "cosine", "document_input_type": "document",
+        "query_input_type": "query", "query_input_version": "semantic-query-text/v1",
+        "query_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}",
+        "document_input_version": "ontology-entity/v1",
+        "document_text_template": "TITLE: {canonical_title}\nSUMMARY: {canonical_summary}",
+    },
+    "semantic": {
+        "search": "exact", "minimum_cosine_similarity": 0.55,
+        "max_candidates": 40, "query_per_anchor": True,
+    },
+    "graph": {
+        "relationship": "RELATED_TO", "bidirectional": True,
+        "max_hops": 2, "max_candidates": 100,
+        "tie_break": "shortest_hop_then_lexicographic_entity_version_path",
+    },
+}
 Key = tuple[str, int]
 
 
 def load_retrieval_policy() -> dict[str, Any]:
     policy = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-    if policy["policy_version"] != "recommendation-retrieval/v1":
+    if not exact_profile_equal(policy, FROZEN_RETRIEVAL_POLICY):
         raise ValueError("unsupported retrieval policy")
     return policy
 
