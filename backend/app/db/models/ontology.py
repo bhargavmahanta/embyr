@@ -148,7 +148,7 @@ class OntologyEdge(Base):
             "and requirement in ('HARD', 'SOFT')) or "
             "(relationship_type <> 'REQUIRES' and objective_id is null "
             "and requirement is null)",
-            name="ontology_edges_requires_identity",
+            name="requires_identity",
         ),
         sa.ForeignKeyConstraint(
             ["source_entity_id", "source_entity_version"],
@@ -161,8 +161,10 @@ class OntologyEdge(Base):
             name="fk_ontology_edges_target_version",
         ),
         sa.ForeignKeyConstraint(
-            ["objective_id"], ["learning_objectives.id"],
-            name="fk_ontology_edges_objective",
+            ["objective_id", "target_entity_id", "target_entity_version"],
+            ["learning_objectives.id", "learning_objectives.entity_id",
+             "learning_objectives.entity_version"],
+            name="fk_ontology_edges_objective_target_version",
         ),
         sa.CheckConstraint(
             "relationship_type in ('REQUIRES', 'BUILDS_ON', 'PART_OF', "
@@ -223,6 +225,10 @@ class LearningObjective(Base):
         ),
         sa.UniqueConstraint(
             "entity_id", "id", name="uq_learning_objectives_entity_id_id"
+        ),
+        sa.UniqueConstraint(
+            "id", "entity_id", "entity_version",
+            name="uq_learning_objectives_id_entity_version",
         ),
         sa.CheckConstraint(
             "importance >= 0 and importance <= 1",
@@ -315,7 +321,8 @@ class EntityEmbedding(Base):
         sa.CheckConstraint(
             "embedding_provider = 'voyage-ai' and embedding_model = 'voyage-4' "
             "and embedding_dimension = 1024 and embedding_input_type = 'document' "
-            "and embedding_input_version = 'entity-document/v1'",
+            "and embedding_input_version = 'ontology-entity/v1' "
+            "and embedding_input_fingerprint ~ '^sha256:[0-9a-f]{64}$'",
             name="voyage_v1_identity",
         ),
     )
@@ -333,6 +340,7 @@ class EntityEmbedding(Base):
     embedding_dimension: Mapped[int] = mapped_column(sa.Integer)
     embedding_input_version: Mapped[str] = mapped_column(sa.Text)
     embedding_input_type: Mapped[str] = mapped_column(sa.Text)
+    embedding_input_fingerprint: Mapped[str] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now()
     )

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api.deps import get_principal, get_session
 from app.api.idempotency import IdempotencyReservation
@@ -58,6 +59,40 @@ def test_next_requires_idempotency_key():
         response = client.post("/api/v1/recommendations/next", json={"mode": "CREATE"})
     assert response.status_code == 400
     assert response.json()["code"] == "MISSING_IDEMPOTENCY_KEY"
+
+
+def test_wrong_query_embedding_count_returns_controlled_503(monkeypatch):
+    from types import SimpleNamespace
+    import app.api.recommendations as api
+
+    async def find(*args, **kwargs):
+        return None
+
+    async def assemble(*args, **kwargs):
+        entity_id = str(uuid4())
+        return SimpleNamespace(
+            anchor_entities=({"entity_id": entity_id, "entity_version": 1},),
+            embeddings=({"entity_id": entity_id},),
+            entities=({"entity_id": entity_id, "entity_version": 1,
+                       "title": "Anchor", "summary": "A topic"},),
+        )
+
+    class WrongCountEmbedder:
+        async def embed_queries(self, texts):
+            assert texts == ["TITLE: Anchor\nSUMMARY: A topic"]
+            return []
+
+    monkeypatch.setattr(api, "find_idempotent_result", find)
+    monkeypatch.setattr(api, "assemble_production_snapshot", assemble)
+    app = _app()
+    app.state.query_embedder = WrongCountEmbedder()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/recommendations/next", json={"mode": "CONTINUE"},
+            headers={"Idempotency-Key": "bad-vectors"},
+        )
+    assert response.status_code == 503
+    assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
 
 
 def test_empty_result_is_persisted_as_replayable_200(monkeypatch):
@@ -170,7 +205,8 @@ def test_decision_cannot_address_other_users_recommendation(monkeypatch):
     assert response.json()["code"] == "RECOMMENDATION_NOT_FOUND"
 
 
-def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
+@pytest.mark.parametrize("stale", [False, True], ids=["current", "stale"])
+def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch, stale):
     import app.api.recommendations as api
     from types import SimpleNamespace
 
@@ -201,6 +237,8 @@ def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
         return _reservation()
 
     async def persist(*args, **kwargs):
+        if stale:
+            raise api.StaleRecommendationTarget("selected target changed")
         stored.append(kwargs)
         return recommendation_id
 
@@ -222,6 +260,11 @@ def test_next_persists_one_selected_entity_with_reviewed_copy(monkeypatch):
             "/api/v1/recommendations/next", json={"mode": "EXPLORE"},
             headers={"Idempotency-Key": "next-1"},
         )
+    if stale:
+        assert response.status_code == 503
+        assert response.json()["code"] == "RECOMMENDATION_GENERATION_UNAVAILABLE"
+        assert stored == []
+        return
     assert response.status_code == 200
     assert response.json()["id"] == str(recommendation_id)
     assert response.json()["hook"] == "Something you asked to explore"
