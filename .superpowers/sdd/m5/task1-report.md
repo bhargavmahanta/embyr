@@ -26,3 +26,10 @@ Read `.superpowers/sdd/m5/task1-review.md`. Revised `test_assessment_schema.py` 
 
 - First combined run: `PYTHONPATH=backend:. /tmp/embyr-a9-venv/bin/python -m pytest database/tests/test_assessment_schema.py database/tests/test_exploration_delivery_migration.py -q` — **1 failed, 21 passed in 10.37s**, identifying the answered-exploration diagnostic expectation.
 - Final same command — **22 passed in 10.77s**.
+
+## Full database regression compatibility follow-up
+
+The parent full database run (`/tmp/embyr-m5-db-regression.log`) reported **5 failed, 428 passed, 1 skipped in 114.51s**; each failure was a stale current-head expectation. Updated HEAD constants in default ACL and RLS tests, the hosted verifier's current-head check, and the idempotency guard's post-failure revision check. Historical target revisions and migrations are unchanged. The idempotency test still exercises 0017's duplicate-generation downgrade rejection; the failure rolls back the entire transaction including the preceding 0018 downgrade, leaving current head 0018.
+
+- `PYTHONPATH=backend:. /tmp/embyr-a9-venv/bin/python -m pytest database/tests/test_default_acl_hardening.py database/tests/test_issue33_hosted_verifier.py database/tests/test_rls.py database/tests/test_idempotency_key_reuse.py -q` — **112 passed, 1 skipped in 91.68s**. Captured at `/tmp/embyr-m5-head-regressions.log`.
+- `git diff --check` — passed.

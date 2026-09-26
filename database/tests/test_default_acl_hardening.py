@@ -21,7 +21,7 @@ from sqlalchemy import create_engine, text
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = REPOSITORY_ROOT / "database" / "alembic.ini"
 
-HEAD = "0017_idempotency_key_reuse"
+HEAD = "0018_exploration_delivery"
 PREVIOUS = "0012_rls_and_security"
 OWNER = "app_owner"
 CLIENT_ROLES = ("anon", "authenticated", "service_role")
