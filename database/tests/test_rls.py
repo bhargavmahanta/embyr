@@ -1175,16 +1175,26 @@ def test_backend_cannot_write_derived_learner_state(migrated_connection):
 # ---------------------------------------------------------------------------
 
 
-def test_worker_sees_cross_user_rows(migrated_connection):
+@pytest.mark.parametrize("with_unrelated_event", (False, True))
+def test_worker_sees_cross_user_rows(migrated_connection, with_unrelated_event):
+    if with_unrelated_event:
+        unrelated_user = _insert_user(migrated_connection)
+        _insert_event(migrated_connection, unrelated_user)
+
     user_a = _insert_user(migrated_connection)
     user_b = _insert_user(migrated_connection)
-    _insert_event(migrated_connection, user_a)
-    _insert_event(migrated_connection, user_b)
+    event_a = _insert_event(migrated_connection, user_a)
+    event_b = _insert_event(migrated_connection, user_b)
 
     _as_role(migrated_connection, WORKER_ROLE)
-    assert migrated_connection.execute(
-        text("select count(*) from learning_events")
-    ).scalar_one() == 2
+    visible = migrated_connection.execute(
+        text(
+            "select id, user_id from learning_events "
+            "where user_id in (:user_a, :user_b)"
+        ),
+        {"user_a": user_a, "user_b": user_b},
+    ).all()
+    assert set(visible) == {(event_a, user_a), (event_b, user_b)}
     _reset_role(migrated_connection)
 
 
