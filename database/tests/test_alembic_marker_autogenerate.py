@@ -268,4 +268,4 @@ def test_single_expected_alembic_head(database_url: str):
         head.revision
         for head in ScriptDirectory.from_config(make_alembic_config(database_url))
         .get_revisions("heads")
-    ] == ["0017_idempotency_key_reuse"]
+    ] == ["0019_response_lock_security"]

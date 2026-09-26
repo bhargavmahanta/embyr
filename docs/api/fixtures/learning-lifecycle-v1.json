@@ -1,0 +1,84 @@
+{
+  "exploration": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "entity_id": "32431fed-6c8e-5d02-9ba7-3d160fb0d4ad",
+    "entity_version": 1,
+    "recommendation_id": null,
+    "practical_challenge_id": null,
+    "practical_challenge_version_id": null,
+    "learning_intent": "DIRECT_INTEREST",
+    "status": "ACTIVE",
+    "started_at": "2026-09-26T00:00:00Z",
+    "returned_at": null,
+    "paused_at": null,
+    "completed_at": null,
+    "version": 2,
+    "lifecycle_contract_version": "exploration-lifecycle/v1",
+    "entity": {
+      "id": "32431fed-6c8e-5d02-9ba7-3d160fb0d4ad",
+      "entity_version": 1,
+      "title": "Everyday reasoning",
+      "summary": "Separate an observation from an interpretation."
+    },
+    "delivery": {
+      "content_id": "a0b1f3ee-6006-5d58-b07d-f0fd854aaca6",
+      "content_version": 1,
+      "entity_id": "32431fed-6c8e-5d02-9ba7-3d160fb0d4ad",
+      "entity_version": 1,
+      "objective_id": "ca62cfd5-4f14-54b2-bf43-e5cf2f4c6f5b",
+      "delivery_contract_version": "exploration-delivery/v1",
+      "work_prompt": "Read this example: a plant has three yellow leaves. One person says, \u201cThree leaves are yellow.\u201d Another says, \u201cThe plant needs more water.\u201d Identify which statement reports what was seen and which proposes an explanation.",
+      "effort_guidance": "Try this for 5\u201310 minutes. Stop whenever you choose; no prior knowledge or materials are needed.",
+      "search_nudges": [
+        "Optional: search for beginner examples of everyday reasoning.",
+        "Compare any explanation you find with the example here."
+      ],
+      "reflection_prompt": "What did you notice, and what would you like to explore next?"
+    },
+    "reflection": null,
+    "assessment_session": null
+  },
+  "session": {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "exploration_id": "00000000-0000-0000-0000-000000000001",
+    "status": "ACTIVE",
+    "confidence_before": "FUZZY",
+    "strategy_version": "assessment-strategy/v1",
+    "interaction": {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "interaction_type": "RECOGNITION",
+      "prompt": "Which statement is an observation?",
+      "strategy_version": "assessment-strategy/v1",
+      "interaction_contract_version": "assessment-interaction/v1",
+      "evaluator_version": "deterministic-evaluation/v1",
+      "evidence_contract_version": "assessment-evidence/v1",
+      "options": [
+        {
+          "id": "4436b758-d482-5796-8aac-5f543cf44da5",
+          "label": "Three leaves are yellow."
+        },
+        {
+          "id": "55d04d65-ee75-52b7-b436-689a539a1c2a",
+          "label": "The plant needs more water."
+        },
+        {
+          "id": "not-sure",
+          "label": "I am not sure yet."
+        }
+      ]
+    },
+    "delivered_support": [],
+    "response_id": null,
+    "evaluation": null,
+    "evaluation_status": null,
+    "feedback": null,
+    "retry_allowed": false
+  },
+  "retry": {
+    "response_id": "00000000-0000-0000-0000-000000000004",
+    "evaluation_status": "PENDING",
+    "session_status": "WAITING_FOR_EVALUATION",
+    "next_interaction": null,
+    "evaluation_run_id": "00000000-0000-0000-0000-000000000005"
+  }
+}

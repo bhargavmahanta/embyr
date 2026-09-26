@@ -29,7 +29,7 @@ WORKER_ROLE = "app_worker"
 MAINTENANCE_ROLE = "app_maintenance"
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account"
 CLIENT_ROLES = ("anon", "authenticated", "service_role")
-HEAD = "0017_idempotency_key_reuse"
+HEAD = "0019_response_lock_security"
 
 LEARNER_TABLES = (
     "user_devices",
@@ -366,7 +366,10 @@ def test_runtime_roles_do_not_own_unapproved_application_objects(
     ).all()
 
     assert relation_owners == []
-    assert function_owners == [("maintenance_delete_account", MAINTENANCE_ROLE)]
+    assert set(function_owners) == {
+        ("maintenance_delete_account", MAINTENANCE_ROLE),
+        ("validate_assessment_response_objective_version", MAINTENANCE_ROLE),
+    }
 
 
 @pytest.mark.parametrize(

@@ -4,6 +4,13 @@
 
 Frozen implementation contract for the first Android release. The API is online-first, supports idempotent replay from the mobile outbox, and keeps AI evaluation asynchronous where necessary.
 
+The implemented M5 reviewed-content pilot is specified by the additive
+[learning lifecycle v1 contract](learning-lifecycle-v1.md), including strict
+response fixtures, optional single-choice assessment and recovery behavior.
+That contract takes precedence for its learning routes. Broader capabilities
+below remain future contracts where no runtime endpoint exists; M3/M4
+recommendation contracts are unchanged.
+
 ## 1. Global Conventions
 
 - Base path: `/api/v1`

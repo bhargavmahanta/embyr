@@ -38,3 +38,6 @@ Thumbs.db
 research/**/.cache/
 research/**/tmp/
 research/**/outputs/tmp/
+
+# Local implementation and review scratch
+.superpowers/

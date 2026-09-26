@@ -31,6 +31,7 @@ include = ["app*", "research", "research.recommendation", "research.recommendati
 
 [tool.setuptools.package-data]
 "app.recommendation" = ["profiles/*.json"]
+"app.learning" = ["packages/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers"
