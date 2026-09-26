@@ -6,12 +6,13 @@ import base64
 import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_principal, get_session
@@ -349,57 +350,51 @@ async def list_explorations(
 async def get_exploration(exploration_id: UUID, principal: Principal, session: Session):
     from app.learning.content import public_delivery
 
-    row = await owned(session, Exploration, principal.user_id, exploration_id)
-    latest = await session.scalar(
-        select(Reflection)
-        .where(
-            Reflection.user_id == principal.user_id, Reflection.exploration_id == row.id
+    # One statement gives parent, reflection and session the same MVCC snapshot.
+    result = (
+        (
+            await session.execute(
+                text("""
+        select e.*,
+          case when v.entity_id is not null then jsonb_build_object(
+            'id',e.entity_id,'title',v.title,'summary',v.summary,
+            'entity_version',v.version) end as entity_summary,
+          (select jsonb_build_object('id',r.id,'exploration_id',r.exploration_id,
+            'entity_id',r.entity_id,'text',r.text,'version',r.version,
+            'created_at',r.created_at,'updated_at',r.updated_at)
+           from reflections r where r.user_id=e.user_id and r.exploration_id=e.id
+           order by r.created_at desc,r.id desc limit 1) as latest_reflection,
+          (select jsonb_build_object('id',s.id,'status',s.status)
+           from assessment_sessions s where s.user_id=e.user_id and s.exploration_id=e.id
+           order by s.started_at desc,s.id desc limit 1) as assessment_reference
+        from explorations e
+        left join learning_entities le on le.id=e.entity_id
+        left join learning_entity_versions v on v.entity_id=le.id and v.version=le.current_version
+        where e.user_id=:user_id and e.id=:exploration_id
+    """),
+                {"user_id": principal.user_id, "exploration_id": exploration_id},
+            )
         )
-        .order_by(Reflection.created_at.desc(), Reflection.id.desc())
-        .limit(1)
+        .mappings()
+        .first()
     )
-    assessment = await session.scalar(
-        select(AssessmentSession)
-        .where(
-            AssessmentSession.user_id == principal.user_id,
-            AssessmentSession.exploration_id == row.id,
-        )
-        .order_by(AssessmentSession.started_at.desc(), AssessmentSession.id.desc())
-        .limit(1)
-    )
-    current = await session.scalar(
-        select(LearningEntityVersion)
-        .join(
-            LearningEntity,
-            and_(
-                LearningEntity.id == LearningEntityVersion.entity_id,
-                LearningEntity.current_version == LearningEntityVersion.version,
-            ),
-        )
-        .where(LearningEntity.id == row.entity_id)
-    )
+    if result is None:
+        fail("EXPLORATION_NOT_FOUND", 404, "The requested resource was not found.")
+    row = SimpleNamespace(**result)
+    if row.latest_reflection is not None:
+        for key in ("created_at", "updated_at"):
+            row.latest_reflection[key] = datetime.fromisoformat(
+                row.latest_reflection[key]
+            ).isoformat()
     return {
         **exploration_dto(row),
         "lifecycle_contract_version": LIFECYCLE_VERSION,
-        "entity": (
-            {
-                "id": str(row.entity_id),
-                "title": current.title,
-                "summary": current.summary,
-                "entity_version": current.version,
-            }
-            if current
-            else None
-        ),
+        "entity": row.entity_summary,
         "delivery": (
             public_delivery(row.delivery_snapshot) if row.delivery_snapshot else None
         ),
-        "reflection": reflection_dto(latest) if latest else None,
-        "assessment_session": (
-            {"id": str(assessment.id), "status": assessment.status}
-            if assessment
-            else None
-        ),
+        "reflection": row.latest_reflection,
+        "assessment_session": row.assessment_reference,
     }
 
 
