@@ -822,7 +822,8 @@ def test_response_revalidates_entity_version_after_pre_response_objective_change
     )
 
 
-def test_response_insert_serializes_with_objective_version_change(migrated_engine):
+@pytest.mark.parametrize("response_role", [None, "app_backend"])
+def test_response_insert_serializes_with_objective_version_change(migrated_engine, response_role):
     with migrated_engine.begin() as setup_connection:
         graph = _valid_graph(setup_connection)
         other_entity_id, _ = _insert_entity_and_objective(setup_connection)
@@ -831,6 +832,12 @@ def test_response_insert_serializes_with_objective_version_change(migrated_engin
 
     def insert_response() -> None:
         with migrated_engine.begin() as worker_connection:
+            if response_role:
+                worker_connection.execute(text("set local role app_backend"))
+                worker_connection.execute(
+                    text("select set_config('app.user_id', :user_id, true)"),
+                    {"user_id": str(graph["user_id"])},
+                )
             worker_pid.put(
                 worker_connection.execute(text("select pg_backend_pid()"))
                 .scalar_one()

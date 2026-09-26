@@ -1087,4 +1087,4 @@ def test_downgrade_restores_previous_trigger_and_removes_function(
         assert _function_row(connection) is not None
         assert connection.execute(
             text("select version_num from alembic_version")
-        ).scalar_one() == "0018_exploration_delivery"
+        ).scalar_one() == "0019_response_lock_security"

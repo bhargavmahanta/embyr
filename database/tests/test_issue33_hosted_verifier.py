@@ -960,7 +960,7 @@ def test_final_skips_orphan_checker_when_fk_contract_fails(
 def test_current_head_remains_after_frozen_fk_tests(migrated_engine, frozen_fk_engine):
     with migrated_engine.connect() as conn:
         revision = conn.execute(text("select version_num from alembic_version")).scalar_one()
-    assert revision == "0018_exploration_delivery"
+    assert revision == "0019_response_lock_security"
 
 
 # ---------------------------------------------------------------------------

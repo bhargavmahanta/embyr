@@ -44,6 +44,7 @@ def test_delivery_upgrade_guards_downgrade_and_deletion(isolated_migration_datab
         assert connection.execute(text("select count(*) from information_schema.columns where table_name='explorations' and column_name like 'delivery_%'")).scalar_one() == 0
         assert not connection.execute(text("select has_column_privilege('app_worker','assessment_sessions','status','UPDATE')")).scalar_one()
     command.upgrade(config, AFTER)
+    command.upgrade(config, "head")
     command.check(config)
 
 

@@ -111,10 +111,10 @@ def test_0017_guarded_downgrade_preserves_duplicate_history(migrated_engine, dat
             command.downgrade(make_alembic_config(database_url),
                               "0016_recommendation_reason")
         # The failed 0017 downgrade rolls back the entire migration transaction,
-        # including the preceding 0018 downgrade, so the current head survives.
+        # including preceding later revisions, so the current head survives.
         with migrated_engine.connect() as connection:
             assert connection.scalar(text("select version_num from alembic_version")) == (
-                "0018_exploration_delivery"
+                "0019_response_lock_security"
             )
             assert connection.scalar(text("""
                 select count(*) from idempotency_records
