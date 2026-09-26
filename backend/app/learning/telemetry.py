@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 FIELDS = (
+    "request_id",
     "command_id",
     "resource_id",
     "job_id",
@@ -14,6 +15,14 @@ FIELDS = (
     "worker_contract_version",
     "evaluator_version",
     "rubric_version",
+    "content_id",
+    "content_version",
+    "delivery_contract_version",
+    "strategy_version",
+    "exploration_id",
+    "assessment_session_id",
+    "evaluation_run_id",
+    "response_id",
     "event_type",
     "event_contract_version",
     "job_status",

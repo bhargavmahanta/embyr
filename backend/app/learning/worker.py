@@ -391,6 +391,8 @@ async def finalize_claim(
                 "job_id": str(claim.job_id),
                 "attempt": claim.attempt,
                 "job_status": job.status,
+                "evaluation_run_id": str(run.id),
+                "strategy_version": assessment.strategy_version,
                 "failure_category": failure_category,
                 "evaluator_version": run.evaluator_version,
                 "rubric_version": run.rubric_version,

@@ -1,4 +1,5 @@
 import json
+import logging
 import asyncio
 import base64
 from pathlib import Path
@@ -17,6 +18,25 @@ from app.api.learning_dtos import (
     EvaluationRetryDTO,
 )
 from app.learning.content import load_package, public_delivery
+from app.learning.telemetry import LearningJSONFormatter
+
+
+def test_structured_telemetry_keeps_correlation_and_excludes_private_fields():
+    record = logging.LogRecord(
+        "learning", logging.INFO, "", 0, "learning_event_staged", (), None
+    )
+    record.request_id = "request-reference"
+    record.evaluation_run_id = "run-reference"
+    record.content_version = 1
+    record.option_id = "SECRET_ANSWER"
+    record.reflection_text = "SECRET_REFLECTION"
+    record.exc_info = (Exception, Exception("SECRET_DIAGNOSTIC"), None)
+    encoded = LearningJSONFormatter().format(record)
+    parsed = json.loads(encoded)
+    assert parsed["request_id"] == "request-reference"
+    assert parsed["evaluation_run_id"] == "run-reference"
+    assert parsed["content_version"] == 1
+    assert "SECRET" not in encoded
 
 
 @pytest.mark.parametrize(

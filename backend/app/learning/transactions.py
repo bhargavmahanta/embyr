@@ -1,6 +1,7 @@
 """Learning-only database failure boundary; preserve shared principal transaction."""
 
 import logging
+from uuid import uuid4
 
 from fastapi import Depends
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 async def get_learning_session(session: AsyncSession = Depends(get_session)):
+    session.info["learning_request_id"] = str(uuid4())
     try:
         yield session
         # Include commit failures in this boundary. The underlying request
@@ -22,7 +24,10 @@ async def get_learning_session(session: AsyncSession = Depends(get_session)):
     except SQLAlchemyError:
         LOGGER.warning(
             "learning_database_unavailable",
-            extra={"failure_category": "DATABASE_UNAVAILABLE"},
+            extra={
+                "failure_category": "DATABASE_UNAVAILABLE",
+                "request_id": session.info["learning_request_id"],
+            },
         )
         if session.in_transaction():
             try:

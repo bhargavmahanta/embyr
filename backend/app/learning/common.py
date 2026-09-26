@@ -73,7 +73,11 @@ async def reserve(session, request, user_id, body):
         raise
     LOGGER.info(
         "learning_command_reserved",
-        extra={"command_id": str(command.record_id), "replay": command.replay},
+        extra={
+            "command_id": str(command.record_id),
+            "replay": command.replay,
+            "request_id": session.info.get("learning_request_id"),
+        },
     )
     return command
 
@@ -103,6 +107,7 @@ async def finish(
         "learning_command_result_staged",
         extra={
             "command_id": str(command.record_id),
+            "request_id": session.info.get("learning_request_id"),
             "resource_id": str(resource_id),
             "result_type": result_type,
             "http_status": status,
@@ -147,7 +152,31 @@ async def emit(
     await session.flush()
     LOGGER.info(
         "learning_event_staged",
-        extra={"event_type": event_type, "event_contract_version": EVENT_VERSION},
+        extra={
+            "event_type": event_type,
+            "event_contract_version": EVENT_VERSION,
+            "request_id": session.info.get("learning_request_id"),
+            "command_id": str(command.record_id) if command else None,
+            "exploration_id": str(exploration.id) if exploration else None,
+            "assessment_session_id": (
+                str(assessment_session_id) if assessment_session_id else None
+            ),
+            **{
+                key: value
+                for key, value in (metadata or {}).items()
+                if key
+                in (
+                    "content_id",
+                    "content_version",
+                    "delivery_contract_version",
+                    "strategy_version",
+                    "evaluator_version",
+                    "rubric_version",
+                    "evaluation_run_id",
+                    "response_id",
+                )
+            },
+        },
     )
     return row
 
