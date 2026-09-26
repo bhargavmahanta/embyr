@@ -5,6 +5,7 @@ token verifier, the problem-details error model, and the session routes. The
 Supabase verifier and the private Storage client are built from configuration
 only when one is not injected, so tests can supply deterministic doubles.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -17,6 +18,7 @@ from app.api.routes import router
 from app.api.recommendations import router as recommendations_router
 from app.api.uploads import router as uploads_router
 from app.api.learning import router as learning_router
+from app.api.assessments import router as assessments_router
 from app.auth.verifier import SupabaseTokenVerifier
 from app.config import Settings
 from app.db.session import create_async_database_engine
@@ -83,4 +85,5 @@ def create_app(
     app.include_router(uploads_router)
     app.include_router(recommendations_router)
     app.include_router(learning_router)
+    app.include_router(assessments_router)
     return app
