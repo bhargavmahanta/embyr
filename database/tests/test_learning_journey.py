@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -72,6 +74,162 @@ def enter(client, subject):
     )
     assert recovered.status_code == 200, recovered.text
     return user, recovered.json()
+
+
+def test_explicit_interest_addressed_update_is_owned_and_versioned(pilot):
+    subject, other = str(uuid4()), str(uuid4())
+    with client_for(pilot.url) as client:
+        user, _ = enter(client, subject)
+        other_user, _ = enter(client, other)
+        starters = client.get(
+            "/api/v1/catalog/starter-interests", headers=headers(subject)
+        ).json()["items"]
+        entity = starters[1]["id"]
+        path = "/api/v1/memory/interests/" + entity
+        first = client.put(
+            path,
+            json={"base_version": 0, "preference": "MORE"},
+            headers=headers(subject),
+        )
+        assert first.status_code == 200 and first.json()["version"] == 1, first.text
+        updated = client.put(
+            path,
+            json={"base_version": 1, "preference": "PAUSED"},
+            headers=headers(subject),
+        )
+        assert updated.status_code == 200 and updated.json()["version"] == 2
+        stale = client.put(
+            path,
+            json={"base_version": 1, "preference": "LESS"},
+            headers=headers(subject),
+        )
+        assert stale.status_code == 409
+        independent = client.put(
+            path,
+            json={"base_version": 0, "preference": "LESS"},
+            headers=headers(other),
+        )
+        assert independent.status_code == 200 and independent.json()["version"] == 1
+        with pilot.engine.connect() as c:
+            rows = c.execute(
+                text(
+                    "select user_id,preference,version from explicit_interest_preferences "
+                    "where entity_id=:entity"
+                ),
+                {"entity": entity},
+            ).all()
+            assert {str(r.user_id): (r.preference, r.version) for r in rows} == {
+                user: ("PAUSED", 2),
+                other_user: ("LESS", 1),
+            }
+            assert (
+                c.scalar(
+                    text(
+                        "select count(*) from learning_events where user_id=:user "
+                        "and entity_id=:entity and event_type='EXPLICIT_INTEREST_CHANGED'"
+                    ),
+                    {"user": user, "entity": entity},
+                )
+                == 2
+            )
+
+
+@pytest.mark.parametrize("first", ["answer", "completion"])
+def test_answer_and_completion_serialize_without_losing_response(
+    pilot, monkeypatch, first
+):
+    import app.api.learning as learning_api
+    import app.api.assessments as assessment_api
+    from app.db.models.exploration import Exploration
+
+    subject = str(uuid4())
+    winner_locked, loser_ready = threading.Event(), threading.Event()
+    original = learning_api.owned
+
+    def hook(command):
+        async def owned_with_barrier(session, model, user, resource_id, *, lock=False):
+            if model is Exploration and lock and command != first:
+                loser_ready.set()
+            row = await original(session, model, user, resource_id, lock=lock)
+            if model is Exploration and lock and command == first:
+                winner_locked.set()
+                assert await asyncio.to_thread(loser_ready.wait, 5)
+            return row
+
+        return owned_with_barrier
+
+    with client_for(pilot.url) as client, ThreadPoolExecutor(max_workers=2) as pool:
+        user, exploration = enter(client, subject)
+        path = "/api/v1/explorations/" + exploration["id"]
+        client.post(path + "/delivery", json={}, headers=headers(subject, "work"))
+        check = client.post(
+            path + "/assessment-sessions",
+            json={"confidence_before": "FUZZY"},
+            headers=headers(subject, "check"),
+        )
+        assert check.status_code == 200, check.text
+        sid, iid = check.json()["id"], check.json()["interaction"]["id"]
+        monkeypatch.setattr(learning_api, "owned", hook("completion"))
+        monkeypatch.setattr(assessment_api, "owned", hook("answer"))
+
+        def request(command):
+            if command == "completion":
+                return client.post(
+                    path + "/completion",
+                    json={"base_version": 2},
+                    headers=headers(subject, "finish-race"),
+                )
+            return client.post(
+                "/api/v1/assessment-sessions/" + sid + "/responses",
+                json={
+                    "interaction_id": iid,
+                    "response_type": "SINGLE_CHOICE",
+                    "content": {"option_id": "not-sure"},
+                },
+                headers=headers(subject, "answer-race"),
+            )
+
+        winning = pool.submit(request, first)
+        assert winner_locked.wait(5)
+        losing = pool.submit(request, "completion" if first == "answer" else "answer")
+        results = {
+            first: winning.result(10),
+            "completion" if first == "answer" else "answer": losing.result(10),
+        }
+        assert results["completion"].status_code == 200, results["completion"].text
+        assert results["answer"].status_code == (202 if first == "answer" else 409)
+        with pilot.engine.connect() as c:
+            assert (
+                c.scalar(
+                    text("select status from explorations where id=:id"),
+                    {"id": exploration["id"]},
+                )
+                == "COMPLETED"
+            )
+            assert c.scalar(
+                text("select status from assessment_sessions where id=:id"), {"id": sid}
+            ) == ("WAITING_FOR_EVALUATION" if first == "answer" else "ABANDONED")
+            assert c.scalar(
+                text(
+                    "select count(*) from assessment_responses r "
+                    "join assessment_interactions i on i.id=r.interaction_id "
+                    "where i.assessment_session_id=:id"
+                ),
+                {"id": sid},
+            ) == (1 if first == "answer" else 0)
+        if first == "answer":
+
+            async def execute(factory):
+                assert await run_once(factory)
+
+            asyncio.run(with_worker(pilot, execute))
+            feedback = client.get(
+                "/api/v1/assessment-responses/"
+                + results["answer"].json()["response_id"],
+                headers=headers(subject),
+            )
+            assert feedback.json()["evaluation_status"] == "SUCCEEDED"
+            assert feedback.json()["result"] == "UNCERTAIN"
 
 
 @pytest.mark.parametrize("result", ["SUPPORTED", "INSUFFICIENT_EVIDENCE", "UNCERTAIN"])

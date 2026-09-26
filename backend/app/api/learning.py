@@ -324,7 +324,14 @@ async def list_explorations(
         query = query.where(Exploration.status == status)
     if cursor:
         try:
-            timestamp, resource = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            if (
+                not isinstance(decoded, list)
+                or len(decoded) != 2
+                or not all(isinstance(value, str) for value in decoded)
+            ):
+                raise ValueError()
+            timestamp, resource = decoded
             timestamp = datetime.fromisoformat(timestamp)
             resource = UUID(resource)
             if timestamp.tzinfo is None:
