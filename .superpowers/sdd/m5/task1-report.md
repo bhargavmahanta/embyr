@@ -19,3 +19,10 @@ All commands ran from `/home/bhargav/.codex/worktrees/m5-exploration/embyr` with
 - `git diff --check` — passed.
 
 Only Task 1 files are in the implementation commit. Runtime/routes/content work belongs to the parent task. Whole-branch independent audit and full integration closure remain Task 6 responsibilities.
+
+## Review follow-up
+
+Read `.superpowers/sdd/m5/task1-review.md`. Revised `test_assessment_schema.py` to assert immediate exploration identity rejection before any answer, while retaining the objective mutation's response-insert revalidation. Full execution also found that the new trigger fires before the historical answered-exploration guard; updated that diagnostic expectation to the immutable identity error, preserving answered interaction/objective guards. No model/migration changes or historical migration edits.
+
+- First combined run: `PYTHONPATH=backend:. /tmp/embyr-a9-venv/bin/python -m pytest database/tests/test_assessment_schema.py database/tests/test_exploration_delivery_migration.py -q` — **1 failed, 21 passed in 10.37s**, identifying the answered-exploration diagnostic expectation.
+- Final same command — **22 passed in 10.77s**.

@@ -739,12 +739,16 @@ def test_answered_interaction_and_parent_version_snapshot_cannot_be_rewritten(
                 "update explorations set entity_id = :entity_id where id = :id"
             ),
             {"id": graph["exploration_id"], "entity_id": other_entity_id},
-            "ck_explorations_assessment_history",
+            "exploration identity is immutable",
         ),
     ]:
         with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
             migrated_connection.execute(statement, parameters)
-        assert error.value.orig.diag.constraint_name == expected
+        if expected == "exploration identity is immutable":
+            assert error.value.orig.sqlstate == "23514"
+            assert expected in str(error.value.orig)
+        else:
+            assert error.value.orig.diag.constraint_name == expected
 
 
 def test_unanswered_interaction_allows_parent_cascade_delete(migrated_connection):
@@ -762,25 +766,36 @@ def test_unanswered_interaction_allows_parent_cascade_delete(migrated_connection
     ).scalar_one() == 0
 
 
-@pytest.mark.parametrize("mutated_parent", ["objective", "exploration"])
-def test_response_revalidates_entity_version_after_pre_response_parent_change(
-    migrated_connection, mutated_parent
-):
+def test_unanswered_exploration_identity_is_immutable(migrated_connection):
     graph = _valid_graph(migrated_connection)
     other_entity_id, _ = _insert_entity_and_objective(migrated_connection)
-    if mutated_parent == "objective":
-        migrated_connection.execute(
-            text(
-                "update learning_objectives set entity_id = :entity_id "
-                "where id = :id"
-            ),
-            {"entity_id": other_entity_id, "id": graph["objective_id"]},
-        )
-    else:
+
+    with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
         migrated_connection.execute(
             text("update explorations set entity_id = :entity_id where id = :id"),
             {"entity_id": other_entity_id, "id": graph["exploration_id"]},
         )
+
+    assert error.value.orig.sqlstate == "23514"
+    assert "exploration identity is immutable" in str(error.value.orig)
+    assert migrated_connection.execute(
+        text("select entity_id from explorations where id = :id"),
+        {"id": graph["exploration_id"]},
+    ).scalar_one() != other_entity_id
+
+
+def test_response_revalidates_entity_version_after_pre_response_objective_change(
+    migrated_connection,
+):
+    graph = _valid_graph(migrated_connection)
+    other_entity_id, _ = _insert_entity_and_objective(migrated_connection)
+    migrated_connection.execute(
+        text(
+            "update learning_objectives set entity_id = :entity_id "
+            "where id = :id"
+        ),
+        {"entity_id": other_entity_id, "id": graph["objective_id"]},
+    )
 
     with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
         migrated_connection.execute(
