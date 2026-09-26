@@ -59,6 +59,19 @@ def _preserve_0013_default_acl_marker(
     return operation
 
 
+@autogenerate_rewriter.rewrites(ops.CreateTableCommentOp)
+def _omit_0013_default_acl_marker_from_downgrade(
+    _context: object, _revision: object, operation: ops.CreateTableCommentOp
+) -> ops.CreateTableCommentOp | list[ops.MigrateOperation]:
+    if (
+        operation.table_name == "app_users"
+        and operation.schema in (None, "public")
+        and _is_0013_default_acl_marker(operation.comment)
+    ):
+        return []
+    return operation
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=database_url,

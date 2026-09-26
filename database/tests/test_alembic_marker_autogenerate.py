@@ -24,6 +24,13 @@ ENV_PY = REPOSITORY_ROOT / "database" / "migrations" / "env.py"
 MARKER_QUERY = text(
     "select obj_description('public.app_users'::regclass, 'pg_class')"
 )
+VALID_MARKER = json.dumps(
+    {
+        "revision": "0013_default_acl_hardening",
+        "owner": "app_owner",
+        "defaults": {},
+    }
+)
 
 
 @pytest.fixture(scope="module")
@@ -114,21 +121,84 @@ def test_marker_recognizer_accepts_exact_structure(marker_recognizer):
 def test_rewrite_is_scoped_to_public_app_users(
     env_module, table_name: str, schema: str | None, suppressed: bool
 ):
-    marker = json.dumps(
-        {
-            "revision": "0013_default_acl_hardening",
-            "owner": "app_owner",
-            "defaults": {},
-        }
-    )
     operation = ops.DropTableCommentOp(
-        table_name, schema=schema, existing_comment=marker
+        table_name, schema=schema, existing_comment=VALID_MARKER
     )
     result = env_module._preserve_0013_default_acl_marker(None, None, operation)
     if suppressed:
         assert result == []
     else:
         assert result is operation
+
+
+def test_arbitrary_drop_comment_operation_is_preserved(env_module):
+    operation = ops.DropTableCommentOp(
+        "app_users", existing_comment="ordinary application comment"
+    )
+    assert (
+        env_module._preserve_0013_default_acl_marker(None, None, operation)
+        is operation
+    )
+
+
+@pytest.mark.parametrize(
+    ("table_name", "schema", "comment", "suppressed"),
+    [
+        ("app_users", None, VALID_MARKER, True),
+        ("app_users", "public", VALID_MARKER, True),
+        ("app_users", "private", VALID_MARKER, False),
+        ("other_table", "public", VALID_MARKER, False),
+        ("app_users", None, "ordinary application comment", False),
+        ("app_users", None, "not json", False),
+    ],
+)
+def test_create_comment_rewrite_is_marker_specific(
+    env_module,
+    table_name: str,
+    schema: str | None,
+    comment: str,
+    suppressed: bool,
+):
+    operation = ops.CreateTableCommentOp(
+        table_name, comment, schema=schema
+    )
+    result = env_module._omit_0013_default_acl_marker_from_downgrade(
+        None, None, operation
+    )
+    if suppressed:
+        assert result == []
+    else:
+        assert result is operation
+
+
+@pytest.mark.parametrize(
+    ("comment", "suppressed"),
+    [
+        (VALID_MARKER, True),
+        ("ordinary application comment", False),
+    ],
+)
+def test_rewriter_filters_both_sides_of_migration_script(
+    env_module, comment: str, suppressed: bool
+):
+    drop = ops.DropTableCommentOp("app_users", existing_comment=comment)
+    create = drop.reverse()
+    script = ops.MigrationScript(
+        None,
+        ops.UpgradeOps(ops=[drop]),
+        ops.DowngradeOps(ops=[create]),
+    )
+    directives = [script]
+
+    env_module.autogenerate_rewriter(None, None, directives)
+
+    assert directives == [script]
+    if suppressed:
+        assert script.upgrade_ops.ops == []
+        assert script.downgrade_ops.ops == []
+    else:
+        assert script.upgrade_ops.ops == [drop]
+        assert script.downgrade_ops.ops == [create]
 
 
 def _table_comment(engine: Engine) -> str | None:
