@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -83,6 +84,10 @@ class Exploration(Base):
             name="explorations_timestamp_order",
         ),
         sa.CheckConstraint("version > 0", name="explorations_version"),
+        sa.CheckConstraint(
+            "(delivery_snapshot is null) = (delivery_contract_version is null)",
+            name="explorations_delivery_pair",
+        ),
         sa.Index(
             "ix_explorations_user_status_started",
             "user_id",
@@ -101,6 +106,8 @@ class Exploration(Base):
     )
     entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     entity_version: Mapped[int] = mapped_column(sa.Integer)
+    delivery_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    delivery_contract_version: Mapped[str | None] = mapped_column(sa.Text)
     recommendation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     practical_challenge_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     practical_challenge_version_id: Mapped[UUID | None] = mapped_column(
