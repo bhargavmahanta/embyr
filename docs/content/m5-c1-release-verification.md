@@ -115,3 +115,54 @@ Android scaffolding may proceed separately against frozen public DTOs, fixtures
 and lifecycle semantics. Android implementation, learner-state/Curiosity Memory
 projection, world/forest growth, Curiosity Stories, generative AI, practical
 artifacts and offline synchronization are excluded from this backend PR.
+
+## Post-opening review and final release-evidence addendum
+
+Recorded 2026-09-26 for [PR #102](https://github.com/bhargavmahanta/embyr/pull/102).
+The previous frozen RC was `595cf2f3af60a857d45d933581e1c847ed9900b8`.
+The post-opening malformed Exploration pagination cursor finding was classified
+**VALID · NORMAL at that old head**, and resolved by review fix commit
+`d2afb3b97b470f549d2d14cab8a298500e55d7dc`.
+
+That commit explicitly imports/catches `binascii.Error` at the cursor boundary,
+with HTTP regressions for malformed base64 and valid next-page pagination.
+Malformed inputs retain `422 INVALID_CURSOR`; valid ordering and cursor semantics
+are unchanged. On the verification host's Python 3.12, `binascii.Error` already
+inherits from the previously caught `ValueError`, so the new cases also passed
+before the explicit catch. This is not a claim that an HTTP 500 was reproduced.
+
+The following results were recorded during verification of the code-fix commit,
+separately from the historical pre-review runs above:
+
+| Post-review gate | Result at `d2afb3b97...` |
+|---|---|
+| Focused cursor/API tests | **11 passed** |
+| Relevant M5 backend tests | **45 passed** |
+| Full backend suite | **346 passed** |
+| Frozen M3 suite | **856 passed** |
+| Combined backend + frozen M3 | **1,202 passed** (sum of the two separately run suites) |
+| Full PostgreSQL 17 database suite | **464 passed, 0 skipped** |
+| Alembic head | Exactly one: `0019_response_lock_security` |
+| Isolated `alembic check` | **PASS**; no new upgrade operations |
+| `git diff --check` | **PASS** |
+| Approved pilot package SHA-256 | `4bb87f2c3c852a2e30de2dcc7f2a7b72d871a077d0395370de56fbdfc294a3a1` |
+| Content bytes changed | **NO**; byte-identical to the previous RC and approved snapshot |
+
+The historical **1,195 passed** result remains valid pre-review evidence; it is
+not replaced or attributed to the later code-fix commit. The post-review results
+were reported in the cursor-fix verification turn. Its temporary host logs are
+not retained on the current host; this documentation-only refresh does not claim
+to rerun those suites. The existing Starlette TestClient warning remains unchanged.
+
+The final RC is the documentation/evidence-only commit descending directly from
+`d2afb3b97...`; its exact SHA is recorded in the PR description and umbrella #92
+after push, avoiding a self-referential hash in this file. This final commit
+changes only this file, `docs/architecture/m5-verification.md` and
+`docs/architecture/m5-independent-audit.md`. Production, tests, content and
+migrations remain byte-identical to the verified code-fix commit. Final release
+checks require `git diff --check`, a clean working tree and the unchanged digest.
+
+The #100 human approval remains valid without reapproval. #101 stays open for
+the merge/post-merge gate. CodeRabbit remains **SKIPPED — NON-BLOCKING** and is not
+manually retriggered. Resolving the implementation review thread records the
+confirmed fix; it does not merge the PR, deploy the pilot or close the milestone.

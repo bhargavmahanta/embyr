@@ -84,3 +84,42 @@ I inspected existing logs; I did not rerun suites:
 - `/tmp/embyr-m5-final-pg17.log`: **464 passed, zero skipped, 1 warning in 121.51s**. The completed final PostgreSQL 17 database run includes the final explicit-interest and both answer/completion race orderings, security and Alembic checks, and the previously environment-specific skipped check. I read the completed log after the parent reported completion. Intermediate disposable-database startup and test-verification-SQL failures were superseded by this successful run; no runtime race failure remains.
 
 Warnings observed are the existing Starlette TestClient deprecation warning. Final automated verification is complete in the inspected logs, including the final race tests and environment-specific skipped-check closure. The source-review disposition remains zero HIGH/NORMAL blockers and zero open LOW findings. Human content approval and explicit production provisioning/coverage remain separate release gates; no production approval is inferred from automated tests.
+
+## Post-opening cursor review addendum — 2026-09-26
+
+The audit above remains the historical review of its explicitly pinned scope;
+it is not silently extended to later commits. The subsequent frozen RC was
+`595cf2f3af60a857d45d933581e1c847ed9900b8`.
+The [post-opening review thread](https://github.com/bhargavmahanta/embyr/pull/102#discussion_r4111808769)
+reported malformed Exploration pagination cursor handling, classified
+**VALID · NORMAL at that old head**. Review fix
+`d2afb3b97b470f549d2d14cab8a298500e55d7dc` resolves the accepted finding.
+
+Current source inspection confirms `binascii` is imported and `binascii.Error`
+is explicitly caught within the existing `422 INVALID_CURSOR` boundary.
+`backend/tests/test_learning_contracts.py` covers six malformed base64 inputs
+through the HTTP endpoint and valid next-page ordering/boundaries. No unrelated
+cursor, lifecycle, content, migration or frozen M3/M4 behavior was changed.
+The Python 3.12 inheritance caveat is recorded in the
+[M5-C1 addendum](../content/m5-c1-release-verification.md#post-opening-review-and-final-release-evidence-addendum).
+
+Verification reported at the code-fix commit: focused cursor tests **11 passed**;
+relevant M5 backend **45 passed**; full backend **346 passed**; frozen M3
+**856 passed** (combined **1,202**); full PostgreSQL database **464 passed,
+0 skipped**; one Alembic head `0019_response_lock_security`; `alembic check`
+**PASS**. The earlier **1,195** run remains historical evidence at its original
+scope. This addendum records source confirmation and the reported post-fix
+verification; it is not a new independent whole-branch audit or a suite rerun.
+
+Approved package SHA-256 remains
+`4bb87f2c3c852a2e30de2dcc7f2a7b72d871a077d0395370de56fbdfc294a3a1`.
+Content bytes changed: **NO**; approval #100 remains valid. The final RC adds only
+the three verification documents to `d2afb3b97...`; its SHA is recorded in PR #102
+and umbrella #92 after push. Final diff/clean-tree and exact-byte checks bind
+that docs-only RC to the verified implementation.
+
+Outstanding findings after the confirmed fix: **HIGH 0, NORMAL 0, LOW 0**.
+The thread is to be resolved after source/regression confirmation and metadata
+refresh; its GitHub resolution state is verified separately from this immutable
+document. CodeRabbit remains **SKIPPED — NON-BLOCKING**, with no manual trigger.
+#101 remains open until the merge/post-merge gate. No merge is performed here.

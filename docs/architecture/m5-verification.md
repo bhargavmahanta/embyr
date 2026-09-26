@@ -94,3 +94,36 @@ growth, stories, Android implementation, generative AI, practical artifacts,
 offline synchronization and account-operation APIs remain deferred. The stable
 client contracts now permit Android work to begin separately. No deployment,
 remote publication or GitHub mutation was performed.
+
+## Post-review verification addendum — 2026-09-26
+
+The implementation-stage results above are historical, including **1,195 passed**.
+The subsequent frozen RC `595cf2f3af60a857d45d933581e1c847ed9900b8` received a
+**VALID · NORMAL** finding for malformed Exploration pagination cursor handling.
+Review fix `d2afb3b97b470f549d2d14cab8a298500e55d7dc` resolves that finding with an
+explicit `binascii.Error` catch and malformed-base64/valid-pagination regressions.
+It preserves `422 INVALID_CURSOR`, valid pagination and all lifecycle semantics.
+
+| Verification recorded at the code-fix commit | Result |
+|---|---|
+| Focused cursor/API tests | **11 passed** |
+| Relevant M5 backend | **45 passed** |
+| Full backend | **346 passed** |
+| Frozen M3 | **856 passed** |
+| Combined backend + frozen M3 | **1,202 passed**; separately run suites |
+| Full PostgreSQL 17 database | **464 passed, 0 skipped** |
+| Alembic head/check | One head, `0019_response_lock_security`; **PASS** |
+
+The approved package digest remains
+`4bb87f2c3c852a2e30de2dcc7f2a7b72d871a077d0395370de56fbdfc294a3a1`;
+content bytes changed: **NO**. Human approval #100 remains valid.
+The [M5-C1 post-review addendum](../content/m5-c1-release-verification.md#post-opening-review-and-final-release-evidence-addendum)
+records provenance, limitations and the final freeze boundary. The final RC is
+the docs-only descendant of `d2afb3b97...`, identified by its exact SHA in PR #102
+and umbrella #92 after push. No production/test/content/migration files change
+after the code-fix commit, and no full suite rerun is claimed for this docs-only
+refresh. `git diff --check` and a clean working tree are final freeze checks.
+
+The [review addendum](m5-independent-audit.md#post-opening-cursor-review-addendum--2026-09-26)
+separately records the resolved finding. Product scope is unchanged; #101 remains
+open for merge/post-merge verification. This refresh does not merge or deploy.
