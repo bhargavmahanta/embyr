@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal
@@ -336,7 +337,7 @@ async def list_explorations(
             resource = UUID(resource)
             if timestamp.tzinfo is None:
                 raise ValueError()
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        except (binascii.Error, ValueError, TypeError, KeyError, json.JSONDecodeError):
             fail("INVALID_CURSOR", 422, "The pagination cursor is invalid.")
         query = query.where(
             or_(

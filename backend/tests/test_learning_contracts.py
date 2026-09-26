@@ -2,14 +2,20 @@ import json
 import logging
 import asyncio
 import base64
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from app.api.errors import AppError
-from app.api.learning import list_explorations
+from app.api.deps import get_principal
+from app.api.errors import AppError, register_exception_handlers
+from app.api.learning import list_explorations, router
+from app.learning.transactions import get_learning_session
 
 from app.api.learning_dtos import (
     DeliveryDTO,
@@ -61,6 +67,77 @@ def test_malformed_pagination_cursor_returns_validation_error(payload):
             )
         )
     assert error.value.status == 422 and error.value.code == "INVALID_CURSOR"
+
+
+@pytest.fixture
+def exploration_page_client():
+    app = FastAPI()
+    app.include_router(router)
+    register_exception_handlers(app)
+    principal = SimpleNamespace(user_id=uuid4())
+    session = SimpleNamespace(scalars=AsyncMock())
+    app.dependency_overrides[get_principal] = lambda: principal
+    app.dependency_overrides[get_learning_session] = lambda: session
+    with TestClient(app) as client:
+        yield client, session, principal
+
+
+@pytest.mark.parametrize("cursor", ["a", "abcde", "ab", "abc", "-", "_"])
+def test_malformed_base64_cursor_returns_http_invalid_cursor(
+    exploration_page_client, cursor
+):
+    client, session, _ = exploration_page_client
+    response = client.get("/api/v1/explorations", params={"cursor": cursor})
+    assert response.status_code == 422
+    assert response.headers["content-type"] == "application/json"
+    assert response.json()["code"] == "INVALID_CURSOR"
+    session.scalars.assert_not_awaited()
+
+
+def test_valid_pagination_cursor_preserves_next_page_boundary(exploration_page_client):
+    client, session, principal = exploration_page_client
+    timestamp = datetime(2026, 9, 26, 12, tzinfo=timezone.utc)
+    rows = [
+        SimpleNamespace(
+            id=uuid4(),
+            entity_id=uuid4(),
+            entity_version=1,
+            recommendation_id=None,
+            practical_challenge_id=None,
+            practical_challenge_version_id=None,
+            learning_intent="DIRECT_INTEREST",
+            status="ACTIVE",
+            started_at=timestamp,
+            returned_at=None,
+            paused_at=None,
+            completed_at=None,
+            version=1,
+        )
+        for _ in range(2)
+    ]
+    rows.sort(key=lambda row: row.id, reverse=True)
+    session.scalars.side_effect = [Mock(all=lambda: rows), Mock(all=lambda: rows[1:])]
+    first = client.get("/api/v1/explorations", params={"limit": 1})
+    assert first.status_code == 200
+    assert [item["id"] for item in first.json()["items"]] == [str(rows[0].id)]
+    cursor = first.json()["next_cursor"]
+    assert json.loads(base64.urlsafe_b64decode(cursor)) == [
+        timestamp.isoformat(),
+        str(rows[0].id),
+    ]
+    second = client.get("/api/v1/explorations", params={"limit": 1, "cursor": cursor})
+    assert second.status_code == 200
+    assert [item["id"] for item in second.json()["items"]] == [str(rows[1].id)]
+    assert second.json()["next_cursor"] is None
+    query = session.scalars.await_args.args[0].compile()
+    assert query.params == {
+        "user_id_1": principal.user_id,
+        "started_at_1": timestamp,
+        "started_at_2": timestamp,
+        "id_1": rows[0].id,
+        "param_1": 2,
+    }
+    assert "ORDER BY explorations.started_at DESC, explorations.id DESC" in str(query)
 
 
 def test_public_delivery_schema_cannot_contain_private_mapping():
