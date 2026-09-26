@@ -246,7 +246,15 @@ def test_assessment_answer_support_recovery(
                 {"id": retried.json()["evaluation_run_id"]},
             )
         current = client.get(rp, headers=headers(subject)).json()
-        assert current["evaluation_run_id"] == str(old) and current["feedback"] is None
-        assert client.get(sp, headers=headers(subject)).json()["evaluation"][
-            "id"
-        ] == str(old)
+        assert current["evaluation_run_id"] is None and current["feedback"] is None
+        assert current["retry_allowed"] is False
+        assert client.get(sp, headers=headers(subject)).json()["evaluation"] is None
+        assert client.get(sp, headers=headers(subject)).json()["retry_allowed"] is False
+        assert (
+            client.post(
+                rp + "/evaluation-retries",
+                json={},
+                headers=headers(subject, "revoked-retry"),
+            ).status_code
+            == 409
+        )

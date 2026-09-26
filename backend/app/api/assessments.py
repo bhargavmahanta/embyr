@@ -97,7 +97,7 @@ async def session_read(db, user, sid):
       (select jsonb_build_object('id',v.id,'status',v.status,'result',v.result,'confidence',v.confidence,'feedback',v.feedback,'failure_category',case when v.status='FAILED' then j.payload->>'failure_category' end,'retry_allowed',v.status='FAILED' and coalesce((j.payload->>'retry_allowed')::boolean,false))
        from assessment_responses r join evaluation_runs v on v.response_id=r.id and v.user_id=r.user_id
        left join jobs j on j.user_id=v.user_id and j.payload->>'evaluation_run_id'=v.id::text and j.job_type='ASSESSMENT_EVALUATION'
-       where r.user_id=s.user_id and r.assessment_session_id=s.id and v.status in ('PENDING','SUCCEEDED','FAILED') order by v.created_at desc,v.id desc limit 1) as evaluation
+       where r.user_id=s.user_id and r.assessment_session_id=s.id order by v.created_at desc,v.id desc limit 1) as evaluation
       from assessment_sessions s join explorations e on e.id=s.exploration_id and e.user_id=s.user_id
       where s.user_id=:u and s.id=:id
     """),
@@ -114,6 +114,8 @@ async def session_read(db, user, sid):
 
     result["interaction"] = public_interaction(SimpleNamespace(**result["interaction"]))
     ev = result["evaluation"]
+    if ev and ev["status"] not in {"PENDING", "SUCCEEDED", "FAILED"}:
+        ev = result["evaluation"] = None
     result.update(
         evaluation_status=ev["status"] if ev else None,
         feedback=ev["feedback"] if ev else None,
@@ -389,7 +391,7 @@ async def get_response(rid: UUID, principal: Principal, session: Session):
     coalesce(v.status='FAILED' and coalesce((j.payload->>'retry_allowed')::boolean,false),false) as retry_allowed
     from assessment_responses r join assessment_sessions s on s.id=r.assessment_session_id and s.user_id=r.user_id
     join explorations e on e.id=s.exploration_id and e.user_id=s.user_id
-    left join lateral (select * from evaluation_runs x where x.user_id=r.user_id and x.response_id=r.id and x.status in ('PENDING','SUCCEEDED','FAILED') order by x.created_at desc,x.id desc limit 1) v on true
+    left join lateral (select * from evaluation_runs x where x.user_id=r.user_id and x.response_id=r.id order by x.created_at desc,x.id desc limit 1) v on true
     left join jobs j on j.user_id=r.user_id and j.job_type='ASSESSMENT_EVALUATION' and j.payload->>'evaluation_run_id'=v.id::text
     where r.id=:id and r.user_id=:u
     """),
@@ -401,7 +403,19 @@ async def get_response(rid: UUID, principal: Principal, session: Session):
     )
     if row is None:
         fail("ASSESSMENT_RESPONSE_NOT_FOUND", 404)
-    return dict(row)
+    result = dict(row)
+    if result["evaluation_status"] not in {"PENDING", "SUCCEEDED", "FAILED"}:
+        for field in (
+            "evaluation_run_id",
+            "evaluation_status",
+            "result",
+            "confidence",
+            "feedback",
+            "failure_category",
+        ):
+            result[field] = None
+        result["retry_allowed"] = False
+    return result
 
 
 @router.post(
@@ -425,7 +439,6 @@ async def retry(
         .where(
             EvaluationRun.user_id == user,
             EvaluationRun.response_id == rid,
-            EvaluationRun.status.in_(["PENDING", "SUCCEEDED", "FAILED"]),
         )
         .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id.desc())
         .limit(1)
