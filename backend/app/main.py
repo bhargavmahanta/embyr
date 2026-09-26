@@ -16,6 +16,7 @@ from app.api.errors import register_exception_handlers
 from app.api.routes import router
 from app.api.recommendations import router as recommendations_router
 from app.api.uploads import router as uploads_router
+from app.api.learning import router as learning_router
 from app.auth.verifier import SupabaseTokenVerifier
 from app.config import Settings
 from app.db.session import create_async_database_engine
@@ -81,4 +82,5 @@ def create_app(
     app.include_router(router)
     app.include_router(uploads_router)
     app.include_router(recommendations_router)
+    app.include_router(learning_router)
     return app
