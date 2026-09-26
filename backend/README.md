@@ -152,6 +152,9 @@ provides minimal onboarding, explicit interests, immutable reviewed delivery,
 Exploration recovery/completion, private reflections and one optional recognition
 check. It produces facts and weak recognition evidence; it writes no derived
 learner state or world projection. Completion is the learner's decision to finish.
+The [implementation verification record](../docs/architecture/m5-verification.md)
+contains final suite results, the independent audit and the production content
+review gate.
 
 Upgrade to `0019_response_lock_security`, then follow the explicit
 [pilot review/provisioning procedure](../docs/content/pilot-review.md).
