@@ -1,5 +1,10 @@
 # M5 implementation and verification
 
+Follow-up: [M5-C1 verification](../content/m5-c1-release-verification.md) records
+the subsequent explicit 3/3 human approval, exact unchanged package digest,
+disposable provisioning/coverage and fresh release-candidate checks. The results
+below remain the original implementation-stage record.
+
 Verified 2026-09-26 on branch `bhargav/m5-exploration`, based on frozen main
 `de332683cb54d68afc66bbcb5c5c5629016ed1eb`. Runtime implementation reviewed through
 `8fd824056aa0f246c2143f8f3181fecafe629712`; subsequent changes contain only this
