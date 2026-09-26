@@ -1,0 +1,226 @@
+{
+  "package_id": "c105ee83-8ec9-58d6-a8df-b6a2974693d4",
+  "package_version": 1,
+  "review_status": "DRAFT",
+  "technical_provenance": {
+    "author": "AI-assisted draft",
+    "validation": "Repository structural and deterministic contract tests; no human review asserted."
+  },
+  "entities": [
+    {
+      "id": "32431fed-6c8e-5d02-9ba7-3d160fb0d4ad",
+      "canonical_key": "m5-pilot:everyday-reasoning",
+      "entity_type": "DOMAIN",
+      "title": "Everyday reasoning",
+      "summary": "Separate an observation from an interpretation.",
+      "objective_id": "ca62cfd5-4f14-54b2-bf43-e5cf2f4c6f5b",
+      "objective": "Separate an observation from an interpretation."
+    },
+    {
+      "id": "db71444d-73d4-5cd9-bf19-110ad7102318",
+      "canonical_key": "m5-pilot:noticing-patterns",
+      "entity_type": "AREA",
+      "title": "Noticing patterns",
+      "summary": "Recognize a repeating pattern from a short sequence.",
+      "objective_id": "4be66118-4818-59ca-a470-4254f4c103d0",
+      "objective": "Recognize a repeating pattern from a short sequence."
+    },
+    {
+      "id": "fffc25fc-5a72-5606-8250-a49e8c150ee1",
+      "canonical_key": "m5-pilot:comparing-fairly",
+      "entity_type": "TOPIC",
+      "title": "Comparing fairly",
+      "summary": "Recognize when two examples differ in more than one relevant feature.",
+      "objective_id": "6994247f-6148-5011-ad5b-0329af8dce4f",
+      "objective": "Recognize when two examples differ in more than one relevant feature."
+    }
+  ],
+  "definitions": [
+    {
+      "content_id": "a0b1f3ee-6006-5d58-b07d-f0fd854aaca6",
+      "content_version": 1,
+      "entity_id": "32431fed-6c8e-5d02-9ba7-3d160fb0d4ad",
+      "entity_version": 1,
+      "objective_id": "ca62cfd5-4f14-54b2-bf43-e5cf2f4c6f5b",
+      "delivery_contract_version": "exploration-delivery/v1",
+      "work_prompt": "Read this example: a plant has three yellow leaves. One person says, \u201cThree leaves are yellow.\u201d Another says, \u201cThe plant needs more water.\u201d Identify which statement reports what was seen and which proposes an explanation.",
+      "effort_guidance": "Try this for 5\u201310 minutes. Stop whenever you choose; no prior knowledge or materials are needed.",
+      "search_nudges": [
+        "Optional: search for beginner examples of everyday reasoning.",
+        "Compare any explanation you find with the example here."
+      ],
+      "reflection_prompt": "What did you notice, and what would you like to explore next?",
+      "assessment": {
+        "strategy_version": "assessment-strategy/v1",
+        "interaction_contract_version": "assessment-interaction/v1",
+        "evaluator_version": "deterministic-evaluation/v1",
+        "evidence_contract_version": "assessment-evidence/v1",
+        "rubric_id": "36c3ddc6-82dc-5b59-b3f6-1e198f7140a5",
+        "rubric_version": 1,
+        "objective_id": "ca62cfd5-4f14-54b2-bf43-e5cf2f4c6f5b",
+        "prompt": "Which statement is an observation?",
+        "options": [
+          {
+            "id": "correct",
+            "label": "Three leaves are yellow."
+          },
+          {
+            "id": "incorrect",
+            "label": "The plant needs more water."
+          },
+          {
+            "id": "not-sure",
+            "label": "I am not sure yet."
+          }
+        ],
+        "option_results": {
+          "correct": {
+            "result": "SUPPORTED",
+            "confidence": 1.0,
+            "feedback": "An observation reports what was seen; an interpretation proposes its meaning."
+          },
+          "incorrect": {
+            "result": "INSUFFICIENT_EVIDENCE",
+            "confidence": 1.0,
+            "feedback": "This choice does not demonstrate this recognition. An observation reports what was seen; an interpretation proposes its meaning."
+          },
+          "not-sure": {
+            "result": "UNCERTAIN",
+            "confidence": 0.0,
+            "feedback": "It is fine to be unsure. An observation reports what was seen; an interpretation proposes its meaning."
+          }
+        },
+        "support": {
+          "SMALL_NUDGE": "Look again at the particular example, one part at a time.",
+          "STRONG_HINT": "An observation reports what was seen; an interpretation proposes its meaning.",
+          "MISSING_CONCEPT": "Separate an observation from an interpretation.",
+          "EXPLANATION": "An observation reports what was seen; an interpretation proposes its meaning."
+        }
+      }
+    },
+    {
+      "content_id": "33b7c692-57cd-51f8-bad4-e115b7c722cc",
+      "content_version": 1,
+      "entity_id": "db71444d-73d4-5cd9-bf19-110ad7102318",
+      "entity_version": 1,
+      "objective_id": "4be66118-4818-59ca-a470-4254f4c103d0",
+      "delivery_contract_version": "exploration-delivery/v1",
+      "work_prompt": "Look at this sequence: circle, square, circle, square. Say the repeating unit aloud and predict what would come next. You can use the words without drawing anything.",
+      "effort_guidance": "Try this for 5\u201310 minutes. Stop whenever you choose; no prior knowledge or materials are needed.",
+      "search_nudges": [
+        "Optional: search for beginner examples of noticing patterns.",
+        "Compare any explanation you find with the example here."
+      ],
+      "reflection_prompt": "What did you notice, and what would you like to explore next?",
+      "assessment": {
+        "strategy_version": "assessment-strategy/v1",
+        "interaction_contract_version": "assessment-interaction/v1",
+        "evaluator_version": "deterministic-evaluation/v1",
+        "evidence_contract_version": "assessment-evidence/v1",
+        "rubric_id": "d90edd4e-c5b0-5932-aa08-59d0023462c3",
+        "rubric_version": 1,
+        "objective_id": "4be66118-4818-59ca-a470-4254f4c103d0",
+        "prompt": "What comes next in circle, square, circle, square?",
+        "options": [
+          {
+            "id": "correct",
+            "label": "Circle."
+          },
+          {
+            "id": "incorrect",
+            "label": "Triangle."
+          },
+          {
+            "id": "not-sure",
+            "label": "I am not sure yet."
+          }
+        ],
+        "option_results": {
+          "correct": {
+            "result": "SUPPORTED",
+            "confidence": 1.0,
+            "feedback": "The two-item unit circle, square repeats, so circle starts the next unit."
+          },
+          "incorrect": {
+            "result": "INSUFFICIENT_EVIDENCE",
+            "confidence": 1.0,
+            "feedback": "This choice does not demonstrate this recognition. The two-item unit circle, square repeats, so circle starts the next unit."
+          },
+          "not-sure": {
+            "result": "UNCERTAIN",
+            "confidence": 0.0,
+            "feedback": "It is fine to be unsure. The two-item unit circle, square repeats, so circle starts the next unit."
+          }
+        },
+        "support": {
+          "SMALL_NUDGE": "Look again at the particular example, one part at a time.",
+          "STRONG_HINT": "The two-item unit circle, square repeats, so circle starts the next unit.",
+          "MISSING_CONCEPT": "Recognize a repeating pattern from a short sequence.",
+          "EXPLANATION": "The two-item unit circle, square repeats, so circle starts the next unit."
+        }
+      }
+    },
+    {
+      "content_id": "d1ec9c81-7511-50f3-86b9-997884d97b0d",
+      "content_version": 1,
+      "entity_id": "fffc25fc-5a72-5606-8250-a49e8c150ee1",
+      "entity_version": 1,
+      "objective_id": "6994247f-6148-5011-ad5b-0329af8dce4f",
+      "delivery_contract_version": "exploration-delivery/v1",
+      "work_prompt": "Imagine comparing two paper airplanes. One is made from thin paper with wide wings. The other uses thick paper with narrow wings. Think about why this comparison cannot isolate the effect of paper thickness.",
+      "effort_guidance": "Try this for 5\u201310 minutes. Stop whenever you choose; no prior knowledge or materials are needed.",
+      "search_nudges": [
+        "Optional: search for beginner examples of comparing fairly.",
+        "Compare any explanation you find with the example here."
+      ],
+      "reflection_prompt": "What did you notice, and what would you like to explore next?",
+      "assessment": {
+        "strategy_version": "assessment-strategy/v1",
+        "interaction_contract_version": "assessment-interaction/v1",
+        "evaluator_version": "deterministic-evaluation/v1",
+        "evidence_contract_version": "assessment-evidence/v1",
+        "rubric_id": "16916b51-66a4-5c37-93b1-f43a40a7ef68",
+        "rubric_version": 1,
+        "objective_id": "6994247f-6148-5011-ad5b-0329af8dce4f",
+        "prompt": "Which comparison best isolates paper thickness?",
+        "options": [
+          {
+            "id": "correct",
+            "label": "Use the same wing shape with two paper thicknesses."
+          },
+          {
+            "id": "incorrect",
+            "label": "Change both paper thickness and wing shape."
+          },
+          {
+            "id": "not-sure",
+            "label": "I am not sure yet."
+          }
+        ],
+        "option_results": {
+          "correct": {
+            "result": "SUPPORTED",
+            "confidence": 1.0,
+            "feedback": "Changing only paper thickness holds wing shape constant, helping isolate thickness."
+          },
+          "incorrect": {
+            "result": "INSUFFICIENT_EVIDENCE",
+            "confidence": 1.0,
+            "feedback": "This choice does not demonstrate this recognition. Changing only paper thickness holds wing shape constant, helping isolate thickness."
+          },
+          "not-sure": {
+            "result": "UNCERTAIN",
+            "confidence": 0.0,
+            "feedback": "It is fine to be unsure. Changing only paper thickness holds wing shape constant, helping isolate thickness."
+          }
+        },
+        "support": {
+          "SMALL_NUDGE": "Look again at the particular example, one part at a time.",
+          "STRONG_HINT": "Changing only paper thickness holds wing shape constant, helping isolate thickness.",
+          "MISSING_CONCEPT": "Recognize when two examples differ in more than one relevant feature.",
+          "EXPLANATION": "Changing only paper thickness holds wing shape constant, helping isolate thickness."
+        }
+      }
+    }
+  ]
+}
