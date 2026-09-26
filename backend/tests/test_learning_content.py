@@ -39,7 +39,7 @@ def test_exact_version_immutable_copy_and_public_redaction(monkeypatch, tmp_path
     lambda d: d['assessment']['support'].pop('EXPLANATION'),
     lambda d: d['assessment'].update(objective_id=str(UUID(int=9))),
     lambda d: d.update(delivery_contract_version='future'),
-    lambda d: d['assessment']['option_results']['correct'].update(result='UNCERTAIN'),
+    lambda d: next(v for v in d['assessment']['option_results'].values() if v['result'] == 'SUPPORTED').update(result='UNCERTAIN'),
 ])
 def test_invalid_definition_rejected(mutation):
     definition = copy.deepcopy(content.load_package()['definitions'][0])
@@ -88,3 +88,26 @@ def test_public_delivery_drops_unknown_private_fields():
     definition['assessment']['secret'] = 'another private marker'
     public = content.public_delivery(definition)
     assert 'private marker' not in json.dumps(public)
+
+
+def test_public_recognition_option_ids_are_opaque_and_not_answer_keys():
+    for definition in content.load_package()['definitions']:
+        assessment = definition['assessment']
+        public_options = [{key: option[key] for key in ('id', 'label')}
+                          for option in assessment['options']]
+        for option in public_options:
+            if option['id'] == 'not-sure':
+                continue
+            assert str(UUID(option['id'])) == option['id']
+            assert option['id'] in assessment['option_results']
+        assert {option['id'] for option in public_options}.isdisjoint({'correct', 'incorrect'})
+
+
+@pytest.mark.parametrize('approval', [None, [], 'approved', 1, True])
+def test_malformed_top_level_approval_is_rejected_and_runtime_unavailable(monkeypatch, tmp_path, approval):
+    with pytest.raises(ValueError):
+        content.validate_attestation(approval)
+    path = tmp_path / 'malformed.json'
+    path.write_text(json.dumps(approval))
+    monkeypatch.setenv('EMBYR_CONTENT_REVIEW_ATTESTATION', str(path))
+    assert content.get_definition(content.starter_entity_ids()[0], 1) is None

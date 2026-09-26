@@ -61,11 +61,11 @@
         "prompt": "Which statement is an observation?",
         "options": [
           {
-            "id": "correct",
+            "id": "4436b758-d482-5796-8aac-5f543cf44da5",
             "label": "Three leaves are yellow."
           },
           {
-            "id": "incorrect",
+            "id": "55d04d65-ee75-52b7-b436-689a539a1c2a",
             "label": "The plant needs more water."
           },
           {
@@ -74,12 +74,12 @@
           }
         ],
         "option_results": {
-          "correct": {
+          "4436b758-d482-5796-8aac-5f543cf44da5": {
             "result": "SUPPORTED",
             "confidence": 1.0,
             "feedback": "An observation reports what was seen; an interpretation proposes its meaning."
           },
-          "incorrect": {
+          "55d04d65-ee75-52b7-b436-689a539a1c2a": {
             "result": "INSUFFICIENT_EVIDENCE",
             "confidence": 1.0,
             "feedback": "This choice does not demonstrate this recognition. An observation reports what was seen; an interpretation proposes its meaning."
@@ -123,11 +123,11 @@
         "prompt": "What comes next in circle, square, circle, square?",
         "options": [
           {
-            "id": "correct",
+            "id": "0da8d19c-9aeb-5412-942c-8eeb5947b81d",
             "label": "Circle."
           },
           {
-            "id": "incorrect",
+            "id": "34097e92-7ffd-5c3e-b91e-1e81ab83d29d",
             "label": "Triangle."
           },
           {
@@ -136,12 +136,12 @@
           }
         ],
         "option_results": {
-          "correct": {
+          "0da8d19c-9aeb-5412-942c-8eeb5947b81d": {
             "result": "SUPPORTED",
             "confidence": 1.0,
             "feedback": "The two-item unit circle, square repeats, so circle starts the next unit."
           },
-          "incorrect": {
+          "34097e92-7ffd-5c3e-b91e-1e81ab83d29d": {
             "result": "INSUFFICIENT_EVIDENCE",
             "confidence": 1.0,
             "feedback": "This choice does not demonstrate this recognition. The two-item unit circle, square repeats, so circle starts the next unit."
@@ -185,11 +185,11 @@
         "prompt": "Which comparison best isolates paper thickness?",
         "options": [
           {
-            "id": "correct",
+            "id": "5691e5dd-1843-55bb-ba32-f21b1942af2c",
             "label": "Use the same wing shape with two paper thicknesses."
           },
           {
-            "id": "incorrect",
+            "id": "bf2bce52-29f2-5d85-afe7-44f5e68beade",
             "label": "Change both paper thickness and wing shape."
           },
           {
@@ -198,12 +198,12 @@
           }
         ],
         "option_results": {
-          "correct": {
+          "5691e5dd-1843-55bb-ba32-f21b1942af2c": {
             "result": "SUPPORTED",
             "confidence": 1.0,
             "feedback": "Changing only paper thickness holds wing shape constant, helping isolate thickness."
           },
-          "incorrect": {
+          "bf2bce52-29f2-5d85-afe7-44f5e68beade": {
             "result": "INSUFFICIENT_EVIDENCE",
             "confidence": 1.0,
             "feedback": "This choice does not demonstrate this recognition. Changing only paper thickness holds wing shape constant, helping isolate thickness."

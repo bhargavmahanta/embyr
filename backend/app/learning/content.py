@@ -47,8 +47,11 @@ def load_package() -> dict:
 
 
 def validate_attestation(attestation: dict, *, allow_test: bool = False) -> None:
+    if not isinstance(attestation, dict):
+        raise ValueError('Review attestation must be an object')
     if (attestation.get('package_sha256') != package_digest()
             or attestation.get('decision') != 'APPROVED'
+            or not isinstance(attestation.get('review_kind'), str)
             or attestation.get('review_kind') not in ({'HUMAN', 'TEST'} if allow_test else {'HUMAN'})
             or not isinstance(attestation.get('reviewer'), str)
             or not attestation['reviewer'].strip()):
