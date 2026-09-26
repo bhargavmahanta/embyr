@@ -33,6 +33,7 @@ from app.db.models.assessment import (
 )
 from app.db.session import create_async_database_engine
 from app.learning.common import emit
+from app.learning.content import validate_definition
 from app.learning.evaluation import evaluate, EvaluationResult, PermanentEvaluationError
 
 LOGGER = logging.getLogger(__name__)
@@ -182,6 +183,21 @@ async def load_context(factory, claim) -> Context:
             != exploration.delivery_snapshot.get("assessment")
         ):
             raise PermanentEvaluationError("Pinned content identity mismatch")
+        try:
+            definition = exploration.delivery_snapshot
+            validate_definition(definition)
+            prompt = interaction.prompt_definition
+            if (
+                definition["entity_id"] != str(exploration.entity_id)
+                or definition["entity_version"] != exploration.entity_version
+                or definition["objective_id"] != str(interaction.objective_id)
+                or prompt["objective_id"] != str(interaction.objective_id)
+                or str(prompt["rubric_version"]) != interaction.rubric_version
+                or prompt["strategy_version"] != assessment.strategy_version
+            ):
+                raise ValueError("Pinned objective or rubric mismatch")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise PermanentEvaluationError("Invalid historical delivery pins") from exc
         return Context(
             response.id,
             assessment.id,

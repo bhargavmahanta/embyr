@@ -41,7 +41,9 @@ def fail(
 async def owned(session, model, user_id, resource_id, *, lock=False):
     query = select(model).where(model.user_id == user_id, model.id == resource_id)
     if lock:
-        query = query.with_for_update()
+        # Exploration keys are immutable. NO KEY UPDATE still serializes
+        # learner commands, while allowing worker event FK KEY SHARE locks.
+        query = query.with_for_update(key_share=model.__tablename__ == "explorations")
     row = await session.scalar(query)
     if row is None:
         fail(

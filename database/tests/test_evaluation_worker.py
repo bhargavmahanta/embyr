@@ -14,7 +14,7 @@ from app.learning.worker import claim_job, process_claim, run_once
 from app.learning.evaluation import TransientEvaluationError
 
 
-def queued(db):
+def queued(db, *, mismatch=None):
     definition = load_package()["definitions"][0]
     prompt = definition["assessment"]
     option = next(
@@ -65,14 +65,24 @@ def queued(db):
             ),
             ids,
         )
+        objective_id = definition["objective_id"]
+        if mismatch == "objective":
+            objective_id = str(uuid4())
+            c.execute(
+                text(
+                    "insert into learning_objectives(id,entity_id,entity_version,objective_type,description,importance) values (:id,:entity,1,'RECOGNITION','Another objective',1)"
+                ),
+                {"id": objective_id, "entity": definition["entity_id"]},
+            )
         c.execute(
             text(
-                "insert into assessment_interactions(id,user_id,assessment_session_id,objective_id,interaction_type,prompt_definition,rubric_version,sequence) values (:interaction,:user,:assessment,:objective,'RECOGNITION',cast(:prompt as jsonb),'1',1)"
+                "insert into assessment_interactions(id,user_id,assessment_session_id,objective_id,interaction_type,prompt_definition,rubric_version,sequence) values (:interaction,:user,:assessment,:objective,'RECOGNITION',cast(:prompt as jsonb),:rubric,1)"
             ),
             {
                 **ids,
-                "objective": definition["objective_id"],
+                "objective": objective_id,
                 "prompt": json.dumps(prompt),
+                "rubric": "2" if mismatch == "rubric" else "1",
             },
         )
         c.execute(
@@ -89,9 +99,9 @@ def queued(db):
         )
         c.execute(
             text(
-                "insert into evaluation_runs(id,user_id,response_id,evaluator_type,evaluator_version,rubric_version,status) values (:run,:user,:response,'DETERMINISTIC','deterministic-evaluation/v1','1','PENDING')"
+                "insert into evaluation_runs(id,user_id,response_id,evaluator_type,evaluator_version,rubric_version,status) values (:run,:user,:response,'DETERMINISTIC','deterministic-evaluation/v1',:rubric,'PENDING')"
             ),
-            ids,
+            {**ids, "rubric": "2" if mismatch == "rubric" else "1"},
         )
         payload = {
             "contract_version": "worker-execution/v1",
@@ -366,4 +376,96 @@ def test_permanent_error_has_no_retry_or_evidence_and_logs_no_exception_content(
         assert (
             payload["failure_category"] == "INVALID_CONTENT"
             and payload["retry_allowed"] is False
+        )
+
+
+@pytest.mark.parametrize("mismatch", ["objective", "rubric"])
+def test_wrong_pin_never_produces_evidence(isolated_migrated_database, mismatch):
+    db = isolated_migrated_database
+    ids = queued(db, mismatch=mismatch)
+
+    async def exercise(factory):
+        assert await run_once(factory)
+
+    asyncio.run(with_worker(db, exercise))
+    with db.engine.connect() as c:
+        assert (
+            c.scalar(text("select status from evaluation_runs where id=:run"), ids)
+            == "FAILED"
+        )
+        assert (
+            c.scalar(
+                text("select count(*) from learning_evidence where user_id=:user"), ids
+            )
+            == 0
+        )
+        assert (
+            c.scalar(
+                text("select payload->>'failure_category' from jobs where id=:job"), ids
+            )
+            == "INVALID_CONTENT"
+        )
+
+
+def test_completion_and_worker_events_do_not_deadlock(
+    isolated_migrated_database, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import app.api.learning as api
+    import app.learning.worker as worker
+    from app.db.models.assessment import AssessmentSession
+    from app.db.models.exploration import Exploration
+    from test_learning_entry_api import client_for, headers
+
+    db = isolated_migrated_database
+    ids = queued(db)
+    parent_locked = threading.Event()
+    session_locked = threading.Event()
+    original_owned = api.owned
+    original_get = worker._get
+
+    async def parent_barrier(session, model, user, resource_id, *, lock=False):
+        row = await original_owned(session, model, user, resource_id, lock=lock)
+        if model is Exploration and lock:
+            parent_locked.set()
+            assert await asyncio.to_thread(session_locked.wait, 5)
+        return row
+
+    async def session_barrier(session, model, user, resource_id, lock=False):
+        row = await original_get(session, model, user, resource_id, lock)
+        if model is AssessmentSession and lock:
+            session_locked.set()
+        return row
+
+    monkeypatch.setattr(api, "owned", parent_barrier)
+    monkeypatch.setattr(worker, "_get", session_barrier)
+    with db.engine.connect() as c:
+        subject = c.scalar(
+            text("select auth_subject from app_users where id=:user"), ids
+        )
+
+    async def exercise(factory):
+        claim = await claim_job(factory)
+        with client_for(db.url) as client, ThreadPoolExecutor(max_workers=1) as pool:
+            completion = pool.submit(
+                client.post,
+                f'/api/v1/explorations/{ids["exploration"]}/completion',
+                json={"base_version": 1},
+                headers=headers(subject, "concurrent-completion"),
+            )
+            assert await asyncio.to_thread(parent_locked.wait, 5)
+            assert await process_claim(factory, claim) is True
+            result = await asyncio.to_thread(completion.result, 5)
+            assert result.status_code == 200, result.text
+
+    asyncio.run(with_worker(db, exercise))
+    with db.engine.connect() as c:
+        assert (
+            c.scalar(text("select status from evaluation_runs where id=:run"), ids)
+            == "SUCCEEDED"
+        )
+        assert (
+            c.scalar(text("select status from explorations where id=:exploration"), ids)
+            == "COMPLETED"
         )
