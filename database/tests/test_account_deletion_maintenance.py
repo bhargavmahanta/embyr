@@ -1035,7 +1035,10 @@ def test_late_failure_rolls_back_the_whole_deletion(migrated_connection):
 # ---------------------------------------------------------------------------
 
 
-def test_downgrade_restores_previous_trigger_and_removes_function(database_url):
+def test_downgrade_restores_previous_trigger_and_removes_function(
+    isolated_migration_database,
+):
+    database_url = isolated_migration_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     try:

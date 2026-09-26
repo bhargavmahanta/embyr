@@ -168,8 +168,8 @@ def test_repository_has_one_migration_head():
     assert _head_revision() == HEAD
 
 
-def test_0013_preserves_unrelated_default_acl_entries(database_url, migrated_engine):
-    del migrated_engine
+def test_0013_preserves_unrelated_default_acl_entries(isolated_migrated_database):
+    database_url = isolated_migrated_database.url
     config = _config(database_url)
     engine = create_engine(database_url)
     client_roles = _ensure_client_roles(engine)
@@ -206,8 +206,10 @@ def test_0013_preserves_unrelated_default_acl_entries(database_url, migrated_eng
         engine.dispose()
 
 
-def test_0013_downgrade_restores_prior_default_acl_state(database_url, migrated_engine):
-    del migrated_engine
+def test_0013_downgrade_restores_prior_default_acl_state(
+    isolated_migrated_database,
+):
+    database_url = isolated_migrated_database.url
     config = _config(database_url)
     engine = create_engine(database_url)
     client_roles = _ensure_client_roles(engine)
@@ -252,8 +254,8 @@ def test_0013_downgrade_restores_prior_default_acl_state(database_url, migrated_
         engine.dispose()
 
 
-def test_0013_blocks_future_objects_for_client_roles(database_url, migrated_engine):
-    del migrated_engine
+def test_0013_blocks_future_objects_for_client_roles(isolated_migrated_database):
+    database_url = isolated_migrated_database.url
     config = _config(database_url)
     engine = create_engine(database_url)
     client_roles = _ensure_client_roles(engine)
@@ -322,10 +324,10 @@ def test_0013_blocks_future_objects_for_client_roles(database_url, migrated_engi
 
 
 def test_0013_preserves_non_public_default_acl_entries(
-    database_url, migrated_engine
+    isolated_migrated_database,
 ):
     """0013 only changes public/global defaults; other schemas are untouched."""
-    del migrated_engine
+    database_url = isolated_migrated_database.url
     config = _config(database_url)
     engine = create_engine(database_url)
     client_roles = _ensure_client_roles(engine)
@@ -368,9 +370,9 @@ def test_0013_preserves_non_public_default_acl_entries(
         engine.dispose()
 
 
-def test_0013_rejects_global_client_role_defaults(database_url, migrated_engine):
+def test_0013_rejects_global_client_role_defaults(isolated_migrated_database):
     """A global client-role grant cannot be undone by a schema-scoped REVOKE."""
-    del migrated_engine
+    database_url = isolated_migrated_database.url
     config = _config(database_url)
     engine = create_engine(database_url)
     client_roles = _ensure_client_roles(engine)

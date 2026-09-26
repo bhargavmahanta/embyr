@@ -399,13 +399,12 @@ def test_runtime_roles_do_not_own_unapproved_application_objects(
     ),
 )
 def test_upgrade_rejects_unsafe_runtime_role_attributes(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
     unsafe_sql,
     restore_sql,
     message,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     command.downgrade(config, "0011a_account_deletion")
@@ -429,11 +428,10 @@ def test_upgrade_rejects_unsafe_runtime_role_attributes(
 
 @pytest.mark.parametrize("granted_role", (WORKER_ROLE, None))
 def test_upgrade_rejects_any_outbound_runtime_role_membership(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
     granted_role,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     generic_role = f"rls_generic_group_{uuid4().hex}"
@@ -475,10 +473,9 @@ def test_upgrade_rejects_any_outbound_runtime_role_membership(
 
 
 def test_upgrade_allows_app_owner_membership_in_maintenance_role(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     admin_role = "app_owner"
@@ -553,11 +550,10 @@ def test_upgrade_allows_app_owner_membership_in_maintenance_role(
 
 
 def test_client_access_is_revoked_before_noinherit_function_owner_transfer(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
     monkeypatch,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     migration_role = f"rls_migration_owner_{uuid4().hex}"
@@ -732,10 +728,9 @@ def test_client_access_is_revoked_before_noinherit_function_owner_transfer(
 
 
 def test_upgrade_revokes_preexisting_supabase_client_access(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     created_roles: list[str] = []
@@ -821,10 +816,9 @@ def test_upgrade_revokes_preexisting_supabase_client_access(
 
 
 def test_upgrade_revokes_preexisting_untrusted_function_executor(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     untrusted_role = f"rls_untrusted_executor_{uuid4().hex}"
@@ -880,12 +874,11 @@ def test_upgrade_revokes_preexisting_untrusted_function_executor(
     ),
 )
 def test_upgrade_aborts_when_required_runtime_role_is_missing(
-    database_url,
-    migrated_engine,
+    isolated_migrated_server,
     missing_role,
     attributes,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_server.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     command.downgrade(config, "0011a_account_deletion")
@@ -1399,10 +1392,9 @@ def test_default_privileges_strip_public_execute_on_new_functions(
 
 
 def test_downgrade_preserves_preexisting_hardened_function_defaults(
-    database_url,
-    migrated_engine,
+    isolated_migrated_database,
 ):
-    del migrated_engine  # ensure the session-scoped migrated database exists
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     engine = create_engine(database_url)
     command.downgrade(config, "0011a_account_deletion")
@@ -1468,7 +1460,10 @@ def test_downgrade_preserves_preexisting_hardened_function_defaults(
 # ---------------------------------------------------------------------------
 
 
-def test_downgrade_to_0011a_removes_security_and_upgrade_restores(database_url):
+def test_downgrade_to_0011a_removes_security_and_upgrade_restores(
+    isolated_migrated_database,
+):
+    database_url = isolated_migrated_database.url
     config = _alembic_config(database_url)
     command.downgrade(config, "0011a_account_deletion")
 

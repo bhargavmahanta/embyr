@@ -3,18 +3,19 @@ from __future__ import annotations
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-from conftest import make_alembic_config, provision_runtime_roles
+from conftest import make_alembic_config
 
 EXPAND = "0015_retrieval_expand"
 ENFORCE = "0015_recommendation_retrieval"
 
 
-def test_legacy_requires_survives_expand_and_curated_enforcement(database_url):
-    engine = create_engine(database_url)
-    config = make_alembic_config(database_url)
-    provision_runtime_roles(engine)
+def test_legacy_requires_survives_expand_and_curated_enforcement(
+    isolated_migration_database,
+):
+    engine = isolated_migration_database.engine
+    config = make_alembic_config(isolated_migration_database.url)
     try:
         command.upgrade(config, "0014_objective_categorical_state")
         with engine.begin() as connection:

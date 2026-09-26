@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from testcontainers.community.postgres import PostgresContainer
 
@@ -114,6 +117,61 @@ def provision_runtime_roles(engine: Engine) -> None:
         connection.execute(
             text("grant app_maintenance to app_owner with set true")
         )
+
+
+class MigrationDatabase(NamedTuple):
+    url: str
+    engine: Engine
+
+
+@pytest.fixture
+def isolated_migration_database(database_url: str) -> Iterator[MigrationDatabase]:
+    """Give revision-changing tests their own database on the test server."""
+    _validate_disposable_url(database_url)
+    name = f"embyr_migration_test_{uuid4().hex}"
+    isolated_url = make_url(database_url).set(database=name).render_as_string(
+        hide_password=False
+    )
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    engine = None
+    created = False
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'create database "{name}"'))
+        created = True
+        engine = create_engine(isolated_url)
+        provision_runtime_roles(engine)
+        yield MigrationDatabase(isolated_url, engine)
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if created:
+            with admin.connect() as connection:
+                connection.execute(text(f'drop database "{name}" with (force)'))
+        admin.dispose()
+
+
+@pytest.fixture
+def isolated_migrated_database(
+    isolated_migration_database: MigrationDatabase,
+) -> MigrationDatabase:
+    """An isolated database already migrated to the current Alembic head."""
+    command.upgrade(make_alembic_config(isolated_migration_database.url), "head")
+    return isolated_migration_database
+
+
+@pytest.fixture
+def isolated_migrated_server() -> Iterator[MigrationDatabase]:
+    """Use a separate cluster when a test drops a cluster-wide runtime role."""
+    with PostgresContainer(PGVECTOR_IMAGE, driver="psycopg") as postgres:
+        url = _psycopg_url(postgres.get_connection_url())
+        engine = create_engine(url)
+        try:
+            provision_runtime_roles(engine)
+            command.upgrade(make_alembic_config(url), "head")
+            yield MigrationDatabase(url, engine)
+        finally:
+            engine.dispose()
 
 
 @pytest.fixture(scope="session")
