@@ -144,3 +144,65 @@ refuses uncurated REQUIRES edges or uncleared old embeddings.
 ## Recommendation integration
 
 The synchronous v1 path, data versions, trace retention, and verification gate are described in [M4 Recommendation Integration](../docs/architecture/m4-recommendation-integration.md). The checked-in `recommendation-profile/v1` sets the initial M3 feature weights; it is not a calibrated quality claim.
+
+## M5 learning runtime
+
+The additive [learning lifecycle contract](../docs/api/learning-lifecycle-v1.md)
+provides minimal onboarding, explicit interests, immutable reviewed delivery,
+Exploration recovery/completion, private reflections and one optional recognition
+check. It produces facts and weak recognition evidence; it writes no derived
+learner state or world projection. Completion is the learner's decision to finish.
+
+Upgrade to `0019_response_lock_security`, then follow the explicit
+[pilot review/provisioning procedure](../docs/content/pilot-review.md).
+The checked-in assets are drafts. Production delivery requires a named review
+approval bound to their exact digest. Provisioning and global content coverage
+checks are operator actions, never automatic startup or migration effects.
+Accepted Explorations remain recoverable if content is missing.
+
+Run the evaluation worker separately with a TLS PostgreSQL URL using the
+provisioned `app_worker` role:
+
+```bash
+# Supply EMBYR_WORKER_DATABASE_URL through the process secret mechanism.
+PYTHONPATH=backend python -m app.learning.worker --poll-seconds 1
+```
+
+The role has only the new column grant to finalize assessment session status and
+completion time, alongside existing evaluation/evidence/job/event permissions.
+It cannot mutate the Exploration or answers. Revision 0019 secures the existing
+answer/objective validation trigger under the maintenance role, retaining its
+row locks while leaving backend ontology access read-only. Maintenance receives
+only the canonical SELECT and id-column UPDATE privileges required for these
+locks; the trigger has a fixed search path and revoked direct execution. Configure your worker connection
+identity as `app_worker` (for a separately provisioned LOGIN member, set its
+connection role explicitly). Never reuse backend, owner or maintenance credentials.
+The worker stops polling on SIGINT/SIGTERM after its current command finishes.
+Defaults: 60-second fenced lease, three attempts, retry delays of 5 and 30 seconds.
+Submitted answers survive processing failures; permitted explicit retries create
+new runs/jobs and preserve old failed runs.
+
+Application LogRecord fields record command/resource/job correlation, contract
+versions, rejection/transition categories, replay flags, queue age, attempts,
+lease expiry and processing latency. Configure the deployment log sink to retain
+these structured fields. Raw learner content, option IDs/answer keys, tokens and
+signed capabilities are not emitted. Staged-command/event logs describe work
+inside a transaction; the ledger and database outcomes establish committed facts.
+
+Alert on terminal evaluation jobs and stranded submitted responses. Example
+read-only operator queries (payloads contain references and safe categories):
+
+```sql
+select id, user_id, attempt_count, payload->>'failure_category' as category
+from jobs where job_type='ASSESSMENT_EVALUATION' and status='FAILED';
+
+select id, attempt_count, available_at, locked_at
+from jobs where job_type='ASSESSMENT_EVALUATION'
+  and ((status in ('PENDING','RETRYABLE_FAILURE') and available_at < now()-interval '5 minutes')
+    or (status='RUNNING' and locked_at < now()-interval '60 seconds'));
+```
+
+Investigate rather than modifying immutable answers or repending FAILED runs.
+Run the provisioning command with `--check-only` before release to detect coverage
+changes. Full tests require Docker and include real `app_backend`/`app_worker`
+journeys; no live model or Supabase service is necessary.

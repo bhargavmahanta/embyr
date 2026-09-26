@@ -18,7 +18,7 @@ import signal
 import time
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.models.identity import Job
@@ -33,6 +33,7 @@ from app.db.models.assessment import (
 )
 from app.db.session import create_async_database_engine
 from app.learning.common import emit
+from app.learning.telemetry import LearningJSONFormatter
 from app.learning.content import validate_definition
 from app.learning.evaluation import evaluate, EvaluationResult, PermanentEvaluationError
 
@@ -80,7 +81,7 @@ async def claim_job(factory) -> Claim | None:
             ),
             and_(
                 Job.status == "RUNNING",
-                Job.locked_at <= func.now() - text("interval '60 seconds'"),
+                Job.locked_at <= func.now() - timedelta(seconds=LEASE_SECONDS),
             ),
         )
         job = await session.scalar(
@@ -392,6 +393,7 @@ async def finalize_claim(
                 "job_status": job.status,
                 "failure_category": failure_category,
                 "evaluator_version": run.evaluator_version,
+                "rubric_version": run.rubric_version,
             },
         )
         return True
@@ -494,7 +496,9 @@ def main():
         parser.error(
             "EMBYR_WORKER_DATABASE_URL must use the separately provisioned app_worker credential"
         )
-    logging.basicConfig(level=logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(LearningJSONFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
     asyncio.run(serve(database_url, args.poll_seconds))
 
 

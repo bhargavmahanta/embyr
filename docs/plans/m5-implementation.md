@@ -52,3 +52,14 @@ Mapping: correct SUPPORTED/confidence1.0; incorrect INSUFFICIENT_EVIDENCE/1.0; n
 
 Freeze complete additive DTOs/examples and recovery fixture contracts. Real PostgreSQL production-role API+worker journeys: new learner onboarding -> recommendation ACCEPT -> delivery -> optional support/answer -> worker -> evidence -> reflection/edit -> learner completion; also unassessed finish, wrong/not-sure, pause/return/resume, no-interest empty Surprise, historical delivery/content gap, ownership, idempotency/conflicts/expiry natural guards, worker restart/stale fencing/duplicate finalization/failure/retry, late evaluation, submit-vs-finish and atomic rollback. Preserve frozen M4 regressions, no provider calls from learning, no raw content leakage.
 Run full backend/database/M3 suites, one Alembic head and check, isolated migrations and deletion/security regression. Independent whole-branch review must have zero HIGH/NORMAL blockers. Record actual results, not historical counts. Content assets still require review before production release; no learning-effectiveness or live-provider quality claim.
+
+## Implementation clarification
+
+Public answer integration revealed the original invoker trigger's FOR SHARE row
+locks require UPDATE privilege on read-only canonical objectives. Additive
+0019_response_lock_security preserves those locks through a revoked, fixed-path
+SECURITY DEFINER trigger owned by the trusted maintenance role. Backend and
+worker grants remain unchanged; maintenance receives narrow lock privileges.
+Historical migrations stay immutable. The prepared Exploration command lock is
+NO KEY UPDATE, compatible with worker ledger FK KEY SHARE locks, preventing a
+completion/finalization deadlock without expanding worker permissions.

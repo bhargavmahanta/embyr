@@ -15,7 +15,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_principal, get_session
+from app.api.deps import get_principal
+from app.api.learning_dtos import (
+    StarterPageDTO,
+    OnboardingDTO,
+    InterestDTO,
+    ExplorationPageDTO,
+    ExplorationDetailDTO,
+    DeliveryDTO,
+    ExplorationDTO,
+    ReflectionDTO,
+)
 from app.auth.principal import AuthenticatedPrincipal
 from app.db.models.identity import (
     AppUser,
@@ -40,9 +50,10 @@ from app.learning.common import (
     LIFECYCLE_VERSION,
 )
 from app.learning.lifecycle import transition
+from app.learning.transactions import get_learning_session
 
 router = APIRouter(prefix="/api/v1", tags=["learning"])
-Session = Annotated[AsyncSession, Depends(get_session)]
+Session = Annotated[AsyncSession, Depends(get_learning_session)]
 Principal = Annotated[AuthenticatedPrincipal, Depends(get_principal)]
 
 
@@ -170,7 +181,7 @@ async def starter_rows(session):
     ).all()
 
 
-@router.get("/catalog/starter-interests")
+@router.get("/catalog/starter-interests", response_model=StarterPageDTO)
 async def starters(principal: Principal, session: Session):
     return {
         "items": [
@@ -186,7 +197,7 @@ async def starters(principal: Principal, session: Session):
     }
 
 
-@router.post("/me/onboarding/complete")
+@router.post("/me/onboarding/complete", response_model=OnboardingDTO)
 async def onboarding(
     body: OnboardingBody, request: Request, principal: Principal, session: Session
 ):
@@ -261,7 +272,7 @@ async def onboarding(
     )
 
 
-@router.put("/memory/interests/{entity_id}")
+@router.put("/memory/interests/{entity_id}", response_model=InterestDTO)
 async def interest(
     entity_id: UUID, body: InterestBody, principal: Principal, session: Session
 ):
@@ -292,6 +303,7 @@ async def interest(
         entity_id=entity_id,
         metadata={"preference": row.preference, "version": row.version},
     )
+    await session.commit()
     return {
         "entity_id": str(entity_id),
         "preference": row.preference,
@@ -299,7 +311,7 @@ async def interest(
     }
 
 
-@router.get("/explorations")
+@router.get("/explorations", response_model=ExplorationPageDTO)
 async def list_explorations(
     principal: Principal,
     session: Session,
@@ -346,7 +358,7 @@ async def list_explorations(
     return {"items": [exploration_dto(row) for row in rows], "next_cursor": next_cursor}
 
 
-@router.get("/explorations/{exploration_id}")
+@router.get("/explorations/{exploration_id}", response_model=ExplorationDetailDTO)
 async def get_exploration(exploration_id: UUID, principal: Principal, session: Session):
     from app.learning.content import public_delivery
 
@@ -398,7 +410,7 @@ async def get_exploration(exploration_id: UUID, principal: Principal, session: S
     }
 
 
-@router.post("/explorations/{exploration_id}/delivery")
+@router.post("/explorations/{exploration_id}/delivery", response_model=DeliveryDTO)
 async def delivery(
     exploration_id: UUID,
     body: EmptyBody,
@@ -421,14 +433,14 @@ async def delivery(
     if row.delivery_snapshot is None:
         if row.status == "COMPLETED":
             fail("EXPLORATION_ALREADY_COMPLETED")
-        definition = get_definition(row.entity_id, row.entity_version)
-        if definition is None:
-            fail(
-                "EXPLORATION_CONTENT_UNAVAILABLE",
-                503,
-                "Reviewed content for this historical entity version is unavailable.",
-            )
         try:
+            definition = get_definition(row.entity_id, row.entity_version)
+            if definition is None:
+                fail(
+                    "EXPLORATION_CONTENT_UNAVAILABLE",
+                    503,
+                    "Reviewed content for this historical entity version is unavailable.",
+                )
             validate_definition(definition)
         except ValueError:
             fail(
@@ -474,7 +486,7 @@ async def delivery(
     )
 
 
-@router.post("/explorations/{exploration_id}/actions")
+@router.post("/explorations/{exploration_id}/actions", response_model=ExplorationDTO)
 async def actions(
     exploration_id: UUID,
     body: ActionBody,
@@ -517,7 +529,7 @@ async def actions(
     )
 
 
-@router.post("/explorations/{exploration_id}/completion")
+@router.post("/explorations/{exploration_id}/completion", response_model=ExplorationDTO)
 async def completion(
     exploration_id: UUID,
     body: CompletionBody,
@@ -582,7 +594,7 @@ async def completion(
     )
 
 
-@router.post("/explorations/{exploration_id}/reflections")
+@router.post("/explorations/{exploration_id}/reflections", response_model=ReflectionDTO)
 async def submit_reflection(
     exploration_id: UUID,
     body: ReflectionBody,
@@ -631,7 +643,7 @@ async def submit_reflection(
     return reflection_dto(row)
 
 
-@router.patch("/reflections/{reflection_id}")
+@router.patch("/reflections/{reflection_id}", response_model=ReflectionDTO)
 async def edit_reflection(
     reflection_id: UUID,
     body: ReflectionEditBody,
@@ -653,4 +665,5 @@ async def edit_reflection(
         exploration=exploration,
         metadata={"reflection_id": str(row.id), "version": row.version},
     )
+    await session.commit()
     return reflection_dto(row)

@@ -110,6 +110,10 @@ async def finish(
             - session.info.get("learning_command_started", time.monotonic()),
         },
     )
+    # Durable effects precede the acknowledgment. Request-scoped yield cleanup
+    # can run after ASGI has sent a response, so it is not the commit boundary
+    # for commands that create facts.
+    await session.commit()
     return encoded
 
 

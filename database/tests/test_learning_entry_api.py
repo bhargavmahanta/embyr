@@ -212,3 +212,116 @@ def test_empty_onboarding_owned_lifecycle_reflection_and_reference_replay(
                 )
                 == 1
             )
+
+
+def test_historical_delivery_survives_canonical_change_and_content_gap(
+    isolated_migrated_database, tmp_path, monkeypatch
+):
+    import json
+    from app.learning.content import load_package, package_digest
+    from app.learning.provision_content import provision
+
+    db = isolated_migrated_database
+    approval = {
+        "package_sha256": package_digest(),
+        "reviewer": "Test reviewer",
+        "reviewed_at": "2026-09-26T00:00:00Z",
+        "decision": "APPROVED",
+        "review_kind": "TEST",
+    }
+    review_path = tmp_path / "review.json"
+    review_path.write_text(json.dumps(approval))
+    monkeypatch.setenv("EMBYR_CONTENT_REVIEW_ATTESTATION", str(review_path))
+    monkeypatch.setenv("EMBYR_CONTENT_ALLOW_TEST_ATTESTATION", "1")
+    definition = load_package()["definitions"][0]
+    entity = definition["entity_id"]
+    with db.engine.begin() as c:
+        provision(c, approval, allow_test=True)
+    subject = str(uuid4())
+    with client_for(db.url) as client:
+        user = client.post(
+            "/api/v1/session/bootstrap", headers=headers(subject)
+        ).json()["id"]
+        with db.engine.begin() as c:
+            exploration = str(
+                c.scalar(
+                    text(
+                        "insert into explorations(user_id,entity_id,entity_version,learning_intent,status,started_at) values (:user,:entity,1,'DIRECT_INTEREST','ACTIVE',now()) returning id"
+                    ),
+                    {"user": user, "entity": entity},
+                )
+            )
+        path = f"/api/v1/explorations/{exploration}"
+        first = client.post(
+            path + "/delivery", json={}, headers=headers(subject, "prepare")
+        )
+        assert first.status_code == 200, first.text
+        assert "assessment" not in first.json()
+        with db.engine.begin() as c:
+            c.execute(
+                text(
+                    "update idempotency_records set expires_at=now()-interval '1 second' where user_id=:user and idempotency_key='prepare'"
+                ),
+                {"user": user},
+            )
+            c.execute(
+                text(
+                    "insert into learning_entity_versions(entity_id,version,title,summary,knowledge_types,scope) values (:entity,2,'New canonical title','New summary',array['CONCEPTUAL'],'NORMAL')"
+                ),
+                {"entity": entity},
+            )
+            c.execute(
+                text("update learning_entities set current_version=2 where id=:entity"),
+                {"entity": entity},
+            )
+        replay = client.post(
+            path + "/delivery", json={}, headers=headers(subject, "prepare")
+        )
+        assert replay.json() == first.json()
+        read = client.get(path, headers=headers(subject)).json()
+        assert read["entity"]["title"] == "New canonical title"
+        assert read["entity_version"] == 1 and read["delivery"]["entity_version"] == 1
+        assert read["delivery"] == first.json()
+        with db.engine.begin() as c:
+            missing = str(
+                c.scalar(
+                    text(
+                        "insert into explorations(user_id,entity_id,entity_version,learning_intent,status,started_at) values (:user,:entity,2,'DIRECT_INTEREST','ACTIVE',now()) returning id"
+                    ),
+                    {"user": user, "entity": entity},
+                )
+            )
+        missing_path = f"/api/v1/explorations/{missing}"
+        result = client.post(
+            missing_path + "/delivery", json={}, headers=headers(subject, "missing")
+        )
+        assert (
+            result.status_code == 503
+            and result.json()["code"] == "EXPLORATION_CONTENT_UNAVAILABLE"
+        )
+        assert (
+            client.get(missing_path, headers=headers(subject)).json()["status"]
+            == "ACTIVE"
+        )
+        monkeypatch.delenv("EMBYR_CONTENT_REVIEW_ATTESTATION")
+        assert (
+            client.get(path, headers=headers(subject)).json()["delivery"]
+            == first.json()
+        )
+        with db.engine.connect() as c:
+            assert (
+                c.scalar(
+                    text(
+                        "select count(*) from learning_events where exploration_id=:id and event_type='EXPLORATION_WORK_PREPARED'"
+                    ),
+                    {"id": exploration},
+                )
+                == 1
+            )
+            assert (
+                c.scalar(
+                    text("select delivery_snapshot from explorations where id=:id"),
+                    {"id": missing},
+                )
+                is None
+            )

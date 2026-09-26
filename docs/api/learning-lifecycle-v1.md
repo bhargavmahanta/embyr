@@ -55,6 +55,10 @@ An interest-free new learner can receive M4's explicit `{ "recommendation": null
 
 Preparing work records availability, never that it was seen. Work contains effort guidance, independent search nudges and a reflection prompt. Current canonical metadata may change; historical delivered work cannot change. Revisit uses the unchanged M4 recommendation flow and creates a new Exploration.
 
+The executable [client fixtures](fixtures/learning-lifecycle-v1.json) describe
+prepared work, an unanswered check and a retry acknowledgment. New routes expose
+strict response schemas in OpenAPI; existing M4 responses retain their contracts.
+
 ## Optional recognition check
 
 | Route | Input | Outcome |
@@ -67,7 +71,7 @@ Preparing work records availability, never that it was seen. Work contains effor
 | POST `/api/v1/assessment-responses/{id}/evaluation-retries` | `{}` | HTTP202 new PENDING run; one pending retry; old FAILED run preserved. Only permitted failure categories are retryable |
 
 ```json
-{"interaction_id":"00000000-0000-0000-0000-000000000000","response_type":"SINGLE_CHOICE","content":{"option_id":"not_sure"}}
+{"interaction_id":"00000000-0000-0000-0000-000000000000","response_type":"SINGLE_CHOICE","content":{"option_id":"not-sure"}}
 ```
 
 ```json
