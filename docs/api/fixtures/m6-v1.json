@@ -1,0 +1,696 @@
+{
+  "fixture_contract": "m6-contract-fixtures/v1",
+  "identity_example": {
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "world_id": "1fdc1b12-68d3-5baf-a8c3-3d18c23bd4ff",
+    "namespace": "a6a18892-0247-5a64-adc3-1161194e67be"
+  },
+  "public_examples": {
+    "memory_current": {
+      "contract_version": "memory-summary/v1",
+      "projection": {
+        "model_version": "learner-projection/v1",
+        "source_sequence": 12,
+        "source_head_sequence": 12,
+        "status": "CURRENT"
+      },
+      "learning_preferences": {
+        "adventure_preference": "BALANCED",
+        "preferred_effort": "15_20_MIN",
+        "support_style": "GUIDED",
+        "practical_opt_in": false,
+        "version": 1
+      },
+      "explicit_interests": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "preference": "NEUTRAL",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Photosynthesis",
+          "preference": "MORE",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000003-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "LESS",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        },
+        {
+          "entity_id": "00000004-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Geometry",
+          "preference": "PAUSED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000005-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "NOT_INTERESTED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        }
+      ],
+      "recently_explored": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "started_count": 1,
+          "returned_count": 2,
+          "completed_count": 1,
+          "latest_activity_at": "2026-09-25T12:00:00Z"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 2,
+          "title": "Photosynthesis",
+          "started_count": 1,
+          "returned_count": 0,
+          "completed_count": 0,
+          "latest_activity_at": "2026-09-25T10:00:00Z"
+        }
+      ],
+      "recognition_evidence": [
+        {
+          "objective_id": "33333333-3333-4333-8333-333333333333",
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "evidence_count": 1,
+          "support_required": true,
+          "last_evidence_at": "2026-09-25T11:30:00Z",
+          "summary": "Recognition evidence recorded."
+        }
+      ],
+      "long_term_interests": [],
+      "voluntary_revisits": [],
+      "truncated": {
+        "explicit_interests": false,
+        "recently_explored": false,
+        "recognition_evidence": false
+      }
+    },
+    "memory_empty": {
+      "contract_version": "memory-summary/v1",
+      "projection": {
+        "model_version": "learner-projection/v1",
+        "source_sequence": 0,
+        "source_head_sequence": 0,
+        "status": "CURRENT"
+      },
+      "learning_preferences": null,
+      "explicit_interests": [],
+      "recently_explored": [],
+      "recognition_evidence": [],
+      "long_term_interests": [],
+      "voluntary_revisits": [],
+      "truncated": {
+        "explicit_interests": false,
+        "recently_explored": false,
+        "recognition_evidence": false
+      }
+    },
+    "memory_pending_filtered": {
+      "contract_version": "memory-summary/v1",
+      "projection": {
+        "model_version": "learner-projection/v1",
+        "source_sequence": 12,
+        "source_head_sequence": 14,
+        "status": "PENDING"
+      },
+      "learning_preferences": {
+        "adventure_preference": "BALANCED",
+        "preferred_effort": "15_20_MIN",
+        "support_style": "GUIDED",
+        "practical_opt_in": false,
+        "version": 1
+      },
+      "explicit_interests": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "preference": "NEUTRAL",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Photosynthesis",
+          "preference": "MORE",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000003-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "LESS",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        },
+        {
+          "entity_id": "00000004-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Geometry",
+          "preference": "PAUSED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000005-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "NOT_INTERESTED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        }
+      ],
+      "recently_explored": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "started_count": 1,
+          "returned_count": 2,
+          "completed_count": 1,
+          "latest_activity_at": "2026-09-25T12:00:00Z"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 2,
+          "title": "Photosynthesis",
+          "started_count": 1,
+          "returned_count": 0,
+          "completed_count": 0,
+          "latest_activity_at": "2026-09-25T10:00:00Z"
+        }
+      ],
+      "recognition_evidence": [],
+      "long_term_interests": [],
+      "voluntary_revisits": [],
+      "truncated": {
+        "explicit_interests": false,
+        "recently_explored": false,
+        "recognition_evidence": false
+      }
+    },
+    "memory_failed": {
+      "contract_version": "memory-summary/v1",
+      "projection": {
+        "model_version": "learner-projection/v1",
+        "source_sequence": 12,
+        "source_head_sequence": 14,
+        "status": "FAILED"
+      },
+      "learning_preferences": {
+        "adventure_preference": "BALANCED",
+        "preferred_effort": "15_20_MIN",
+        "support_style": "GUIDED",
+        "practical_opt_in": false,
+        "version": 1
+      },
+      "explicit_interests": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "preference": "NEUTRAL",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Photosynthesis",
+          "preference": "MORE",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000003-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "LESS",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        },
+        {
+          "entity_id": "00000004-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "Geometry",
+          "preference": "PAUSED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
+        },
+        {
+          "entity_id": "00000005-2222-4222-8222-222222222222",
+          "entity_version": null,
+          "title": null,
+          "preference": "NOT_INTERESTED",
+          "version": 1,
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
+        }
+      ],
+      "recently_explored": [
+        {
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "title": "TCP handshake",
+          "started_count": 1,
+          "returned_count": 2,
+          "completed_count": 1,
+          "latest_activity_at": "2026-09-25T12:00:00Z"
+        },
+        {
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 2,
+          "title": "Photosynthesis",
+          "started_count": 1,
+          "returned_count": 0,
+          "completed_count": 0,
+          "latest_activity_at": "2026-09-25T10:00:00Z"
+        }
+      ],
+      "recognition_evidence": [],
+      "long_term_interests": [],
+      "voluntary_revisits": [],
+      "truncated": {
+        "explicit_interests": false,
+        "recently_explored": false,
+        "recognition_evidence": false
+      }
+    },
+    "world_empty": {
+      "revision": 0,
+      "layout_version": 1,
+      "generation_seed": "589a1eee0ea9f16ac77537916a6ca7b584381018eec18f314dc94000e53c0e13",
+      "regions": [],
+      "nodes": [],
+      "connections": [],
+      "artifacts": []
+    },
+    "world_populated": {
+      "revision": 4,
+      "layout_version": 1,
+      "generation_seed": "589a1eee0ea9f16ac77537916a6ca7b584381018eec18f314dc94000e53c0e13",
+      "regions": [
+        {
+          "id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+          "region_key": "discovery",
+          "primary_domain_id": null,
+          "logical_x": 0,
+          "logical_y": 0,
+          "logical_width": 1,
+          "logical_height": 1,
+          "visual_archetype": "grove"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+          "entity_id": "00000001-2222-4222-8222-222222222222",
+          "entity_version": 1,
+          "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+          "logical_x": 0.6030931968660013,
+          "logical_y": 0.7435054966274223,
+          "depth": 0,
+          "visual_archetype": "branching_tree",
+          "visual_seed": "ebd3aee35c34fb03940e2204245bccc3b9a419931e3c029550777186565072f4",
+          "growth_state": "YOUNG",
+          "revision": 4
+        },
+        {
+          "id": "49a237b2-b6df-57c1-93b3-1420b56a676a",
+          "entity_id": "00000002-2222-4222-8222-222222222222",
+          "entity_version": 2,
+          "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+          "logical_x": 0.20418028398880078,
+          "logical_y": 0.49958664382883816,
+          "depth": 0,
+          "visual_archetype": "branching_tree",
+          "visual_seed": "e98bfb5fbe8a5654e7af48b3c57c5ab1a41b473961984a89e4bada91b49a179e",
+          "growth_state": "SEED",
+          "revision": 3
+        }
+      ],
+      "connections": [],
+      "artifacts": []
+    },
+    "delta_empty_at_head": {
+      "from_revision": 4,
+      "to_revision": 4,
+      "current_revision": 4,
+      "has_more": false,
+      "changes": []
+    },
+    "delta_multiple_changes": {
+      "from_revision": 0,
+      "to_revision": 4,
+      "current_revision": 4,
+      "has_more": false,
+      "changes": [
+        {
+          "revision": 1,
+          "type": "REGION_ADDED",
+          "object_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "region_key": "discovery",
+              "primary_domain_id": null,
+              "logical_x": 0,
+              "logical_y": 0,
+              "logical_width": 1,
+              "logical_height": 1,
+              "visual_archetype": "grove"
+            }
+          }
+        },
+        {
+          "revision": 2,
+          "type": "NODE_ADDED",
+          "object_id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+              "entity_id": "00000001-2222-4222-8222-222222222222",
+              "entity_version": 1,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.6030931968660013,
+              "logical_y": 0.7435054966274223,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "ebd3aee35c34fb03940e2204245bccc3b9a419931e3c029550777186565072f4",
+              "growth_state": "SPROUT",
+              "revision": 2
+            }
+          }
+        },
+        {
+          "revision": 3,
+          "type": "NODE_ADDED",
+          "object_id": "49a237b2-b6df-57c1-93b3-1420b56a676a",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "49a237b2-b6df-57c1-93b3-1420b56a676a",
+              "entity_id": "00000002-2222-4222-8222-222222222222",
+              "entity_version": 2,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.20418028398880078,
+              "logical_y": 0.49958664382883816,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "e98bfb5fbe8a5654e7af48b3c57c5ab1a41b473961984a89e4bada91b49a179e",
+              "growth_state": "SEED",
+              "revision": 3
+            }
+          }
+        },
+        {
+          "revision": 4,
+          "type": "NODE_GROWTH_CHANGED",
+          "object_id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+              "entity_id": "00000001-2222-4222-8222-222222222222",
+              "entity_version": 1,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.6030931968660013,
+              "logical_y": 0.7435054966274223,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "ebd3aee35c34fb03940e2204245bccc3b9a419931e3c029550777186565072f4",
+              "growth_state": "YOUNG",
+              "revision": 4
+            }
+          }
+        }
+      ]
+    },
+    "delta_page_1": {
+      "from_revision": 0,
+      "to_revision": 2,
+      "current_revision": 4,
+      "has_more": true,
+      "changes": [
+        {
+          "revision": 1,
+          "type": "REGION_ADDED",
+          "object_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "region_key": "discovery",
+              "primary_domain_id": null,
+              "logical_x": 0,
+              "logical_y": 0,
+              "logical_width": 1,
+              "logical_height": 1,
+              "visual_archetype": "grove"
+            }
+          }
+        },
+        {
+          "revision": 2,
+          "type": "NODE_ADDED",
+          "object_id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+              "entity_id": "00000001-2222-4222-8222-222222222222",
+              "entity_version": 1,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.6030931968660013,
+              "logical_y": 0.7435054966274223,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "ebd3aee35c34fb03940e2204245bccc3b9a419931e3c029550777186565072f4",
+              "growth_state": "SPROUT",
+              "revision": 2
+            }
+          }
+        }
+      ]
+    },
+    "delta_page_2": {
+      "from_revision": 2,
+      "to_revision": 4,
+      "current_revision": 4,
+      "has_more": false,
+      "changes": [
+        {
+          "revision": 3,
+          "type": "NODE_ADDED",
+          "object_id": "49a237b2-b6df-57c1-93b3-1420b56a676a",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "49a237b2-b6df-57c1-93b3-1420b56a676a",
+              "entity_id": "00000002-2222-4222-8222-222222222222",
+              "entity_version": 2,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.20418028398880078,
+              "logical_y": 0.49958664382883816,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "e98bfb5fbe8a5654e7af48b3c57c5ab1a41b473961984a89e4bada91b49a179e",
+              "growth_state": "SEED",
+              "revision": 3
+            }
+          }
+        },
+        {
+          "revision": 4,
+          "type": "NODE_GROWTH_CHANGED",
+          "object_id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+          "payload": {
+            "schema_version": "world-delta/v1",
+            "object": {
+              "id": "0a3009d2-e65f-501d-a499-45b4337a4a67",
+              "entity_id": "00000001-2222-4222-8222-222222222222",
+              "entity_version": 1,
+              "region_id": "b56d4386-1422-5a11-81d3-96d11e57dbaa",
+              "logical_x": 0.6030931968660013,
+              "logical_y": 0.7435054966274223,
+              "depth": 0,
+              "visual_archetype": "branching_tree",
+              "visual_seed": "ebd3aee35c34fb03940e2204245bccc3b9a419931e3c029550777186565072f4",
+              "growth_state": "YOUNG",
+              "revision": 4
+            }
+          }
+        }
+      ]
+    },
+    "resync_ahead": {
+      "type": "about:blank",
+      "title": "World resync required",
+      "status": 409,
+      "code": "WORLD_RESYNC_REQUIRED",
+      "detail": "Fetch the World snapshot before requesting further changes.",
+      "request_id": "44444444-4444-4444-8444-444444444444",
+      "details": {
+        "after_revision": 5,
+        "current_revision": 4
+      }
+    },
+    "resync_history_hole": {
+      "type": "about:blank",
+      "title": "World resync required",
+      "status": 409,
+      "code": "WORLD_RESYNC_REQUIRED",
+      "detail": "Fetch the World snapshot before requesting further changes.",
+      "request_id": "44444444-4444-4444-8444-444444444444",
+      "details": {
+        "after_revision": 0,
+        "current_revision": 4
+      }
+    }
+  },
+  "receipt_key_examples": [
+    {
+      "contract_version": "projection-input/v1",
+      "schema_version": 1,
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "source_sequence": 1,
+      "source_kind": "LEDGER",
+      "source_key": "55555555-5555-4555-8555-555555555555",
+      "source_group": "1001",
+      "source_time": "2026-09-25T08:00:00Z",
+      "facts": {
+        "event_id": "55555555-5555-4555-8555-555555555555",
+        "event_type": "EXPLORATION_STARTED",
+        "source_schema_version": 1,
+        "entity_id": "00000001-2222-4222-8222-222222222222",
+        "entity_version": 1,
+        "exploration_id": "77777777-7777-4777-8777-777777777777",
+        "assessment_session_id": null,
+        "response_id": null,
+        "evaluation_run_id": null,
+        "reflection_id": null,
+        "recommendation_id": "88888888-8888-4888-8888-888888888888",
+        "command_id": "99999999-9999-4999-8999-999999999999",
+        "event_ordinal": 1,
+        "preference": null,
+        "preference_version": null
+      }
+    },
+    {
+      "contract_version": "projection-input/v1",
+      "schema_version": 1,
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "source_sequence": 2,
+      "source_kind": "EVIDENCE",
+      "source_key": "66666666-6666-4666-8666-666666666666:ACTIVE",
+      "source_group": "1002",
+      "source_time": "2026-09-25T11:30:00Z",
+      "facts": {
+        "evidence_id": "66666666-6666-4666-8666-666666666666",
+        "resulting_status": "ACTIVE",
+        "source_type": "ASSESSMENT_RESPONSE",
+        "source_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "evidence_type": "RECOGNITION",
+        "evidence_strength": "WEAK",
+        "objective_id": "33333333-3333-4333-8333-333333333333",
+        "entity_id": "00000001-2222-4222-8222-222222222222",
+        "entity_version": 1,
+        "response_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "evaluation_run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "evaluation_status": "SUCCEEDED",
+        "evaluation_result": "SUPPORTED",
+        "evaluator_version": "deterministic-evaluation/v1",
+        "rubric_version": "assessment-rubric/v1",
+        "support_level": "SMALL_NUDGE",
+        "classification_confidence": 1.0,
+        "transition_at": "2026-09-25T11:30:00Z"
+      }
+    },
+    {
+      "contract_version": "projection-input/v1",
+      "schema_version": 1,
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "source_sequence": 3,
+      "source_kind": "EVIDENCE",
+      "source_key": "66666666-6666-4666-8666-666666666666:REVOKED",
+      "source_group": "1003",
+      "source_time": "2026-09-25T11:30:00Z",
+      "facts": {
+        "evidence_id": "66666666-6666-4666-8666-666666666666",
+        "resulting_status": "REVOKED",
+        "source_type": "ASSESSMENT_RESPONSE",
+        "source_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "evidence_type": "RECOGNITION",
+        "evidence_strength": "WEAK",
+        "objective_id": "33333333-3333-4333-8333-333333333333",
+        "entity_id": "00000001-2222-4222-8222-222222222222",
+        "entity_version": 1,
+        "response_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "evaluation_run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "evaluation_status": "REVOKED",
+        "evaluation_result": "SUPPORTED",
+        "evaluator_version": "deterministic-evaluation/v1",
+        "rubric_version": "assessment-rubric/v1",
+        "support_level": "SMALL_NUDGE",
+        "classification_confidence": 1.0,
+        "transition_at": "2026-09-25T13:00:00Z"
+      }
+    },
+    {
+      "contract_version": "projection-input/v1",
+      "schema_version": 1,
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "source_sequence": 4,
+      "source_kind": "BOOTSTRAP",
+      "source_key": "learner-projection/v1:baseline",
+      "source_group": "1004",
+      "source_time": "2026-09-25T14:00:00Z",
+      "facts": {
+        "cutoff_source_sequence": 3,
+        "cutoff_at": "2026-09-25T14:00:00Z"
+      }
+    }
+  ],
+  "job_example": {
+    "contract_version": "projection-worker/v1",
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "source_group": "1004",
+    "first_source_sequence": 1,
+    "last_source_sequence": 4
+  }
+}
