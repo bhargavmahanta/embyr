@@ -41,8 +41,9 @@ def provision(connection, attestation, *, allow_test=False):
         _ensure(connection, LearningObjective, dict(id=UUID(entity['objective_id']), entity_id=entity_id, entity_version=1, objective_type='RECOGNITION', description=entity['objective'], importance=1.0), {'id':UUID(entity['objective_id'])})
         _ensure(connection, EntityDomain, dict(entity_id=entity_id, domain_id=domain_id, is_primary=True, membership_strength=1.0), {'entity_id':entity_id,'domain_id':domain_id})
     for child, parent in zip(package['entities'][1:], package['entities'][:-1]):
-        edge_id = uuid5(namespace, child['canonical_key']+'/part-of')
-        _ensure(connection, OntologyEdge, dict(id=edge_id,source_entity_id=UUID(child['id']),target_entity_id=UUID(parent['id']),source_entity_version=1,target_entity_version=1,relationship_type='PART_OF',confidence=1.0,status='ACTIVE',provenance=provenance), {'id':edge_id})
+        for relationship, suffix in (('PART_OF', 'part-of'), ('RELATED_TO', 'related-to')):
+            edge_id = uuid5(namespace, child['canonical_key']+'/'+suffix)
+            _ensure(connection, OntologyEdge, dict(id=edge_id,source_entity_id=UUID(child['id']),target_entity_id=UUID(parent['id']),source_entity_version=1,target_entity_version=1,relationship_type=relationship,confidence=1.0,status='ACTIVE',provenance=provenance), {'id':edge_id})
     check_database_coverage(connection, attestation, allow_test=allow_test)
 
 

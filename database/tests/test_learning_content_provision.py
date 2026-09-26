@@ -22,7 +22,8 @@ def test_provision_is_stable_connected_and_coverage_checks_all_current_versions(
         provision_content.provision(connection, review(), allow_test=True)
         provision_content.provision(connection, review(), allow_test=True)
         assert len(connection.execute(select(LearningEntity.id)).all()) == 3
-        assert len(connection.execute(select(OntologyEdge.id)).all()) == 2
+        assert len(connection.execute(select(OntologyEdge.id)).all()) == 4
+        assert sorted(connection.execute(select(OntologyEdge.relationship_type)).scalars()) == ['PART_OF', 'PART_OF', 'RELATED_TO', 'RELATED_TO']
         assert len(connection.execute(select(EntityDomain.entity_id)).all()) == 3
         provision_content.check_database_coverage(connection, review(), allow_test=True)
         entity_id = load_package()['entities'][0]['id']
@@ -53,3 +54,29 @@ def test_provision_refuses_changed_immutable_version(isolated_migrated_database)
         with pytest.raises(ValueError, match='Immutable'):
             with connection.begin_nested():
                 provision_content.provision(connection, review(), allow_test=True)
+
+
+@pytest.mark.parametrize('anchor_index', [0, 2])
+def test_pilot_is_discoverable_by_frozen_bidirectional_m4_graph_retrieval(isolated_migrated_database, anchor_index):
+    from uuid import UUID, uuid4
+    from sqlalchemy import text
+    from app.recommendation.snapshot import QUERIES, build_production_snapshot
+    from app.recommendation.retrieval import retrieve_candidates
+
+    package = load_package()
+    user_id = uuid4()
+    anchor_id = UUID(package['entities'][anchor_index]['id'])
+    with isolated_migrated_database.engine.begin() as connection:
+        provision_content.provision(connection, review(), allow_test=True)
+        rows = {name: list(connection.execute(text(query), {'user_id':user_id}).mappings())
+                for name, query in QUERIES.items()}
+    # Explicit choice anchors the frozen input; no embedding or provider calls.
+    rows['preferences'] = [{'entity_id':anchor_id, 'entity_version':1, 'preference':'MORE', 'version':1}]
+    candidates = retrieve_candidates(build_production_snapshot(user_id, rows), {})
+    graphs = {candidate['target_entity_id']: source['provenance']['hop_distance']
+              for candidate in candidates for source in candidate['source_paths']
+              if source['source'] == 'GRAPH'}
+    expected = {entity['id']: abs(index - anchor_index)
+                for index, entity in enumerate(package['entities']) if index != anchor_index}
+    assert graphs == expected
+    assert all(candidate['eligibility_state'] == 'ELIGIBLE' for candidate in candidates)

@@ -2,7 +2,7 @@
 
 The repository pilot at `backend/app/learning/packages/pilot-v1.json` is an AI-assisted **draft**. Structural tests and technical inspection are factual provenance only. No human review or learning effectiveness is claimed. Human asset review is a production release acceptance gate.
 
-A named human reviewer must inspect each work prompt, objective, recognition option, result mapping, feedback and all four support levels for accuracy, accessibility, prerequisite-free scope, coherence and safe wording. They must inspect the DOMAIN → AREA → TOPIC composition and search suggestions. The reviewer approves the exact package bytes, not merely its filename. Do not modify a released content/rubric identity: add a new immutable package/version and retain historical definitions when future versions are authored.
+A named human reviewer must inspect each work prompt, objective, recognition option, result mapping, feedback and all four support levels for accuracy, accessibility, prerequisite-free scope, coherence and safe wording. They must inspect the DOMAIN → AREA → TOPIC composition and search suggestions, including two PART_OF hierarchy edges and two RELATED_TO discovery edges between adjacent levels. Frozen M4 graph retrieval treats RELATED_TO edges bidirectionally, enabling one-hop and two-hop discovery from either end. The reviewer approves the exact package bytes, not merely its filename. Do not modify a released content/rubric identity: add a new immutable package/version and retain historical definitions when future versions are authored.
 
 After review, the operator creates a local attestation (never prepopulate a real approval in source control):
 
@@ -26,7 +26,7 @@ PYTHONPATH=backend python -m app.learning.provision_content --review-attestation
 PYTHONPATH=backend python -m app.learning.provision_content --review-attestation /absolute/path/review.json --check-only
 ```
 
-Use a synchronous SQLAlchemy PostgreSQL URL such as `postgresql+psycopg://...` and a privileged ontology provisioning identity, separately from backend runtime credentials. The command refuses TEST attestations. It provisions stable entity/version/objective/edge IDs, primary domain membership and two PART_OF edges in one transaction. Rerunning the same approval is harmless; differing existing immutable fields or any global coverage gap aborts the whole transaction.
+Use a synchronous SQLAlchemy PostgreSQL URL such as `postgresql+psycopg://...` and a privileged ontology provisioning identity, separately from backend runtime credentials. The command refuses TEST attestations. It provisions stable entity/version/objective/edge IDs, primary domain membership, two PART_OF hierarchy edges and two RELATED_TO discovery edges in one transaction. Rerunning the same approval is harmless; differing existing immutable fields or any global coverage gap aborts the whole transaction.
 
 Coverage checks every current REVIEWED/PUBLISHED entity version, including entities outside this pilot. Adding reviewed catalog entities requires matching delivery packages. This release gate has no effect on recommendation candidate retrieval or ranking, and runtime content gaps retain accepted explorations for recovery.
 
