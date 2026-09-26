@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-from conftest import make_alembic_config, provision_runtime_roles
+from conftest import make_alembic_config
 
 BEFORE = "0015_recommendation_retrieval"
 AFTER = "0016_recommendation_reason"
@@ -41,10 +41,9 @@ def _insert_recommendation(connection, user_id, entity_id, reason_code):
     }).scalar_one()
 
 
-def test_0016_nullable_upgrade_and_safe_downgrades(database_url):
-    config = make_alembic_config(database_url)
-    engine = create_engine(database_url)
-    provision_runtime_roles(engine)
+def test_0016_nullable_upgrade_and_safe_downgrades(isolated_migration_database):
+    config = make_alembic_config(isolated_migration_database.url)
+    engine = isolated_migration_database.engine
     try:
         command.upgrade(config, BEFORE)
         with engine.begin() as connection:
