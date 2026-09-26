@@ -1,6 +1,8 @@
 """Owned resource, command and factual event helpers for learning operations."""
 
 from datetime import datetime, timezone
+import logging
+import time
 from uuid import UUID, uuid4
 
 from fastapi.encoders import jsonable_encoder
@@ -11,17 +13,23 @@ from app.api.idempotency import (
     require_idempotency_key,
     request_fingerprint,
     reserve_idempotent_command,
+    IdempotencyConflict,
     store_idempotent_result,
 )
 from app.db.models.events import LearningEvent
 
 LIFECYCLE_VERSION = "exploration-lifecycle/v1"
 EVENT_VERSION = "learning-lifecycle-events/v1"
+LOGGER = logging.getLogger(__name__)
 
 
 def fail(
     code, status=409, detail="The command conflicts with the current resource state."
 ):
+    LOGGER.info(
+        "learning_operation_rejected",
+        extra={"failure_category": code, "http_status": status},
+    )
     raise AppError(
         code=code,
         status=status,
@@ -46,13 +54,26 @@ async def owned(session, model, user_id, resource_id, *, lock=False):
 
 async def reserve(session, request, user_id, body):
     name = request.url.path
-    return await reserve_idempotent_command(
-        session,
-        user_id=user_id,
-        idempotency_key=require_idempotency_key(request),
-        command_name=name,
-        fingerprint=request_fingerprint(name, body),
+    session.info["learning_command_started"] = time.monotonic()
+    try:
+        command = await reserve_idempotent_command(
+            session,
+            user_id=user_id,
+            idempotency_key=require_idempotency_key(request),
+            command_name=name,
+            fingerprint=request_fingerprint(name, body),
+        )
+    except IdempotencyConflict:
+        LOGGER.info(
+            "learning_command_conflict",
+            extra={"failure_category": "IDEMPOTENCY_KEY_REUSED"},
+        )
+        raise
+    LOGGER.info(
+        "learning_command_reserved",
+        extra={"command_id": str(command.record_id), "replay": command.replay},
     )
+    return command
 
 
 async def finish(
@@ -75,6 +96,17 @@ async def finish(
         result_id=resource_id,
         response_status=status,
         response_body=encoded,
+    )
+    LOGGER.info(
+        "learning_command_result_staged",
+        extra={
+            "command_id": str(command.record_id),
+            "resource_id": str(resource_id),
+            "result_type": result_type,
+            "http_status": status,
+            "latency_seconds": time.monotonic()
+            - session.info.get("learning_command_started", time.monotonic()),
+        },
     )
     return encoded
 
@@ -107,6 +139,10 @@ async def emit(
     )
     session.add(row)
     await session.flush()
+    LOGGER.info(
+        "learning_event_staged",
+        extra={"event_type": event_type, "event_contract_version": EVENT_VERSION},
+    )
     return row
 
 
