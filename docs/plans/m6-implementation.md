@@ -117,6 +117,20 @@ Acceptance criteria:
   values, current authoritative preferences while lagging, exact sort order and
   truncation after filtering. Fixed neutral recognition copy, empty unsupported
   lists, no extra score/private/content/provenance fields.
+- Resolve explicit-interest availability from the current public display
+  version: AVAILABLE requires an existing REVIEWED/PUBLISHED entity with a
+  non-null current version and matching version row; return its positive version
+  and bounded non-empty title. UNAVAILABLE preserves the explicit choice with
+  null display version/title when current_version is null or status is not
+  public. A claimed public/current version with a missing row is an integrity
+  failure, never UNAVAILABLE.
+- Preserve unavailable entity_id, exact preference, preference version and
+  updated_at. Include unavailable choices in shared ordering, max-20 cap and
+  truncated calculation; never omit because current_version is null, select a
+  historical version, invent display values or mutate preferences on GET.
+  Cross-user isolation remains unchanged. Existing preference PUT behavior and
+  M3/M4 recommendation deliverability rules remain unchanged. Availability is
+  a Memory read-model concern; M6-02/M6-03 behavior does not depend on it.
 - Distinct entity/version activity uses latest_activity_at from starts, returns,
   first reflection submission and completion. Counts deduplicate resources and
   events; GET/preparation/hints/evaluation/reflection edits never advance activity.
@@ -141,6 +155,14 @@ evidence invalidation; immediate explicit suppression; no-read writes; integer
 and cursor matrix; prefix/interior/tail-hole detection; stable continuation with
 growing head; delta-to-snapshot equality and concurrent transaction snapshots;
 sentinel private content absent from responses/logs/errors.
+
+Availability cases: available current public version; null current_version;
+non-REVIEWED/PUBLISHED status despite an existing version; missing claimed
+public/current row as integrity failure; no historical fallback; unavailable
+choices across ordering/cap/truncation boundaries; unchanged choices and no
+GET-side mutation. Strict schema rejection covers AVAILABLE with either null
+display field, UNAVAILABLE with either non-null display field, missing
+availability and unknown availability. Owner isolation remains covered.
 
 ## M6-05 — Replay, correction, deletion and compatibility final gate
 
@@ -206,8 +228,20 @@ migration bytes matched HEAD, 0020 was absent, and `git diff --check` passed.
 These checks validate the contract artifacts; worker, concurrency, API and
 database behavior tests remain the implementation issues' acceptance work.
 
+The explicit-interest availability follow-up preserves all contract version
+identities and adds six invalid-shape rejection probes to the original 12.
+Memory fixtures retain all five preference values and exercise AVAILABLE and
+UNAVAILABLE, including null display fields without omission. Follow-up focused
+validation passed for the same 12 public examples, four receipts, one job and
+18 total rejection probes, including all six availability cases. Existing
+identity/seed/coordinate, delta reconstruction, version, privacy and 21-link
+checks still passed. Scope remains four documentation files with no production,
+test or migration changes; independent re-review must precede review-thread
+resolution or merge.
+
 | Concern | Classification | Severity | Disposition |
 | --- | --- | --- | --- |
+| Legal explicit choice may reference an entity with no current public display version | VALID | NORMAL | Required availability with strict conditional display fields; choice preserved; independent re-review pending |
 | Discovery sorted recent activity by original start only | STALE | NORMAL | Superseded by latest_activity_at contract and explicit acceptance cases |
 | Bootstrap/live overlap could double-count or publish invented transitions | VALID | HIGH | Freeze gated prefix baseline, unique source keys, C/B cutoff and race tests |
 | Treat node pin as immutable under all future versions | STALE | NORMAL | Freeze only world-projection/v1; reviewed future evolution remains possible |

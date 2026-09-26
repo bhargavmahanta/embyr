@@ -28,7 +28,8 @@
           "title": "TCP handshake",
           "preference": "NEUTRAL",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000002-2222-4222-8222-222222222222",
@@ -36,15 +37,17 @@
           "title": "Photosynthesis",
           "preference": "MORE",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000003-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Ocean tides",
+          "entity_version": null,
+          "title": null,
           "preference": "LESS",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         },
         {
           "entity_id": "00000004-2222-4222-8222-222222222222",
@@ -52,15 +55,17 @@
           "title": "Geometry",
           "preference": "PAUSED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000005-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Music",
+          "entity_version": null,
+          "title": null,
           "preference": "NOT_INTERESTED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         }
       ],
       "recently_explored": [
@@ -144,7 +149,8 @@
           "title": "TCP handshake",
           "preference": "NEUTRAL",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000002-2222-4222-8222-222222222222",
@@ -152,15 +158,17 @@
           "title": "Photosynthesis",
           "preference": "MORE",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000003-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Ocean tides",
+          "entity_version": null,
+          "title": null,
           "preference": "LESS",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         },
         {
           "entity_id": "00000004-2222-4222-8222-222222222222",
@@ -168,15 +176,17 @@
           "title": "Geometry",
           "preference": "PAUSED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000005-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Music",
+          "entity_version": null,
+          "title": null,
           "preference": "NOT_INTERESTED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         }
       ],
       "recently_explored": [
@@ -230,7 +240,8 @@
           "title": "TCP handshake",
           "preference": "NEUTRAL",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000002-2222-4222-8222-222222222222",
@@ -238,15 +249,17 @@
           "title": "Photosynthesis",
           "preference": "MORE",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000003-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Ocean tides",
+          "entity_version": null,
+          "title": null,
           "preference": "LESS",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         },
         {
           "entity_id": "00000004-2222-4222-8222-222222222222",
@@ -254,15 +267,17 @@
           "title": "Geometry",
           "preference": "PAUSED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "AVAILABLE"
         },
         {
           "entity_id": "00000005-2222-4222-8222-222222222222",
-          "entity_version": 1,
-          "title": "Music",
+          "entity_version": null,
+          "title": null,
           "preference": "NOT_INTERESTED",
           "version": 1,
-          "updated_at": "2026-09-25T09:00:00Z"
+          "updated_at": "2026-09-25T09:00:00Z",
+          "availability": "UNAVAILABLE"
         }
       ],
       "recently_explored": [

@@ -305,7 +305,7 @@ Top-level keys are exactly `contract_version`, `projection`,
 | --- | --- |
 | projection | model_version, source_sequence (processed), source_head_sequence (captured), status |
 | learning_preferences | null before onboarding; otherwise adventure_preference, preferred_effort, support_style, practical_opt_in, version |
-| explicit_interests | entity_id, entity_version, title, preference, version, updated_at |
+| explicit_interests | entity_id, entity_version, title, preference, version, updated_at, availability |
 | recently_explored | entity_id, entity_version, title, started_count, returned_count, completed_count, latest_activity_at |
 | recognition_evidence | objective_id, entity_id, entity_version, evidence_count, support_required, last_evidence_at, summary |
 | long_term_interests | always [] |
@@ -323,12 +323,39 @@ upgrade PENDING to CURRENT. An empty user has the strict empty shape.
 Learning preferences and explicit choices are read from current authoritative
 tables immediately, even with derived lag. Preserve all five preference values
 `NEUTRAL`, `MORE`, `LESS`, `PAUSED`, `NOT_INTERESTED`. Explicit interests cap at
-20 and sort `(updated_at DESC, entity_id ASC)`. Their entity version/title come
-from the same transaction's current public entity version. Title strings are
-bounded to 512 Unicode characters; slice public display titles to that bound
-without storing altered ontology content. Preference codes are bounded to the
-existing 64-character contract. Do not infer promotional interest from activity
-or override explicit suppression choices.
+20 and sort `(updated_at DESC, entity_id ASC)`. Required `availability` is
+`AVAILABLE` or `UNAVAILABLE`, resolved in the same owner-scoped read transaction.
+
+`AVAILABLE` requires that the LearningEntity exists, its status is REVIEWED or
+PUBLISHED, current_version is non-null, and the exact matching
+LearningEntityVersion row exists. Return the positive current `entity_version`
+and its non-empty public `title`. Title strings are bounded to 512 Unicode
+characters; slice public display titles to that bound without storing altered
+ontology content.
+
+`UNAVAILABLE` means the entity exists but has no current public display version:
+current_version is null or entity status is not REVIEWED/PUBLISHED. Return
+`entity_version=null` and `title=null`, preserving authoritative entity_id,
+preference, preference version and updated_at. Never select a historical
+version, invent a title/version or silently omit the explicit choice. If an
+entity claims a public/current version but its matching LearningEntityVersion
+row is missing, treat that as a data-integrity failure, not UNAVAILABLE.
+
+Unavailable preferences remain explicit learner choices. Include them with
+available choices in ordering, the max-20 cap and truncated calculation. GET
+must never delete/rewrite a preference, infer a replacement or promote/demote
+its value. UNAVAILABLE means only that the choice still exists while its entity
+lacks a current public display version; it does not mean deletion, changed
+intent or that the entity never existed. Preference codes remain bounded to
+the existing 64-character contract. Do not infer promotional interest from
+activity or override explicit suppression choices.
+
+The existing PUT `/api/v1/memory/interests/{entity_id}` behavior is unchanged by
+M6-01. This addition handles rows already legal under existing persistence/API
+behavior. Availability is a Memory read-model concern, with no M6-02 capture or
+M6-03 publication behavior depending on presentation availability. M3/M4
+recommendation semantics remain unchanged; recommendation code continues its
+existing deliverability/current-version rules independently of Memory display.
 
 Recent explorations cap at 10 **distinct entity/version pairs**, ordered
 `(latest_activity_at DESC, entity_id ASC, entity_version ASC)`. Title resolves
