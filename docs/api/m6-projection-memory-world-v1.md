@@ -100,8 +100,9 @@ receipt and other uses, but its time does not participate in placement ordering.
 At a processed horizon each encountered Exploration must have exactly one
 canonical start receipt. Multiple distinct `EXPLORATION_STARTED` receipts for
 one `exploration_id` are a bounded integrity failure; never silently select an
-earliest receipt, choose by source sequence, average times or consult mutable
-Exploration state.
+earliest receipt or choose a lowest sequence, earliest time or smallest UUID
+from conflicting duplicate starts. Validate uniqueness first, then rank valid
+distinct encounters. Do not average times or consult mutable Exploration state.
 
 ### Receipt field allowlists
 
@@ -287,10 +288,14 @@ For baseline reduction, use reconstructable history/current evidence at the
 cutoff, reconcile earlier captured transitions with the final status snapshot,
 deduplicate by source identity and response, and publish the final baseline
 once through the same reducer/publisher. Baseline first placement selects the
-minimum `(EXPLORATION_STARTED receipt.source_time, exploration_id)` per entity
-from valid distinct encounters in the immutable baseline receipts, then emits
-canonical additions at their highest currently justified growth. Compare source
-times by instant ascending, then canonical lowercase Exploration UUID ascending.
+minimum `EXPLORATION_STARTED.source_sequence` per entity among valid distinct
+encounter receipts in prefix `1..B`, then emits canonical additions at their
+highest currently justified growth. Historical facts imported during bootstrap
+may receive sequences after live receipts already present in `1..C`. Preserve
+the sequence actually assigned by the capture/bootstrap contract; do not reorder
+or reinterpret those receipts by historical timestamps. Baseline and incremental
+publication over the same immutable prefix must select the same entity-version
+pin.
 Do not separately query `explorations.started_at` for baseline pin ordering.
 It does not emit invented historical grow/correct revisions. Current facts
 cannot reconstruct every past correction-time state; that history stays unknown.
@@ -443,27 +448,43 @@ Node public object is exactly `id`, `entity_id`, `entity_version`, `region_id`,
 preserved. Entity version pins the first accepted placement and is frozen for
 `world-projection/v1`; no automatic repinning. This is not a promise of
 immutability across every future World contract: reviewed evolution may define
-repinning. For live groups with multiple first encounters choose minimum
-`(EXPLORATION_STARTED receipt.source_time, exploration_id)` among valid distinct
-encounters of the entity. Compare source times by instant ascending, then
-canonical lowercase Exploration UUID ascending. This is the same immutable
-ordering used by baseline reduction; already placed nodes keep their pins.
+repinning. For an entity with no existing node, collect valid distinct
+`EXPLORATION_STARTED` receipts in the currently processed prefix and choose the
+minimum `source_sequence`. That receipt's captured entity ID and entity version
+define the v1 node pin. This is the identical rule used by baseline reduction;
+already placed nodes keep their pins. Per-user source sequences are unique, so
+no UUID tie-break is required.
 Evidence for another entity version can affect its own objective state/Memory
 but cannot grow the old pin. Archetype is `branching_tree`, depth 0. DTOs omit
 source times, owner IDs, evidence references and arbitrary metadata.
 
-For placement, `source_time` is the immutable projection receipt envelope field
-derived from `learning_events.occurred_at` on `EXPLORATION_STARTED`. Source
-sequence, recommendation acceptance time, transaction ID, worker order and job
-order are not semantic encounter times. `explorations.started_at` is not a
-projection input for World placement. Changing it after capture must not change
-the selected entity version, node identity, World growth, fingerprints or replay
+`source_sequence` is the World encounter-precedence cursor: immutable, per-user,
+unique, positive, transactionally allocated, replayable, monotonic in publication
+order and already authoritative for projection processing. A later group cannot
+contain a lower sequence than an already published group. Thus incremental
+publication and complete-prefix replay select the same first encounter without
+repinning, buffering for unknown future timestamps, new World delta types,
+capture-schema changes or migration 0021.
+
+For canonical encounter receipts, `source_time` remains immutable factual event
+time derived from `learning_events.occurred_at`, and may be used where another frozen semantic rule
+explicitly requires factual time. It is not the World encounter-precedence
+cursor. An earlier source time arriving at a later sequence does not repin an
+existing node or, by itself, emit an extra World delta. Operational start time,
+receipt source time, event occurrence time, recommendation acceptance time,
+transaction ID, worker order, job order and UUID order do not define pin
+precedence. `explorations.started_at` is not a projection input for World
+placement. Changing it after capture must not change the selected entity version,
+node identity, World growth, fingerprints or replay
 result. Operational tables may still be consulted where this contract explicitly
 permits validation, but cannot replace immutable receipt facts.
 
 **Pre-implementation placement erratum.** The placement ordering correction
-replaces the earlier mutable Exploration start-time rule with immutable
-encounter receipt time. M6-03 has not been
+replaces the earlier mutable Exploration start-time rule with immutable start
+receipt sequence. The first proposed correction used immutable receipt time,
+but independent review found that later groups can contain earlier event times,
+making baseline and incremental pins disagree. The final correction uses the
+existing projection ordering cursor for encounter precedence. M6-03 has not been
 implemented, no World projection using the conflicting rule has been deployed,
 and no hosted/production M6 derived data exists. This is a pre-implementation
 erratum restoring receipt determinism, not a migration of an existing public

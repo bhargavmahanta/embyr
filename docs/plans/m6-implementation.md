@@ -79,11 +79,14 @@ Acceptance criteria:
 - Identity namespace, UUID derivations, UTF-8 SHA-256 encodings and binary64
   coordinate rule match fixtures. First placement pins entity version for v1;
   baseline and live placement both select the minimum
-  `(EXPLORATION_STARTED receipt.source_time, exploration_id)` among valid
-  distinct encounters, ordered by time instant then canonical lowercase UUID.
-  Only the immutable start receipt supplies encounter ordering; M4's acceptance
-  and start events count as one encounter. Duplicate distinct start receipts
-  for one Exploration fail with a bounded integrity category. Operational
+  `EXPLORATION_STARTED.source_sequence` among valid distinct encounters in the
+  processed prefix. Sequence is the immutable per-user unique positive,
+  transactionally allocated, replayable ordering cursor, monotonic in publication
+  order; no UUID tie-break is required. Only start receipts supply encounter
+  precedence; M4's acceptance and start events count as one encounter.
+  Duplicate distinct start receipts for one Exploration fail with a bounded
+  integrity category before ranking. Factual source time never defines pin
+  precedence. Operational
   `explorations.started_at` never supplies placement facts or changes replay.
   Later-version evidence cannot promote the pin. Region appears with first node,
   never from explicit preference alone; root can remain revision zero.
@@ -115,27 +118,42 @@ deletion concurrency; no mutation of historic sources or other state dimensions.
 
 First-placement acceptance cases for M6-03:
 
-- **A — Crossed times:** Two Explorations of the same entity use different
-  entity versions. A has an earlier operational `started_at` but a later
-  `EXPLORATION_STARTED.source_time`; B has a later operational start but an
-  earlier immutable encounter time. Pin B's entity version.
-- **B — Mutation after capture:** Capture the immutable start receipt, then
+- **A — Crossed event time / sequence:** Encounter A has source sequence 10,
+  later source time and entity version 1. Encounter B of the same entity has
+  source sequence 20, earlier source time and entity version 2. Pin version 1
+  because source sequence defines encounter precedence.
+- **B — Mutable operational start:** Capture the immutable start receipt, then
   mutate operational `Exploration.started_at`. Projection output and pin remain
   unchanged, including node identity, growth, fingerprints and replay result.
-- **C — Same source time:** Two distinct encounters have identical immutable
-  source times. The smaller canonical lowercase `exploration_id` wins across
-  replay, page sizes, process restarts and worker scheduling.
+- **C — Identical event times:** Two distinct encounters have identical source
+  times but different sequences. Lower source sequence wins across replay,
+  page sizes, process restarts and worker scheduling. No UUID tie-break is
+  required because per-user source sequence is unique.
 - **D — M4 two-event accept:** `RECOMMENDATION_ACCEPTED` followed by
   `EXPLORATION_STARTED` for the same Exploration contributes one encounter.
-  Only the start receipt's time participates in pin ordering; acceptance retains
-  its factual receipt and other uses.
-- **E — Baseline versus live:** Equivalent immutable encounter receipts
-  published through a baseline or ordinary live replay produce the same entity
-  version pin. Neither path queries operational start time for selection.
+  Only the start receipt's source sequence participates in pin precedence;
+  acceptance retains its factual receipt and other uses.
+- **E — Baseline versus live:** Given exactly the same immutable receipt prefix,
+  baseline reduction and incremental group publication choose the same entity
+  version pin, including the crossed-source-time example in case A. In baseline
+  prefix `1..B`, historical imports sequenced after live receipts in `1..C`
+  retain their assigned ordering; neither path reorders by historical time or
+  queries operational start time for selection.
 - **F — Duplicate start:** Two distinct `EXPLORATION_STARTED` receipts reference
-  one `exploration_id`. Refuse publication with a bounded integrity failure;
-  never choose an arbitrary or earliest start, use source sequence, average
-  times or consult mutable Exploration state.
+  one `exploration_id`. Refuse publication with a bounded integrity failure
+  before encounter precedence is applied. Never choose the lowest sequence,
+  earliest source time or smallest UUID from conflicting duplicate starts;
+  never average times or consult mutable Exploration state.
+
+Triggering two-group regression: G1 has a lower source sequence, later source
+time and entity version 1; G2 has a higher sequence, earlier source time and
+version 2 for the same entity. Live G1 then G2, complete-prefix replay and
+baseline over the same receipt prefix must all pin version 1. No repinning and
+no extra World delta merely because G2 has earlier factual time. Encounter
+precedence must not use operational start time, receipt source time, event
+occurrence time, recommendation acceptance time, transaction ID, worker order,
+job order or UUID order. The sequence rule avoids buffering for unknown future
+timestamps, new World delta types, capture-schema changes and migration 0021.
 
 The approved pre-implementation placement erratum keeps all six contract
 identities unchanged: M6-03 has not been implemented, no World projection using
@@ -143,7 +161,11 @@ the conflicting rule has been deployed, and no hosted/production M6 derived
 data exists. It restores receipt-only determinism before implementation; it
 does not migrate an existing public semantic stream. Receipt schema, fixtures
 and migration 0020 remain unchanged. Implementation must not add `started_at`
-to receipts or create migration 0021.
+to receipts or create migration 0021. `source_time` remains factual event time
+for other explicitly frozen uses, but is not the World encounter-precedence
+cursor. The first proposed immutable-time correction was insufficient because
+event time need not be monotonic with publication order; the final correction
+uses the existing authoritative receipt sequence.
 
 ## M6-04 — Private bounded Memory and World reads
 
@@ -280,7 +302,8 @@ resolution or merge.
 
 | Concern | Classification | Severity | Disposition |
 | --- | --- | --- | --- |
-| Placement ordering required mutable Exploration start time absent from receipts | VALID | NORMAL | Pre-implementation erratum uses canonical EXPLORATION_STARTED receipt time plus Exploration UUID for baseline/live placement; duplicate starts fail; independent review pending |
+| Placement ordering required mutable Exploration start time absent from receipts | VALID | NORMAL | Pre-implementation erratum uses minimum canonical EXPLORATION_STARTED source sequence for baseline/live placement; duplicate starts fail before ranking; independent re-review pending |
+| Immutable source time can arrive out of order relative to incremental publication | VALID | NORMAL | Final precedence uses the existing immutable receipt sequence; crossed-time two-group baseline/live/replay regression specified; existing pins remain fixed; independent re-review pending |
 | Legal explicit choice may reference an entity with no current public display version | VALID | NORMAL | Required availability with strict conditional display fields; choice preserved; independent re-review pending |
 | Discovery sorted recent activity by original start only | STALE | NORMAL | Superseded by latest_activity_at contract and explicit acceptance cases |
 | Bootstrap/live overlap could double-count or publish invented transitions | VALID | HIGH | Freeze gated prefix baseline, unique source keys, C/B cutoff and race tests |
