@@ -94,6 +94,14 @@ It must retain every actual evidence transition in the group without inventing
 intermediate projected states. M4 acceptance/start events are supported even
 without the M5 metadata contract marker. One accepted Exploration contributes
 one encounter, regardless of the two ledger events emitted by M4.
+`EXPLORATION_STARTED` is the sole canonical encounter receipt for World ordering
+and first-placement selection. `RECOMMENDATION_ACCEPTED` retains its factual
+receipt and other uses, but its time does not participate in placement ordering.
+At a processed horizon each encountered Exploration must have exactly one
+canonical start receipt. Multiple distinct `EXPLORATION_STARTED` receipts for
+one `exploration_id` are a bounded integrity failure; never silently select an
+earliest receipt, choose by source sequence, average times or consult mutable
+Exploration state.
 
 ### Receipt field allowlists
 
@@ -279,8 +287,11 @@ For baseline reduction, use reconstructable history/current evidence at the
 cutoff, reconcile earlier captured transitions with the final status snapshot,
 deduplicate by source identity and response, and publish the final baseline
 once through the same reducer/publisher. Baseline first placement selects the
-earliest accepted Exploration by `(started_at, exploration_id)` per entity,
-then emits canonical additions at their highest currently justified growth.
+minimum `(EXPLORATION_STARTED receipt.source_time, exploration_id)` per entity
+from valid distinct encounters in the immutable baseline receipts, then emits
+canonical additions at their highest currently justified growth. Compare source
+times by instant ascending, then canonical lowercase Exploration UUID ascending.
+Do not separately query `explorations.started_at` for baseline pin ordering.
 It does not emit invented historical grow/correct revisions. Current facts
 cannot reconstruct every past correction-time state; that history stays unknown.
 After bootstrap releases the lock, new transactions receive sequences `B+1`
@@ -433,10 +444,33 @@ preserved. Entity version pins the first accepted placement and is frozen for
 `world-projection/v1`; no automatic repinning. This is not a promise of
 immutability across every future World contract: reviewed evolution may define
 repinning. For live groups with multiple first encounters choose minimum
-`(started_at, exploration_id)`; already placed nodes keep their pins. Evidence
-for another entity version can affect its own objective state/Memory but cannot
-grow the old pin. Archetype is `branching_tree`, depth 0. DTOs omit source times,
-owner IDs, evidence references and arbitrary metadata.
+`(EXPLORATION_STARTED receipt.source_time, exploration_id)` among valid distinct
+encounters of the entity. Compare source times by instant ascending, then
+canonical lowercase Exploration UUID ascending. This is the same immutable
+ordering used by baseline reduction; already placed nodes keep their pins.
+Evidence for another entity version can affect its own objective state/Memory
+but cannot grow the old pin. Archetype is `branching_tree`, depth 0. DTOs omit
+source times, owner IDs, evidence references and arbitrary metadata.
+
+For placement, `source_time` is the immutable projection receipt envelope field
+derived from `learning_events.occurred_at` on `EXPLORATION_STARTED`. Source
+sequence, recommendation acceptance time, transaction ID, worker order and job
+order are not semantic encounter times. `explorations.started_at` is not a
+projection input for World placement. Changing it after capture must not change
+the selected entity version, node identity, World growth, fingerprints or replay
+result. Operational tables may still be consulted where this contract explicitly
+permits validation, but cannot replace immutable receipt facts.
+
+**Pre-implementation placement erratum.** The placement ordering correction
+replaces the earlier mutable Exploration start-time rule with immutable
+encounter receipt time. M6-03 has not been
+implemented, no World projection using the conflicting rule has been deployed,
+and no hosted/production M6 derived data exists. This is a pre-implementation
+erratum restoring receipt determinism, not a migration of an existing public
+semantic stream. Contract identities remain `projection-input/v1`,
+`projection-worker/v1`, `learner-projection/v1`, `memory-summary/v1`,
+`world-projection/v1` and `world-delta/v1`. Receipt schema, fixtures and migration
+0020 remain unchanged; no new migration is required.
 
 For the pinned entity version select the highest justified growth:
 

@@ -78,7 +78,14 @@ Acceptance criteria:
   reopen a completed Exploration.
 - Identity namespace, UUID derivations, UTF-8 SHA-256 encodings and binary64
   coordinate rule match fixtures. First placement pins entity version for v1;
-  later-version evidence cannot promote the pin. Region appears with first node,
+  baseline and live placement both select the minimum
+  `(EXPLORATION_STARTED receipt.source_time, exploration_id)` among valid
+  distinct encounters, ordered by time instant then canonical lowercase UUID.
+  Only the immutable start receipt supplies encounter ordering; M4's acceptance
+  and start events count as one encounter. Duplicate distinct start receipts
+  for one Exploration fail with a bounded integrity category. Operational
+  `explorations.started_at` never supplies placement facts or changes replay.
+  Later-version evidence cannot promote the pin. Region appears with first node,
   never from explicit preference alone; root can remain revision zero.
 - Highest factual SEED/SPROUT/YOUNG growth only, correction-only regression,
   ESTABLISHED unreachable, stable placement, empty connections/artifacts.
@@ -105,6 +112,38 @@ and corrupt-lineage cases; min/any/max/dedup; revoked/superseded replacement;
 multi-version pinning; bootstrap overlap; repeated/out-of-order jobs; exact
 lease-boundary tests; atomic fault injection; canonical delta/replay snapshots;
 deletion concurrency; no mutation of historic sources or other state dimensions.
+
+First-placement acceptance cases for M6-03:
+
+- **A — Crossed times:** Two Explorations of the same entity use different
+  entity versions. A has an earlier operational `started_at` but a later
+  `EXPLORATION_STARTED.source_time`; B has a later operational start but an
+  earlier immutable encounter time. Pin B's entity version.
+- **B — Mutation after capture:** Capture the immutable start receipt, then
+  mutate operational `Exploration.started_at`. Projection output and pin remain
+  unchanged, including node identity, growth, fingerprints and replay result.
+- **C — Same source time:** Two distinct encounters have identical immutable
+  source times. The smaller canonical lowercase `exploration_id` wins across
+  replay, page sizes, process restarts and worker scheduling.
+- **D — M4 two-event accept:** `RECOMMENDATION_ACCEPTED` followed by
+  `EXPLORATION_STARTED` for the same Exploration contributes one encounter.
+  Only the start receipt's time participates in pin ordering; acceptance retains
+  its factual receipt and other uses.
+- **E — Baseline versus live:** Equivalent immutable encounter receipts
+  published through a baseline or ordinary live replay produce the same entity
+  version pin. Neither path queries operational start time for selection.
+- **F — Duplicate start:** Two distinct `EXPLORATION_STARTED` receipts reference
+  one `exploration_id`. Refuse publication with a bounded integrity failure;
+  never choose an arbitrary or earliest start, use source sequence, average
+  times or consult mutable Exploration state.
+
+The approved pre-implementation placement erratum keeps all six contract
+identities unchanged: M6-03 has not been implemented, no World projection using
+the conflicting rule has been deployed, and no hosted/production M6 derived
+data exists. It restores receipt-only determinism before implementation; it
+does not migrate an existing public semantic stream. Receipt schema, fixtures
+and migration 0020 remain unchanged. Implementation must not add `started_at`
+to receipts or create migration 0021.
 
 ## M6-04 — Private bounded Memory and World reads
 
@@ -241,6 +280,7 @@ resolution or merge.
 
 | Concern | Classification | Severity | Disposition |
 | --- | --- | --- | --- |
+| Placement ordering required mutable Exploration start time absent from receipts | VALID | NORMAL | Pre-implementation erratum uses canonical EXPLORATION_STARTED receipt time plus Exploration UUID for baseline/live placement; duplicate starts fail; independent review pending |
 | Legal explicit choice may reference an entity with no current public display version | VALID | NORMAL | Required availability with strict conditional display fields; choice preserved; independent re-review pending |
 | Discovery sorted recent activity by original start only | STALE | NORMAL | Superseded by latest_activity_at contract and explicit acceptance cases |
 | Bootstrap/live overlap could double-count or publish invented transitions | VALID | HIGH | Freeze gated prefix baseline, unique source keys, C/B cutoff and race tests |
