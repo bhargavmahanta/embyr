@@ -1175,3 +1175,238 @@ def test_non_rfc3339_source_time_aborts_source_and_capture(
             ).scalar_one()
             == 1
         )
+
+
+def projection_role(c, role, owner):
+    # Match a direct runtime login, including role='none'. A guard based only on
+    # current_setting('role') would miss these connections. LOCAL resets on exit.
+    execute(c, f"set local session authorization {role}")
+    execute(c, "select set_config('app.user_id',:u,true)", u=str(owner))
+    assert execute(
+        c, "select current_user,session_user,current_setting('role')"
+    ).one() == (role, role, "none")
+
+
+def test_backend_cannot_insert_projection_job_directly(isolated_migrated_database):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+    with db.engine.begin() as c:
+        payload = execute(c, "select payload from jobs").scalar_one()
+        execute(c, "delete from jobs")
+        projection_role(c, "app_backend", owner)
+        with pytest.raises(DBAPIError, match="M6_JOB_ROLE") as error, c.begin_nested():
+            execute(
+                c,
+                "insert into jobs(user_id,job_type,status,payload) values(:u,'LEARNER_PROJECTION','PENDING',cast(:p as jsonb))",
+                u=owner,
+                p=json.dumps(payload),
+            )
+        assert error.value.orig.sqlstate == "42501"
+        assert execute(c, "select count(*) from jobs").scalar_one() == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "status='SUCCEEDED'",
+        "status='FAILED'",
+        "attempt_count=1",
+        "locked_at=now()",
+        "locked_by='request'",
+        "available_at=now()+interval '1 hour'",
+        "completed_at=now()",
+        "payload=payload",
+        "user_id=user_id",
+        "job_type='ASSESSMENT_EVALUATION'",
+    ],
+)
+def test_backend_cannot_update_projection_job(isolated_migrated_database, change):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+    with db.engine.begin() as c:
+        before = execute(c, "select to_jsonb(j) from jobs j").scalar_one()
+        projection_role(c, "app_backend", owner)
+        with pytest.raises(DBAPIError, match="M6_JOB_ROLE") as error, c.begin_nested():
+            execute(c, f"update jobs set {change} where user_id=:u", u=owner)
+        assert error.value.orig.sqlstate == "42501"
+        assert execute(c, "select to_jsonb(j) from jobs j").scalar_one() == before
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "status='SUCCEEDED'",
+        "status='FAILED'",
+        "attempt_count=1",
+        "locked_at=now()",
+        "locked_by='maintenance'",
+        "available_at=now()+interval '1 hour'",
+        "completed_at=now()",
+    ],
+)
+def test_capture_role_cannot_change_projection_lifecycle_even_in_source_group(
+    isolated_migrated_database, change
+):
+    with isolated_migrated_database.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+        execute(c, "set constraints all immediate")
+        execute(c, "set local role app_maintenance")
+        with pytest.raises(DBAPIError, match="M6_JOB_LIFECYCLE"), c.begin_nested():
+            execute(c, f"update jobs set {change} where user_id=:u", u=owner)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "status='RUNNING'",
+        "attempt_count=1",
+        "locked_at=now()",
+        "locked_by='claim'",
+        "completed_at=now()",
+    ],
+)
+def test_projection_job_initial_state_is_pending_unclaimed(
+    isolated_migrated_database, change
+):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+    with db.engine.begin() as c:
+        row = execute(c, "select to_jsonb(j) from jobs j").scalar_one()
+        execute(c, "delete from jobs")
+        execute(c, "set local role app_maintenance")
+        column, value = change.split("=", 1)
+        with pytest.raises(DBAPIError, match="M6_JOB_INITIAL_STATE"), c.begin_nested():
+            if column == "status":
+                execute(
+                    c,
+                    f"insert into jobs(user_id,job_type,status,payload) values(:u,'LEARNER_PROJECTION',{value},cast(:p as jsonb))",
+                    u=owner,
+                    p=json.dumps(row["payload"]),
+                )
+            else:
+                execute(
+                    c,
+                    f"insert into jobs(user_id,job_type,status,payload,{column}) values(:u,'LEARNER_PROJECTION','PENDING',cast(:p as jsonb),{value})",
+                    u=owner,
+                    p=json.dumps(row["payload"]),
+                )
+
+
+def test_backend_sources_still_create_and_extend_one_trusted_pending_job(
+    isolated_migrated_database,
+):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+    with db.engine.begin() as c:
+        projection_role(c, "app_backend", owner)
+        onboard(c, owner)
+        execute(
+            c,
+            "insert into learning_events(user_id,event_type,occurred_at,schema_version,metadata) select :u,'ONBOARDING_COMPLETED',now(),1,jsonb_build_object('preferences_version',1) from generate_series(1,2)",
+            u=owner,
+        )
+    with db.engine.connect() as c:
+        row = execute(
+            c,
+            "select status,attempt_count,locked_at,locked_by,completed_at,payload from jobs",
+        ).one()
+        assert row[:5] == ("PENDING", 0, None, None, None)
+        assert row.payload["first_source_sequence"] == 1
+        assert row.payload["last_source_sequence"] == 3
+        assert execute(c, "select count(*) from projection_inputs").scalar_one() == 3
+
+
+@pytest.mark.parametrize("terminal", ["SUCCEEDED", "FAILED"])
+def test_worker_can_update_projection_lifecycle(isolated_migrated_database, terminal):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+    with db.engine.begin() as c:
+        projection_role(c, "app_worker", owner)
+        execute(
+            c,
+            "update jobs set status='RUNNING',attempt_count=attempt_count+1,locked_at=now(),locked_by='future-worker',available_at=now()+interval '1 minute' where user_id=:u",
+            u=owner,
+        )
+    with db.engine.begin() as c:
+        projection_role(c, "app_worker", owner)
+        execute(
+            c,
+            "update jobs set status=:s,locked_at=null,locked_by=null,completed_at=now() where user_id=:u",
+            u=owner,
+            s=terminal,
+        )
+    with db.engine.connect() as c:
+        row = execute(
+            c, "select status,attempt_count,locked_at,locked_by,completed_at from jobs"
+        ).one()
+        assert row[:4] == (terminal, 1, None, None)
+        assert row.completed_at is not None
+
+
+def test_backend_evaluation_job_insert_update_is_unchanged(isolated_migrated_database):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+    with db.engine.begin() as c:
+        projection_role(c, "app_backend", owner)
+        job = execute(
+            c,
+            "insert into jobs(user_id,job_type,status,payload) values(:u,'ASSESSMENT_EVALUATION','PENDING','{}') returning id",
+            u=owner,
+        ).scalar_one()
+        execute(
+            c,
+            "update jobs set status='RUNNING',attempt_count=1,available_at=now(),locked_at=now(),locked_by='request',payload=cast(:p as jsonb) where id=:j",
+            j=job,
+            p=json.dumps({"retry": True}),
+        )
+        execute(
+            c,
+            "update jobs set status='SUCCEEDED',locked_at=null,locked_by=null,completed_at=now() where id=:j",
+            j=job,
+        )
+        row = execute(
+            c,
+            "select status,attempt_count,payload,completed_at from jobs where id=:j",
+            j=job,
+        ).one()
+        assert row[:3] == ("SUCCEEDED", 1, {"retry": True})
+        assert row.completed_at is not None
+
+
+@pytest.mark.parametrize("status", ["PENDING", "SUCCEEDED"])
+def test_maintenance_cannot_convert_other_job_into_projection(
+    isolated_migrated_database, status
+):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+        onboard(c, owner)
+    with db.engine.begin() as c:
+        payload = execute(c, "select payload from jobs").scalar_one()
+        execute(c, "delete from jobs")
+        job = execute(
+            c,
+            "insert into jobs(user_id,job_type,status,attempt_count,payload) values(:u,'ASSESSMENT_EVALUATION',:s,1,cast(:p as jsonb)) returning id",
+            u=owner,
+            s=status,
+            p=json.dumps(payload),
+        ).scalar_one()
+        execute(c, "set local role app_maintenance")
+        with pytest.raises(DBAPIError, match="M6_JOB_IDENTITY"), c.begin_nested():
+            execute(
+                c, "update jobs set job_type='LEARNER_PROJECTION' where id=:j", j=job
+            )
+        assert execute(
+            c, "select job_type,status from jobs where id=:j", j=job
+        ).one() == ("ASSESSMENT_EVALUATION", status)

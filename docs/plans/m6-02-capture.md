@@ -60,8 +60,17 @@ inventing historical numbers. Alembic's revision column remains widened to 64
 characters on rollback because Alembic writes the preceding revision only after
 the downgrade completes.
 
-Verification: 55 focused foundation tests, 145 targeted database regressions,
+Verification: 84 focused foundation tests, 145 targeted database regressions,
 346 backend tests and 856 frozen M3 tests passed on disposable local PostgreSQL
 16 with pgvector. Frozen fixture/schema checks and all 21 historical migration
 byte comparisons passed. Review findings on job shape, final run snapshots,
 timestamp bounds and non-superuser downgrade cleanup were resolved.
+
+The independent job-lifecycle finding adds 29 real-role regressions. The job
+guard rejects direct backend projection INSERT/UPDATE using `current_user`,
+including direct-login semantics where the role setting is `none`. Trusted
+capture creates only PENDING, unclaimed jobs and can extend their payload only
+inside the original source group; it cannot change lifecycle fields. Worker
+lifecycle updates remain allowed. Conversion into or out of the projection job
+type is rejected, while other job types retain their existing queue behavior.
+The independent review thread remains open for re-review after this patch.

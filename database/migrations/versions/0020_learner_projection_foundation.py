@@ -417,7 +417,24 @@ deferrable initially deferred for each row execute function public.m6_validate_j
 create function public.m6_job_shape() returns trigger
 language plpgsql set search_path=pg_catalog,public,pg_temp as $$
 begin
- if tg_op='UPDATE' and old.job_type='LEARNER_PROJECTION' and new.job_type<>old.job_type then
+ -- Check the effective database identity, including direct runtime logins.
+ -- Capture calls this invoker guard as its SECURITY DEFINER owner instead.
+ if (new.job_type='LEARNER_PROJECTION' or
+  (tg_op='UPDATE' and old.job_type='LEARNER_PROJECTION')) and current_user='app_backend' then
+  raise exception 'M6_JOB_ROLE' using errcode='42501';
+ end if;
+ if tg_op='INSERT' and new.job_type='LEARNER_PROJECTION' and
+  (new.status is distinct from 'PENDING' or new.attempt_count is distinct from 0 or
+   new.locked_at is not null or new.locked_by is not null or new.completed_at is not null) then
+  raise exception 'M6_JOB_INITIAL_STATE' using errcode='23514';
+ end if;
+ if tg_op='UPDATE' and old.job_type='LEARNER_PROJECTION' and current_user='app_maintenance' and
+  (to_jsonb(new)-'payload' is distinct from to_jsonb(old)-'payload' or
+   old.payload->>'source_group' is distinct from pg_current_xact_id()::text) then
+  raise exception 'M6_JOB_LIFECYCLE' using errcode='42501';
+ end if;
+ if tg_op='UPDATE' and new.job_type is distinct from old.job_type and
+  (old.job_type='LEARNER_PROJECTION' or new.job_type='LEARNER_PROJECTION') then
   raise exception 'M6_JOB_IDENTITY' using errcode='23514';
  end if;
  if new.job_type<>'LEARNER_PROJECTION' then return new; end if;
