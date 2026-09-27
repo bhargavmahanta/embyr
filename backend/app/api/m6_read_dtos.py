@@ -213,3 +213,18 @@ class WorldDeltaPage(PublicModel):
     current_revision: Revision
     has_more: StrictBool
     changes: Annotated[list[WorldChange], Field(max_length=1000)]
+
+
+class WorldResyncDetails(PublicModel):
+    after_revision: Sequence
+    current_revision: Revision
+
+
+class WorldResyncRequired(PublicModel):
+    type: Literal["about:blank"]
+    title: Literal["World resync required"]
+    status: Literal[409]
+    code: Literal["WORLD_RESYNC_REQUIRED"]
+    detail: Literal["Fetch the World snapshot before requesting further changes."]
+    request_id: UUID
+    details: WorldResyncDetails

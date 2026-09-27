@@ -19,13 +19,13 @@ The #106 worktree was inspected read-only and is not reused.
 
 ## Read transaction and privacy
 
-Authentication retains its ordinary request session. Resolving the principal
-already starts that transaction, so changing its isolation afterward is unsafe.
-Each read opens a separate AsyncSession from the configured factory. Its first
-statement sets REPEATABLE READ and READ ONLY; the next sets transaction-local
-`app.user_id`. All owned repositories add explicit owner predicates. Teardown
-rolls back and closes the read session. No repair, initialization or publication
-occurs on a GET.
+Bearer verification has no database I/O. Each read opens one AsyncSession from
+the configured factory. Its first statement sets REPEATABLE READ and READ ONLY;
+it then resolves the verified external identity to an existing `app_users.id`
+inside that snapshot. An unmapped identity returns 401 without a virtual read.
+The same transaction sets transaction-local `app.user_id` before owner-scoped
+queries. Teardown rolls back and closes the session. No repair, initialization
+or publication occurs on a GET.
 
 Database exceptions and invalid read-model DTOs become bounded
 `M6_READ_UNAVAILABLE` application errors. SQL, parameters and learner content
@@ -83,13 +83,12 @@ history at or before the accepted cursor is irrelevant.
 
 ## Verification
 
-The final backend plus M6-04 run passed 457 tests: 422 backend tests (including
-32 M6-04 contract/DTO checks) and 35 M6-04 database integration tests.
-The M6-04 focused total is 67. The full selected regression batch passed
-1,589 tests before the final boolean-coercion guard; the final 457-test rerun
-covers all backend and M6-04 checks after that guard. These runs verify 1,592
-distinct tests: 422 backend, 856 frozen M3, 145 existing M4/M5 database checks,
-84 capture-foundation checks, 50 publisher checks and 35 M6-04 database checks.
+The current backend plus M6-04 run passed 464 tests: 422 backend tests
+(including 32 M6-04 contract/DTO checks) and 42 M6-04 database integration
+tests. The focused M6-04 total is 74. The full selected regression batch
+passed 1,599 tests after the single-transaction and OpenAPI fixes: 422 backend,
+856 frozen M3, 145 existing M4/M5 database checks, 84 capture-foundation
+checks, 50 publisher checks and 42 M6-04 database checks.
 M6-03 coverage totals 94 (44 reducer plus 50 publisher). Both runs reported
 one upstream Starlette TestClient deprecation warning and zero test failures.
 Alembic check passed with no new upgrade operations; all 22 migration files
@@ -100,8 +99,10 @@ AUTHORIZATION app_backend`, and existing migration/grant policy. They do not
 contact hosted databases. Native test provisioning is separate from the
 production TLS engine policy, which is unchanged.
 
-The integration matrix includes actual isolation/read-only settings, attempted
-write rejection, pooled owner-context cleanup, strict empty reads, freshness,
+The integration matrix includes single-connection route reads with a pool of
+one, actual isolation/read-only settings, resolved owner context, deleted-user
+401 behavior, attempted write rejection, pooled owner-context cleanup, strict
+empty reads, freshness,
 authoritative preferences/choices, availability integrity, Unicode title
 bounds, historical activity, safety-only recognition omission, support/latest
 recomputation, bounds/ties, privacy, cross-user isolation, full-suffix history
@@ -113,14 +114,17 @@ No production persistence or privilege rule is weakened for those probes.
 
 The contract suite validates all 12 frozen public examples, strict nested DTOs,
 UTC-aware times and rejection of booleans in numeric constants,
-OpenAPI response models, ASCII query grammar, large limit clamping, and actual
+integer OpenAPI query schemas, the strict 409 response model, ASCII query
+grammar, large limit clamping, and actual
 representative responses against the frozen JSON schema.
 
 ## Local performance characterization
 
-Single local characterization, without an SLA. Query counts include
-principal authentication, owner context and read-transaction setup. Rows are
-returned public entries; continuity scans do not load payloads.
+Initial candidate characterization, before the single-transaction follow-up;
+query counts included separate principal authentication and read transactions
+and therefore do not describe the current request flow. Retained as historical
+measurements without an SLA. Rows are returned public entries; continuity
+scans do not load payloads.
 
 | Scenario | Queries | Public entries | Elapsed ms |
 | --- | ---: | ---: | ---: |
@@ -164,5 +168,8 @@ with historical evidence retained. Internal source review found one
 IMPLEMENTATION_DIVERGENCE · LOW: Pydantic numeric Literal fields admitted and
 normalized bool values that the frozen schema rejects. A shared before-validator
 and three previously failing probes resolve it. The reviewer verified rejection
-and unchanged public fixture round-trips; no actionable finding remains.
-Independent GitHub PR review is still required; this operation does not merge.
+and unchanged public fixture round-trips. Independent PR review then found the
+two-session pool-starvation risk (VALID · NORMAL) and string OpenAPI parameters
+(IMPLEMENTATION_DIVERGENCE · LOW). This follow-up resolves them with one
+read-only transaction and integer public query schemas; both review threads
+remain open for independent re-review. This operation does not merge.

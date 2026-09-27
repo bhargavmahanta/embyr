@@ -1,14 +1,20 @@
-"""Private M6 read routes; auth session is never reused for read isolation."""
+"""Private M6 reads resolve verified identity in their isolated transaction."""
 
 import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import ValidationError
+from pydantic import BeforeValidator, ValidationError, WithJsonSchema
 
-from app.api.deps import get_principal
-from app.api.m6_read_dtos import BIGINT, MemorySummary, WorldDeltaPage, WorldSnapshot
-from app.auth.principal import AuthenticatedPrincipal
+from app.api.deps import get_external_identity
+from app.api.m6_read_dtos import (
+    BIGINT,
+    MemorySummary,
+    WorldDeltaPage,
+    WorldResyncRequired,
+    WorldSnapshot,
+)
+from app.auth.principal import ExternalIdentity
 from app.learning.memory_read import memory_summary
 from app.learning.read_transactions import integrity_error, read_transaction
 from app.learning.world_read import world_changes, world_snapshot
@@ -19,13 +25,14 @@ router = APIRouter(prefix="/api/v1", tags=["Memory and World"])
 @router.get("/memory/summary", response_model=MemorySummary)
 async def memory(
     request: Request,
-    principal: Annotated[AuthenticatedPrincipal, Depends(get_principal)],
+    identity: Annotated[ExternalIdentity, Depends(get_external_identity)],
 ):
     try:
-        async with read_transaction(
-            request.app.state.session_factory, principal.user_id
-        ) as session:
-            return await memory_summary(session, principal.user_id)
+        async with read_transaction(request.app.state.session_factory, identity) as (
+            session,
+            user_id,
+        ):
+            return await memory_summary(session, user_id)
     except ValidationError:
         raise integrity_error() from None
 
@@ -33,13 +40,14 @@ async def memory(
 @router.get("/world", response_model=WorldSnapshot)
 async def world(
     request: Request,
-    principal: Annotated[AuthenticatedPrincipal, Depends(get_principal)],
+    identity: Annotated[ExternalIdentity, Depends(get_external_identity)],
 ):
     try:
-        async with read_transaction(
-            request.app.state.session_factory, principal.user_id
-        ) as session:
-            return await world_snapshot(session, principal.user_id)
+        async with read_transaction(request.app.state.session_factory, identity) as (
+            session,
+            user_id,
+        ):
+            return await world_snapshot(session, user_id)
     except ValidationError:
         raise integrity_error() from None
 
@@ -47,7 +55,9 @@ async def world(
 def query_integer(value, *, minimum, maximum=None):
     # Compare decimal text before converting, so enormous positive limits
     # still clamp without Python's integer-string length limit or DB overflow.
-    if not re.fullmatch(r"[0-9]+", value):
+    if type(value) is int:
+        value = str(value)
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value):
         raise HTTPException(status_code=422, detail="Invalid integer query parameter")
     digits = value.lstrip("0") or "0"
     if minimum == 1 and digits == "0":
@@ -62,19 +72,36 @@ def query_integer(value, *, minimum, maximum=None):
     return int(digits)
 
 
-@router.get("/world/changes", response_model=WorldDeltaPage)
+AfterRevision = Annotated[
+    int,
+    BeforeValidator(lambda raw: query_integer(raw, minimum=0, maximum=BIGINT)),
+    WithJsonSchema({"type": "integer", "minimum": 0}),
+    Query(),
+]
+PageLimit = Annotated[
+    int,
+    BeforeValidator(lambda raw: query_integer(raw, minimum=1)),
+    WithJsonSchema({"type": "integer", "minimum": 1}),
+    Query(),
+]
+
+
+@router.get(
+    "/world/changes",
+    response_model=WorldDeltaPage,
+    responses={409: {"model": WorldResyncRequired}},
+)
 async def changes(
     request: Request,
-    after_revision: Annotated[str, Query()],
-    principal: Annotated[AuthenticatedPrincipal, Depends(get_principal)],
-    limit: Annotated[str, Query()] = "500",
+    after_revision: AfterRevision,
+    identity: Annotated[ExternalIdentity, Depends(get_external_identity)],
+    limit: PageLimit = 500,
 ):
-    cursor = query_integer(after_revision, minimum=0, maximum=BIGINT)
-    page_size = query_integer(limit, minimum=1)
     try:
-        async with read_transaction(
-            request.app.state.session_factory, principal.user_id
-        ) as session:
-            return await world_changes(session, principal.user_id, cursor, page_size)
+        async with read_transaction(request.app.state.session_factory, identity) as (
+            session,
+            user_id,
+        ):
+            return await world_changes(session, user_id, after_revision, limit)
     except ValidationError:
         raise integrity_error() from None

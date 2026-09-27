@@ -1,4 +1,4 @@
-"""Authenticated reads use a fresh transaction, independently of auth SQL."""
+"""Resolve identity and read projections in one isolated transaction."""
 
 from contextlib import asynccontextmanager
 
@@ -6,6 +6,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.errors import AppError
+from app.auth.principal import AuthError, AuthFailure, ExternalIdentity
+from app.auth.users import resolve_user_id
 from app.db.session import set_current_user
 
 
@@ -19,7 +21,7 @@ def integrity_error():
 
 
 @asynccontextmanager
-async def read_transaction(factory, user_id):
+async def read_transaction(factory, identity: ExternalIdentity):
     try:
         async with factory() as session:
             try:
@@ -27,8 +29,11 @@ async def read_transaction(factory, user_id):
                 await session.execute(
                     text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 )
+                user_id = await resolve_user_id(session, identity)
+                if user_id is None:
+                    raise AuthError(AuthFailure.UNMAPPED_IDENTITY)
                 await set_current_user(session, user_id)
-                yield session
+                yield session, user_id
             finally:
                 await session.rollback()
     except SQLAlchemyError:

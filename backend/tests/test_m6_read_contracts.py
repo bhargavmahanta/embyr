@@ -7,6 +7,7 @@ import pytest
 from app.api.m6_read_dtos import (
     MemorySummary,
     WorldDeltaPage,
+    WorldResyncRequired,
     WorldSnapshot,
 )
 from app.api.m6_reads import query_integer
@@ -49,6 +50,7 @@ def test_frozen_public_examples(name):
         "memorySummary": MemorySummary,
         "worldSnapshot": WorldSnapshot,
         "worldDeltaPage": WorldDeltaPage,
+        "worldResyncRequired": WorldResyncRequired,
     }.get(schema_name)
     if model:
         result = model.model_validate_json(json.dumps(value)).model_dump(mode="json")
@@ -108,6 +110,23 @@ def test_openapi_closed_response_models():
         "WorldDeltaPage",
     ]:
         assert schema["components"]["schemas"][name]["additionalProperties"] is False
+
+    changes = schema["paths"]["/api/v1/world/changes"]["get"]
+    params = {item["name"]: item for item in changes["parameters"]}
+    assert params["after_revision"]["required"] is True
+    assert params["after_revision"]["schema"]["type"] == "integer"
+    assert params["after_revision"]["schema"]["minimum"] == 0
+    assert params["limit"]["required"] is False
+    assert params["limit"]["schema"]["type"] == "integer"
+    assert params["limit"]["schema"]["minimum"] == 1
+    assert params["limit"]["schema"]["default"] == 500
+    assert changes["responses"]["409"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/WorldResyncRequired")
+    assert (
+        schema["components"]["schemas"]["WorldResyncRequired"]["additionalProperties"]
+        is False
+    )
 
 
 def test_dtos_reject_naive_times_and_string_coordinates():

@@ -15,8 +15,8 @@ class Verifier:
         return ExternalIdentity("SUPABASE", token)
 
 
-def client_for(db):
-    engine = create_async_engine(db.url)
+def client_for(db, **pool_options):
+    engine = create_async_engine(db.url, **pool_options)
 
     @event.listens_for(engine.sync_engine, "connect")
     def role(connection, _):
@@ -130,6 +130,82 @@ def subject_for(db, owner):
         )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/memory/summary",
+        "/api/v1/world",
+        "/api/v1/world/changes?after_revision=0",
+    ],
+)
+def test_m6_route_uses_one_read_only_connection(isolated_migrated_database, path):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+    subject = subject_for(db, owner)
+    client, engine = client_for(db, pool_size=1, max_overflow=0, pool_timeout=0.25)
+    statements = []
+    contexts = []
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def record_statement(conn, cursor, statement, params, context, many):
+        statements.append(statement)
+
+    @event.listens_for(engine.sync_engine, "after_cursor_execute")
+    def record_context(conn, cursor, statement, params, context, many):
+        if "set_config('app.user_id'" in statement:
+            contexts.append(
+                tuple(
+                    conn.exec_driver_sql(
+                        "select current_setting('transaction_isolation'), "
+                        "current_setting('transaction_read_only'), "
+                        "current_setting('app.user_id')"
+                    ).one()
+                )
+            )
+
+    with client:
+        response = client.get(path, headers=headers(subject))
+        assert response.status_code == 200, response.text
+    assert statements[0] == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    assert contexts == [("repeatable read", "on", str(owner))]
+    asyncio.run(engine.dispose())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/memory/summary",
+        "/api/v1/world",
+        "/api/v1/world/changes?after_revision=0",
+    ],
+)
+def test_unmapped_identity_has_no_virtual_read(isolated_migrated_database, path):
+    client, engine = client_for(isolated_migrated_database, pool_size=1, max_overflow=0)
+    with client:
+        response = client.get(path, headers=headers(str(uuid4())))
+        assert response.status_code == 401
+        assert response.json()["code"] == "UNMAPPED_IDENTITY"
+    asyncio.run(engine.dispose())
+
+
+def test_deleted_owner_cannot_receive_virtual_world(isolated_migrated_database):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        owner = user(c)
+    subject = subject_for(db, owner)
+    with db.engine.begin() as c:
+        c.execute(
+            text("delete from public.app_users where id=:owner"), {"owner": owner}
+        )
+    client, engine = client_for(db, pool_size=1, max_overflow=0)
+    with client:
+        response = client.get("/api/v1/world", headers=headers(subject))
+        assert response.status_code == 401
+        assert response.json()["code"] == "UNMAPPED_IDENTITY"
+    asyncio.run(engine.dispose())
+
+
 def test_memory_freshness_preferences_and_explicit_bounds(isolated_migrated_database):
     db = isolated_migrated_database
     with db.engine.begin() as c:
@@ -237,12 +313,17 @@ def test_delta_query_matrix(isolated_migrated_database):
             "?after_revision=-1",
             "?after_revision=1.0",
             "?after_revision=1e0",
+            "?after_revision=١",
+            "?after_revision=１",
             "?after_revision=true",
             "?after_revision=9223372036854775808",
             "?after_revision=0&limit=0",
             "?after_revision=0&limit=-1",
             "?after_revision=0&limit=1.0",
             "?after_revision=0&limit=1e3",
+            "?after_revision=0&limit=true",
+            "?after_revision=0&limit=١",
+            "?after_revision=0&limit=１",
         ]:
             r = client.get("/api/v1/world/changes" + query, headers=h)
             assert r.status_code == 422, (query, r.text)
@@ -278,6 +359,7 @@ def test_read_transaction_runtime_and_cleanup(isolated_migrated_database):
     db = isolated_migrated_database
     with db.engine.begin() as c:
         owner = user(c)
+    subject = subject_for(db, owner)
 
     async def check():
         engine = create_async_engine(db.url, pool_size=1, max_overflow=0)
@@ -289,7 +371,10 @@ def test_read_transaction_runtime_and_cleanup(isolated_migrated_database):
             connection.commit()
 
         factory = async_sessionmaker(engine)
-        async with read_transaction(factory, owner) as s:
+        async with read_transaction(
+            factory, ExternalIdentity("SUPABASE", str(subject))
+        ) as (s, resolved_owner):
+            assert resolved_owner == owner
             row = (
                 await s.execute(
                     text(
