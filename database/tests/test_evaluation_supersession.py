@@ -672,7 +672,10 @@ def test_evaluation_cannot_leave_active_evidence_when_superseded(
         response_id=graph["response_id"],
     )
     migrated_connection.execute(
-        EVIDENCE_INSERT, _evidence_parameters(graph, evaluation_id)
+        EVIDENCE_INSERT,
+        _evidence_parameters(
+            graph, evaluation_id, evidence_type="RECOGNITION", evidence_strength="WEAK"
+        ),
     )
 
     with pytest.raises(DBAPIError) as error, migrated_connection.begin_nested():
@@ -720,7 +723,10 @@ def test_concurrent_evidence_insert_serializes_with_evaluation_supersession(
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         evidence_connection.execute(
-            EVIDENCE_INSERT, _evidence_parameters(graph, evaluation_id)
+            EVIDENCE_INSERT,
+            _evidence_parameters(
+                graph, evaluation_id, evidence_type="RECOGNITION", evidence_strength="WEAK"
+            ),
         )
         supersession = executor.submit(supersede_evaluation)
         pid = worker_pid.get(timeout=5)
@@ -799,7 +805,10 @@ def test_evaluation_correction_supersedes_history_and_adds_replacement_atomicall
         response_id=graph["response_id"],
     )
     old_evidence_id = migrated_connection.execute(
-        EVIDENCE_INSERT, _evidence_parameters(graph, old_evaluation_id)
+        EVIDENCE_INSERT,
+        _evidence_parameters(
+            graph, old_evaluation_id, evidence_type="RECOGNITION", evidence_strength="WEAK"
+        ),
     ).scalar_one()
 
     migrated_connection.execute(
@@ -824,7 +833,8 @@ def test_evaluation_correction_supersedes_history_and_adds_replacement_atomicall
         _evidence_parameters(
             graph,
             new_evaluation_id,
-            evidence_strength="MODERATE",
+            evidence_type="RECOGNITION",
+            evidence_strength="WEAK",
             evaluation_confidence=0.7,
         ),
     ).scalar_one()

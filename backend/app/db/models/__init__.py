@@ -27,6 +27,11 @@ from app.db.models.identity import (
 )
 from app.db.models.exploration import Exploration, Reflection
 from app.db.models.events import LearningEvent
+from app.db.models.projection import (
+    LearnerProjectionCheckpoint,
+    ProjectionInput,
+    ProjectionSourceHead,
+)
 from app.db.models.learner_state import (
     LearnerChallengeState,
     LearnerConfidenceState,
@@ -78,6 +83,9 @@ __all__ = [
     "LearningEntityVersion",
     "LearningEvidence",
     "LearningEvent",
+    "LearnerProjectionCheckpoint",
+    "ProjectionInput",
+    "ProjectionSourceHead",
     "LearningObjective",
     "LearnerChallengeState",
     "LearnerConfidenceState",

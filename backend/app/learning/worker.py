@@ -33,6 +33,7 @@ from app.db.models.assessment import (
 )
 from app.db.session import create_async_database_engine
 from app.learning.common import emit
+from app.learning.projection_capture import lock_source_owner
 from app.learning.telemetry import LearningJSONFormatter
 from app.learning.content import validate_definition
 from app.learning.evaluation import evaluate, EvaluationResult, PermanentEvaluationError
@@ -261,6 +262,8 @@ async def finalize_claim(
     async with factory() as session, session.begin():
         # Match learner commands' order. Claiming never holds a job lock while
         # obtaining session/run locks, so expired-lease recovery cannot invert it.
+        if not await lock_source_owner(session, claim.user_id):
+            return False
         assessment = await _get(
             session, AssessmentSession, claim.user_id, assessment_id, True
         )

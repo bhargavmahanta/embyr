@@ -462,7 +462,10 @@ def test_answer_event_failure_is_safe_and_rolls_back_command(pilot, caplog):
             for table in ("assessment_responses", "evaluation_runs", "jobs"):
                 assert (
                     c.scalar(
-                        text(f"select count(*) from {table} where user_id=:user"),
+                        text(
+                            f"select count(*) from {table} where user_id=:user"
+                            + (" and job_type='ASSESSMENT_EVALUATION'" if table == "jobs" else "")
+                        ),
                         {"user": user},
                     )
                     == 0
@@ -598,7 +601,10 @@ def test_lost_commit_acknowledgment_replays_durable_answer(pilot, monkeypatch, c
             for table in ("assessment_responses", "evaluation_runs", "jobs"):
                 assert (
                     c.scalar(
-                        text(f"select count(*) from {table} where user_id=:user"),
+                        text(
+                            f"select count(*) from {table} where user_id=:user"
+                            + (" and job_type='ASSESSMENT_EVALUATION'" if table == "jobs" else "")
+                        ),
                         {"user": user},
                     )
                     == 1

@@ -1,7 +1,7 @@
 # M6 — Implementation plan after contract freeze
 
 Status: M6-01 complete; **proposed issues only**, none created by this document.
-Baseline: `d5015398b494aa8df33b94392007a60ad72f026a`.
+Baseline: `2b8d8a315ca880da874f178602ffc413c89418b9`.
 Worktree: `/home/bhargav/orca/workspaces/embyr/m6-memory-world`.
 Branch: `bhargav/m6-memory-world`; sole owner Codex.
 
