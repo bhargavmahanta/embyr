@@ -1,9 +1,18 @@
 # M6 — Implementation plan after contract freeze
 
-Status: M6-01 and M6-02 complete; M6-03 implementation ready for independent PR review.
-Baseline: `0ef91dcff36e94097b2ff13575cce2aca0e14d1c`.
-Worktree: `/home/bhargav/orca/workspaces/embyr/m6-memory-world`.
-Branch: `bhargav/m6-03-state-world-publisher`; sole owner Codex.
+Status: M6-01, M6-02 and M6-03 COMPLETED; M6-04 IN PROGRESS.
+M6-04 implementation baseline: `0f2f373e30b8062f06994d8ef5496acd21729561`.
+Worktree: `/home/bhargav/orca/workspaces/embyr/m6-04-memory-world-reads`.
+Branch: `bhargav/m6-04-memory-world-reads`; sole owner Codex.
+
+[M6-04 read implementation and verification](m6-04-reads.md) records this issue's
+read-only boundary. #106 completed through PR #112 at the baseline above; #107
+is READY after that dependency. #108 remains outside this implementation.
+
+Historical M6-03 review-stage metadata: baseline
+`0ef91dcff36e94097b2ff13575cce2aca0e14d1c`, worktree
+`/home/bhargav/orca/workspaces/embyr/m6-memory-world`, branch
+`bhargav/m6-03-state-world-publisher`. The evidence below is preserved.
 
 The [M6 frozen contract](../api/m6-projection-memory-world-v1.md),
 [strict schemas](../api/schemas/m6-v1.schema.json) and
