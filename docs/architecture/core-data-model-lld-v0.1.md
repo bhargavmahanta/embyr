@@ -1,5 +1,13 @@
 # LLD v0.1 — Core Data Model
 
+> Historical design record. For M6 v1, the frozen
+> [Projection, Memory and World contracts](../api/m6-projection-memory-world-v1.md)
+> supersede this document's `is_current` derived-state sketch (one current row
+> per logical key), embedded explicit interest (separate authoritative
+> `explicit_interest_preferences`), and multi-change revision / `change_ordinal`
+> sketch (one material object change per revision). Other historical context is
+> preserved. The M6 contract specifies future implementation, not shipped routes.
+
 ## 1. Design Goal
 
 The backend must keep four fundamentally different kinds of information separate:
