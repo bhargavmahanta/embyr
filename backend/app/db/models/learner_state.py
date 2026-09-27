@@ -103,7 +103,7 @@ class LearnerObjectiveState(Base):
     )
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     objective_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
-    understanding_estimate: Mapped[float] = mapped_column(sa.Double)
+    understanding_estimate: Mapped[float | None] = mapped_column(sa.Double)
     categorical_state: Mapped[str | None] = mapped_column(sa.Text)
     evaluation_confidence: Mapped[float | None] = mapped_column(sa.Double)
     support_required: Mapped[bool] = mapped_column(

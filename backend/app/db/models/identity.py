@@ -110,6 +110,13 @@ class IdempotencyRecord(Base):
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
+        sa.Index(
+            "uq_jobs_projection_group",
+            "user_id",
+            sa.text("(payload->>'source_group')"),
+            unique=True,
+            postgresql_where=sa.text("job_type='LEARNER_PROJECTION'"),
+        ),
         sa.CheckConstraint(
             "status in ('PENDING', 'RUNNING', 'SUCCEEDED', "
             "'RETRYABLE_FAILURE', 'FAILED')",

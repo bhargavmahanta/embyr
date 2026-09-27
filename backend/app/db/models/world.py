@@ -50,6 +50,7 @@ class LearnerWorld(Base):
 class WorldRegion(Base):
     __tablename__ = "world_regions"
     __table_args__ = (
+        sa.UniqueConstraint("world_id", "region_key", name="uq_world_regions_world_key"),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["app_users.id"],
@@ -99,6 +100,14 @@ class WorldNode(Base):
     __tablename__ = "world_nodes"
     __table_args__ = (
         sa.ForeignKeyConstraint(
+            ["entity_id", "entity_version"],
+            ["learning_entity_versions.entity_id", "learning_entity_versions.version"],
+            name="fk_world_nodes_entity_version",
+        ),
+        sa.CheckConstraint(
+            "entity_version is null or entity_version > 0", name="entity_version"
+        ),
+        sa.ForeignKeyConstraint(
             ["user_id"],
             ["app_users.id"],
             ondelete="CASCADE",
@@ -139,6 +148,7 @@ class WorldNode(Base):
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     world_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     entity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    entity_version: Mapped[int | None] = mapped_column(sa.Integer)
     region_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     logical_x: Mapped[float] = mapped_column(sa.Double)
     logical_y: Mapped[float] = mapped_column(sa.Double)
