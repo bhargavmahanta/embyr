@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.m6_reads import router as m6_reads_router
 from app.api.errors import register_exception_handlers
 from app.api.routes import router
 from app.api.recommendations import router as recommendations_router
@@ -86,4 +87,5 @@ def create_app(
     app.include_router(recommendations_router)
     app.include_router(learning_router)
     app.include_router(assessments_router)
+    app.include_router(m6_reads_router)
     return app
