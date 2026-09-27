@@ -206,7 +206,6 @@ def _parse_receipt(user_id, raw):
             "ASSESSMENT_EVALUATED",
             "ASSESSMENT_EVALUATION_FAILED",
             "ASSESSMENT_EVALUATION_RETRY_REQUESTED",
-            "ASSESSMENT_COMPLETED",
         ]:
             require(
                 f["response_id"] is not None and f["evaluation_run_id"] is not None,

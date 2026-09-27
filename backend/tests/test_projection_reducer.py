@@ -320,3 +320,47 @@ def test_world_identity_and_coordinates_match_frozen_fixture():
         )
         == node
     )
+
+
+def test_assessment_completed_receipt_does_not_require_response_or_run():
+    from app.learning.projection_reducer import reduce_prefix
+
+    completed = receipt(2, event="ASSESSMENT_COMPLETED")
+    completed["facts"]["assessment_session_id"] = str(UUID(int=123))
+    out = reduce_prefix(U, [receipt(1), completed])
+    assert out.nodes[0]["growth_state"] == "SEED"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("classification_confidence", None),
+        ("evaluator_version", "unsupported/v1"),
+        ("evaluation_status", "PENDING"),
+    ],
+)
+def test_ineligible_evidence_does_not_create_objective_or_promote(field, value):
+    from app.learning.projection_reducer import reduce_prefix
+
+    item = evidence(2)
+    item["facts"][field] = value
+    out = reduce_prefix(U, [receipt(1), item])
+    assert not out.objectives and not out.provenance
+    assert out.nodes[0]["growth_state"] == "SEED"
+
+
+def test_late_recognition_after_completion_does_not_reopen_exploration():
+    from app.learning.projection_reducer import reduce_prefix
+
+    out = reduce_prefix(
+        U, [receipt(1), receipt(2, event="EXPLORATION_COMPLETED"), evidence(3)]
+    )
+    assert out.nodes[0]["growth_state"] == "YOUNG"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_canonical_json_rejects_nonfinite_values(value):
+    from app.learning.world_projection import canonical_json
+
+    with pytest.raises(ValueError):
+        canonical_json({"value": value})
