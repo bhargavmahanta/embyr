@@ -1,9 +1,9 @@
 # M6 — Implementation plan after contract freeze
 
-Status: M6-01 complete; **proposed issues only**, none created by this document.
-Baseline: `2b8d8a315ca880da874f178602ffc413c89418b9`.
+Status: M6-01 and M6-02 complete; M6-03 implementation ready for independent PR review.
+Baseline: `0ef91dcff36e94097b2ff13575cce2aca0e14d1c`.
 Worktree: `/home/bhargav/orca/workspaces/embyr/m6-memory-world`.
-Branch: `bhargav/m6-memory-world`; sole owner Codex.
+Branch: `bhargav/m6-03-state-world-publisher`; sole owner Codex.
 
 The [M6 frozen contract](../api/m6-projection-memory-world-v1.md),
 [strict schemas](../api/schemas/m6-v1.schema.json) and
