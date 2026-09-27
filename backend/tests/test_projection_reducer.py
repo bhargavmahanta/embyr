@@ -364,3 +364,53 @@ def test_canonical_json_rejects_nonfinite_values(value):
 
     with pytest.raises(ValueError):
         canonical_json({"value": value})
+
+
+@pytest.mark.parametrize(
+    "event", ["EXPLORATION_COMPLETED", "REFLECTION_SUBMITTED", "USER_RETURNED"]
+)
+def test_exploration_scoped_history_without_canonical_start_is_rejected(event):
+    from app.learning.projection_reducer import ProjectionError
+
+    with pytest.raises(ProjectionError, match="^MISSING_START$"):
+        reduce([receipt(1, event=event)])
+
+
+def test_missing_start_for_second_exploration_cannot_hide_behind_valid_encounter():
+    from app.learning.projection_reducer import ProjectionError
+
+    with pytest.raises(ProjectionError, match="^MISSING_START$"):
+        reduce(
+            [
+                receipt(1),
+                receipt(2, event="USER_RETURNED", exploration=str(UUID(int=99))),
+            ]
+        )
+
+
+def test_start_is_validated_over_complete_group_before_encounter_selection():
+    out = reduce(
+        [
+            receipt(1, event="RECOMMENDATION_ACCEPTED", group="1"),
+            receipt(2, group="1"),
+            receipt(3, event="REFLECTION_SUBMITTED"),
+            receipt(4, event="EXPLORATION_COMPLETED"),
+            receipt(5, event="USER_RETURNED"),
+        ]
+    )
+    assert len(out.nodes) == 1
+    assert out.nodes[0]["entity_version"] == 1
+    assert out.nodes[0]["growth_state"] == "SPROUT"
+
+
+def test_missing_start_is_rejected_before_eligible_response_reduction():
+    from app.learning.projection_reducer import ProjectionError
+
+    with pytest.raises(ProjectionError, match="^MISSING_START$"):
+        reduce(
+            [
+                receipt(1, event="USER_RETURNED"),
+                evidence(2),
+                evidence(3, evid=21, run=31),
+            ]
+        )

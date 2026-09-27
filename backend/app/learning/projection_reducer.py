@@ -75,7 +75,6 @@ def reduce_prefix(user_id, receipts) -> Projection:
             if event == "EXPLORATION_STARTED":
                 require(ex not in starts, "DUPLICATE_START")
                 starts[ex] = r
-                pins.setdefault(f["entity_id"], f["entity_version"])
                 root = True
             if event in ["REFLECTION_SUBMITTED", "EXPLORATION_COMPLETED"]:
                 sprouts.add((f["entity_id"], f["entity_version"]))
@@ -113,6 +112,12 @@ def reduce_prefix(user_id, receipts) -> Projection:
             )
             if evid not in evidence_times:
                 evidence_times[evid] = r["source_time"]
+    require(set(lineage) == set(starts), "MISSING_START")
+    # Starts were collected in immutable source-sequence order. Rank only
+    # after every encountered Exploration has its unique canonical start.
+    for start in starts.values():
+        facts = start["facts"]
+        pins.setdefault(facts["entity_id"], facts["entity_version"])
     eligible = {}
     responses = set()
     young = set()

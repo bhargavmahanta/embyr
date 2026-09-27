@@ -1308,3 +1308,69 @@ def test_exhausted_unprocessed_claim_terminalizes_without_recomputing(
             ).scalar_one()
             == "FAILED"
         )
+
+
+@pytest.mark.parametrize("as_baseline", [False, True], ids=["live", "baseline"])
+def test_missing_canonical_start_permanently_blocks_only_its_owner(
+    as_baseline, isolated_migrated_database
+):
+    db = isolated_migrated_database
+    with db.engine.begin() as c:
+        g = _response_graph(c)
+        g["exploration_id"] = sql(
+            c,
+            "select s.exploration_id from assessment_sessions s join assessment_responses r on r.user_id=s.user_id and r.assessment_session_id=s.id where r.user_id=:u and r.id=:r",
+            u=g["user_id"],
+            r=g["response_id"],
+        ).scalar_one()
+        # Real factual capture, deliberately missing EXPLORATION_STARTED.
+        returned(c, g)
+        run = sql(
+            c,
+            "insert into evaluation_runs(user_id,response_id,evaluator_type,evaluator_version,rubric_version,result,confidence,feedback,status) values (:u,:r,'DETERMINISTIC','deterministic-evaluation/v1','rubric-v1','SUPPORTED',.8,'bounded','SUCCEEDED') returning id",
+            u=g["user_id"],
+            r=g["response_id"],
+        ).scalar_one()
+        evidence(c, g, run, evaluation_confidence=0.8)
+    if as_baseline:
+        assert baseline(db, g["user_id"]) == 3
+    before = state(db, g["user_id"])
+    other = graph(db)
+    assert drain(db) == 2
+    assert state(db, g["user_id"]) == before
+    with db.engine.connect() as c:
+        failed = sql(
+            c,
+            "select payload,status,attempt_count,locked_at,locked_by from jobs where user_id=:u and job_type='LEARNER_PROJECTION' and status='FAILED'",
+            u=g["user_id"],
+        ).one()
+        assert failed.status == "FAILED" and failed.attempt_count == 1
+        assert failed.locked_at is None and failed.locked_by is None
+        cp = sql(
+            c,
+            "select processed_source_sequence,blocking_group,failure_code,input_fingerprint,output_fingerprint from learner_projection_checkpoints where user_id=:u",
+            u=g["user_id"],
+        ).one()
+        assert tuple(cp) == (
+            0,
+            failed.payload["source_group"],
+            "MISSING_START",
+            None,
+            None,
+        )
+        for table in [
+            "learner_objective_state",
+            "state_evidence_links",
+            "learner_worlds",
+            "world_regions",
+            "world_nodes",
+            "world_changes",
+        ]:
+            assert (
+                sql(
+                    c, f"select count(*) from {table} where user_id=:u", u=g["user_id"]
+                ).scalar_one()
+                == 0
+            )
+    assert state(db, other["user_id"])["checkpoint"] == 2
+    assert state(db, other["user_id"])["nodes"][0][2] == "YOUNG"
