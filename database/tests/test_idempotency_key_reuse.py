@@ -6,12 +6,11 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
-from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from app.api.idempotency import reserve_idempotent_command
 from app.db.session import set_current_user
 from conftest import make_alembic_config
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _user(engine):
@@ -114,7 +113,7 @@ def test_0017_guarded_downgrade_preserves_duplicate_history(migrated_engine, dat
         # including preceding later revisions, so the current head survives.
         with migrated_engine.connect() as connection:
             assert connection.scalar(text("select version_num from alembic_version")) == (
-                "0019_response_lock_security"
+                "0020_learner_projection_foundation"
             )
             assert connection.scalar(text("""
                 select count(*) from idempotency_records
