@@ -2,8 +2,13 @@
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
+from argparse import Namespace
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from pathlib import Path
 from threading import Event
 from time import perf_counter
 
@@ -15,6 +20,92 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_learner_state_schema import _insert_objective, _insert_objective_state
 from test_projection_foundation import onboard, user
 from test_projection_publisher import graph, worker
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "not-a-database-url-secretP4ss",
+        "postgresql+psycopg://reviewer:secretP4ss@127.0.0.1/embyr_test?sslmode=disable",
+    ],
+)
+def test_cli_engine_configuration_errors_are_bounded(url):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "app.learning.projection_operator",
+            "bootstrap",
+            "--user-id",
+            "11111111-1111-4111-8111-111111111111",
+        ],
+        cwd=Path(__file__).resolve().parents[2] / "backend",
+        env={**os.environ, "EMBYR_DATABASE_URL": url},
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert len(result.stdout.splitlines()) == 1
+    assert json.loads(result.stdout) == {
+        "status": "REFUSED",
+        "category": "DATABASE_ERROR",
+    }
+    assert result.stderr == ""
+    assert "Traceback" not in result.stdout
+    assert "secretP4ss" not in result.stdout + result.stderr
+    assert url not in result.stdout + result.stderr
+    assert "SELECT" not in result.stdout + result.stderr
+
+
+def test_cli_teardown_error_is_bounded(monkeypatch, capsys):
+    import app.learning.projection_operator as operator
+
+    class BrokenEngine:
+        async def dispose(self):
+            raise RuntimeError("private database teardown detail")
+
+    monkeypatch.setenv("EMBYR_DATABASE_URL", "placeholder")
+    monkeypatch.setattr(
+        operator, "create_async_database_engine", lambda _: BrokenEngine()
+    )
+    monkeypatch.setattr(operator, "async_sessionmaker", lambda *a, **kw: object())
+
+    async def successful_bootstrap(*args, **kwargs):
+        return {"status": "APPLIED"}
+
+    monkeypatch.setattr(operator, "bootstrap", successful_bootstrap)
+    code = asyncio.run(
+        operator._main(
+            Namespace(
+                operation="bootstrap",
+                user_id="11111111-1111-4111-8111-111111111111",
+                apply=True,
+            )
+        )
+    )
+    output = capsys.readouterr()
+    assert code == 1
+    assert json.loads(output.out) == {"status": "REFUSED", "category": "DATABASE_ERROR"}
+    assert output.err == ""
+    assert "private database teardown detail" not in output.out + output.err
+
+
+def test_cli_help_still_parses():
+    result = subprocess.run(
+        [sys.executable, "-m", "app.learning.projection_operator", "--help"],
+        cwd=Path(__file__).resolve().parents[2] / "backend",
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "bootstrap" in result.stdout
+    assert "audit" in result.stdout
+    assert "requeue" in result.stdout
+    assert result.stderr == ""
 
 
 def operate(db, action):
@@ -35,6 +126,258 @@ def old_user(db):
         owner = user(connection)
     command.upgrade(config, "head")
     return owner
+
+
+def old_preference_history(db, changes, *, terminal=None):
+    """Create an immutable pre-0020 choice chain and its current row."""
+    config = make_alembic_config(db.url)
+    command.upgrade(config, "0019_response_lock_security")
+    with db.engine.begin() as connection:
+        owner = user(connection)
+        onboard(connection, owner)
+        entity, _ = _insert_objective(connection)
+        event_ids = []
+        for ordinal, (preference, version) in enumerate(changes, start=1):
+            if ordinal == 1:
+                connection.execute(
+                    text("""insert into explicit_interest_preferences
+(user_id,entity_id,preference,version) values (:u,:e,:p,:v)"""),
+                    {"u": owner, "e": entity, "p": preference, "v": version},
+                )
+            else:
+                connection.execute(
+                    text("""update explicit_interest_preferences
+set preference=:p,version=:v where user_id=:u and entity_id=:e"""),
+                    {"u": owner, "e": entity, "p": preference, "v": version},
+                )
+            event_ids.append(
+                connection.scalar(
+                    text("""insert into learning_events
+(user_id,event_type,entity_id,occurred_at,schema_version,metadata)
+values (:u,'EXPLICIT_INTEREST_CHANGED',:e,
+now()+(:ordinal * interval '1 second'),1,cast(:metadata as jsonb)) returning id"""),
+                    {
+                        "u": owner,
+                        "e": entity,
+                        "ordinal": ordinal,
+                        "metadata": json.dumps(
+                            {"preference": preference, "version": version}
+                        ),
+                    },
+                )
+            )
+        if terminal is not None:
+            connection.execute(
+                text("""update explicit_interest_preferences
+set preference=:p,version=:v where user_id=:u and entity_id=:e"""),
+                {"u": owner, "e": entity, "p": terminal[0], "v": terminal[1]},
+            )
+    command.upgrade(config, "head")
+    return owner, entity, event_ids
+
+
+def test_historical_preference_versions_dry_run_then_apply(
+    isolated_migration_database,
+):
+    from app.learning.projection_operator import bootstrap
+
+    db = isolated_migration_database
+    owner, entity, event_ids = old_preference_history(db, [("MORE", 1), ("PAUSED", 2)])
+    preview = operate(db, lambda factory: bootstrap(factory, owner))
+    assert preview["status"] == "READY_TO_APPLY"
+    assert (preview["ledger_imported"], preview["ledger_reused"]) == (3, 0)
+    assert (
+        preview["cutoff_source_sequence"],
+        preview["baseline_through_sequence"],
+    ) == (
+        0,
+        4,
+    )
+    with db.engine.connect() as connection:
+        assert connection.execute(
+            text("""select bootstrap_state,source_sequence
+from projection_source_heads where user_id=:u"""),
+            {"u": owner},
+        ).one() == ("REQUIRED", 0)
+        assert connection.scalar(text("select count(*) from projection_inputs")) == 0
+        assert (
+            connection.scalar(
+                text("select count(*) from jobs where job_type='LEARNER_PROJECTION'")
+            )
+            == 0
+        )
+    applied = operate(db, lambda factory: bootstrap(factory, owner, apply=True))
+    assert applied["status"] == "APPLIED"
+    assert (applied["ledger_imported"], applied["ledger_reused"]) == (3, 0)
+    with db.engine.connect() as connection:
+        rows = connection.execute(
+            text("""select source_sequence,source_kind,source_key,facts
+from projection_inputs where user_id=:u order by source_sequence"""),
+            {"u": owner},
+        ).all()
+        assert [(row.source_sequence, row.source_kind) for row in rows] == [
+            (1, "LEDGER"),
+            (2, "LEDGER"),
+            (3, "LEDGER"),
+            (4, "BOOTSTRAP"),
+        ]
+        assert [row.source_key for row in rows[1:3]] == [str(id) for id in event_ids]
+        assert [
+            (
+                row.facts["entity_id"],
+                row.facts["preference"],
+                row.facts["preference_version"],
+            )
+            for row in rows[1:3]
+        ] == [(str(entity), "MORE", 1), (str(entity), "PAUSED", 2)]
+
+
+@pytest.mark.parametrize(
+    "changes,terminal",
+    [
+        ([("PAUSED", 2)], None),
+        ([("MORE", 1), ("PAUSED", 3)], None),
+        ([("MORE", 1), ("PAUSED", 1)], None),
+        ([("MORE", 1), ("PAUSED", 2)], ("MORE", 2)),
+    ],
+)
+def test_contradictory_historical_preference_chain_rolls_back(
+    isolated_migration_database, changes, terminal
+):
+    from app.learning.projection_inputs import ProjectionError
+    from app.learning.projection_operator import bootstrap
+
+    db = isolated_migration_database
+    owner, _, _ = old_preference_history(db, changes, terminal=terminal)
+    with pytest.raises(ProjectionError, match="HISTORICAL_PREFERENCE"):
+        operate(db, lambda factory: bootstrap(factory, owner, apply=True))
+    with db.engine.connect() as connection:
+        assert connection.execute(
+            text("""select bootstrap_state,source_sequence
+from projection_source_heads where user_id=:u"""),
+            {"u": owner},
+        ).one() == ("REQUIRED", 0)
+        assert connection.scalar(text("select count(*) from projection_inputs")) == 0
+        assert (
+            connection.scalar(
+                text("select count(*) from jobs where job_type='LEARNER_PROJECTION'")
+            )
+            == 0
+        )
+
+
+def test_historical_preference_overlap_reuses_live_receipt(
+    isolated_migration_database,
+):
+    from app.learning.projection_operator import bootstrap
+
+    db = isolated_migration_database
+    owner, entity, event_ids = old_preference_history(db, [("MORE", 1)])
+    with db.engine.begin() as connection:
+        prior_sequence = connection.scalar(
+            text("select m6_capture_ledger(e) from learning_events e where e.id=:id"),
+            {"id": event_ids[0]},
+        )
+        prior_facts = connection.scalar(
+            text("""select facts from projection_inputs
+where user_id=:u and source_kind='LEDGER' and source_key=:key"""),
+            {"u": owner, "key": str(event_ids[0])},
+        )
+    with db.engine.begin() as connection:
+        connection.execute(
+            text("""update explicit_interest_preferences
+set preference='PAUSED',version=2 where user_id=:u and entity_id=:e"""),
+            {"u": owner, "e": entity},
+        )
+        connection.execute(
+            text("""insert into learning_events
+(user_id,event_type,entity_id,occurred_at,schema_version,metadata)
+values (:u,'EXPLICIT_INTEREST_CHANGED',:e,now()+interval '2 seconds',1,
+cast(:metadata as jsonb))"""),
+            {
+                "u": owner,
+                "e": entity,
+                "metadata": json.dumps({"preference": "PAUSED", "version": 2}),
+            },
+        )
+    result = operate(db, lambda factory: bootstrap(factory, owner, apply=True))
+    assert result["ledger_reused"] == 2
+    assert result["ledger_imported"] == 1
+    with db.engine.connect() as connection:
+        row = connection.execute(
+            text("""select source_sequence,facts from projection_inputs
+where user_id=:u and source_kind='LEDGER' and source_key=:key"""),
+            {"u": owner, "key": str(event_ids[0])},
+        ).one()
+        assert row == (prior_sequence, prior_facts)
+        assert (
+            connection.scalar(
+                text("""select count(*) from projection_inputs
+where user_id=:u and source_kind='LEDGER' and source_key=:key"""),
+                {"u": owner, "key": str(event_ids[0])},
+            )
+            == 1
+        )
+
+
+def test_historical_onboarding_version_must_match_current_row(
+    isolated_migration_database,
+):
+    from app.learning.projection_inputs import ProjectionError
+    from app.learning.projection_operator import bootstrap
+
+    db = isolated_migration_database
+    config = make_alembic_config(db.url)
+    command.upgrade(config, "0019_response_lock_security")
+    with db.engine.begin() as connection:
+        owner = user(connection)
+        onboard(connection, owner)
+        connection.execute(
+            text("update learner_preferences set version=2 where user_id=:u"),
+            {"u": owner},
+        )
+    command.upgrade(config, "head")
+    with pytest.raises(ProjectionError, match="HISTORICAL_PREFERENCE"):
+        operate(db, lambda factory: bootstrap(factory, owner, apply=True))
+
+
+def test_historical_onboarding_preserves_its_nondefault_version(
+    isolated_migration_database,
+):
+    from app.learning.projection_operator import bootstrap
+
+    db = isolated_migration_database
+    config = make_alembic_config(db.url)
+    command.upgrade(config, "0019_response_lock_security")
+    with db.engine.begin() as connection:
+        owner = user(connection)
+        connection.execute(
+            text("""insert into learner_preferences
+(user_id,adventure_preference,preferred_effort,support_style,version)
+values (:u,'BALANCED','15_20_MIN','SMALL_HINT',2)"""),
+            {"u": owner},
+        )
+        connection.execute(
+            text("""insert into learning_events
+(user_id,event_type,occurred_at,schema_version,metadata)
+values (:u,'ONBOARDING_COMPLETED',now(),1,
+jsonb_build_object('preferences_version',2))"""),
+            {"u": owner},
+        )
+    command.upgrade(config, "head")
+    assert (
+        operate(db, lambda factory: bootstrap(factory, owner, apply=True))["status"]
+        == "APPLIED"
+    )
+    with db.engine.connect() as connection:
+        assert (
+            connection.scalar(
+                text("""select facts->>'preference_version' from projection_inputs
+where user_id=:u and source_kind='LEDGER'"""),
+                {"u": owner},
+            )
+            == "2"
+        )
 
 
 def test_bootstrap_dry_run_rolls_back_then_apply_is_idempotent(
@@ -280,8 +623,8 @@ def test_source_waiting_on_bootstrap_head_gets_post_baseline_sequence(
 def test_failed_historical_import_rolls_back_all_earlier_receipts(
     isolated_migration_database,
 ):
+    from app.learning.projection_inputs import ProjectionError
     from app.learning.projection_operator import bootstrap
-    from sqlalchemy.exc import DBAPIError
 
     db = isolated_migration_database
     config = make_alembic_config(db.url)
@@ -295,7 +638,7 @@ values (:u,'EXPLORATION_STARTED',now()+interval '1 second',1,'{}'::jsonb)"""),
             {"u": owner},
         )
     command.upgrade(config, "head")
-    with pytest.raises(DBAPIError):
+    with pytest.raises(ProjectionError, match="LEDGER_LINEAGE"):
         operate(db, lambda factory: bootstrap(factory, owner, apply=True))
     with db.engine.connect() as connection:
         assert connection.execute(

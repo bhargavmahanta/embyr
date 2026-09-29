@@ -33,6 +33,10 @@ or authorize a later apply on its own. Apply repeats every check under its own
 locks and may refuse if the state changed. Refusals emit a bounded category;
 the tool does not print reflection text, answers, source metadata, evidence
 payloads, credentials, signed URLs, or SQL errors.
+Engine construction, execution, and disposal are inside the same bounded CLI
+error boundary. Malformed URLs, disallowed TLS modes, and teardown errors
+return `REFUSED` / `DATABASE_ERROR` without a traceback or connection detail.
+Missing `EMBYR_DATABASE_URL` retains its separate configuration-required result.
 
 ### Historical bootstrap
 
@@ -53,10 +57,27 @@ foreign World identity, invalid pins/seeds, topology, or revision stream are
 not adopted or overwritten.
 
 The operator enumerates supported owned ledger events by factual occurrence
-time, receipt time, command identity, event ordinal, and event UUID. It calls
-the existing closed M6 capture function, which reconstructs lineage from
-owned rows and reuses identical receipts in `1..C`. Any unsupported or
-contradictory source fails the whole import. It next enumerates current
+time, receipt time, command identity, event ordinal, and event UUID. For each
+historical event it selects only the frozen ledgerFacts fields from the
+immutable event, closed metadata identifiers, and owned lineage rows. It does
+not call live `m6_capture_ledger`, whose current preference-row check remains
+correct for live transactions but would reject older valid choices. The
+historical path appends through unchanged `m6_append_input`, retaining its
+receipt shape, size, identity, sequence, job, and immutability guards.
+
+An explicit-interest chain starts at version 1 and advances exactly one per
+event for each entity. Each event retains its own one-of-five preference and
+version, even when the current row has advanced. The final historical choice
+must equal the current authoritative row; missing intermediate events, a
+conflicting duplicate version, or a current row without an event chain refuse
+the entire bootstrap. Onboarding retains its event's `preferences_version`.
+The onboarding API is the sole supported writer of `learner_preferences`, so
+its current version must still equal that event version; a later unexplained
+version change refuses instead of being invented. Identical receipts already
+in `1..C` are reused without rewriting their facts or sequence. Any other
+unsupported or contradictory source also fails the whole import.
+
+The operator next enumerates current
 supported evidence by evidence UUID. New historical evidence snapshots contain
 the current status and a null `transition_at` because an old transition instant
 cannot be inferred. An identical already-captured transition retains its
@@ -121,7 +142,7 @@ second owner remains. Database deletion does not itself assert deletion of
 external Storage objects. New M6 receipts and projections may be future export
 requirements, but this issue implements no export path.
 
-The local release-candidate gate passed: M6-05 operator/journey tests 29,
+The initial PR-head local release-candidate gate passed: M6-05 operator/journey tests 29,
 M6-05 recommendation compatibility 18, full disposable PostgreSQL suite 668
 passed with one intentional historical-verifier skip, backend suite 440, and
 recommendation/research suite 856. Focused prior-M6 checks passed: M6-02 84,
@@ -130,6 +151,20 @@ M6-03 publisher 50 and reducer 44, M6-04 reads 42. Migration upgrade to
 The package wheel contains the operator; imports, lint, local links, and
 `git diff --check` passed. These are local tests only. No hosted bootstrap,
 production rollout, M7 work, or PR merge is part of #108 implementation.
+
+The follow-up review gate addressed two independent NORMAL findings:
+`VALID` engine initialization outside the bounded CLI handler, and
+`IMPLEMENTATION_DIVERGENCE` historical preference events using live
+current-row validation. Fresh checks passed: 41 focused M6-05 database tests,
+18 focused compatibility tests, M6-02 84, M6-03 publisher 50 and reducer 44,
+M6-04 reads 42, backend 440, full PostgreSQL 680 with one intentional
+historical-verifier skip, and recommendation/research 856. Malformed URL,
+disallowed TLS, and teardown regressions emit bounded `DATABASE_ERROR` output.
+The MORE/version 1 to PAUSED/version 2 historical chain imports with both
+original facts; missing, duplicate, or terminally contradictory versions
+refuse atomically. The migration cycle and Alembic check passed again; the
+wheel contains and imports the revised operator. Both PR review threads stay
+open for independent re-review.
 
 The first full database run exposed stale pre-0020 test assumptions, classified
 `STALE · LOW`: several tests still named 0019 as the repository head, the
