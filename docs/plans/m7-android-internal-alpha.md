@@ -145,7 +145,12 @@ Release traffic uses HTTPS. Package only client-safe configuration: no service-r
 
 - **Pure unit:** auth transitions, durable idempotency, version reconciliation, assessment state, World reducer and renderer transforms.
 - **Repository/network:** fakes plus MockWebServer for 401/refresh, nullable recommendation, 202 replay/poll, Problem Details/422, 409 resync, pagination and ambiguous timeout.
-- **Contract fixtures:** decode [M5 public fixtures](../api/fixtures/learning-lifecycle-v1.json) and [M6 strict public fixtures](../api/fixtures/m6-v1.json) against the M6 schema.
+- **Contract fixtures:** decode [M5 public fixtures](../api/fixtures/learning-lifecycle-v1.json)
+  against reviewed Android M5 lifecycle DTOs and the [frozen M5 contract](../api/learning-lifecycle-v1.md).
+  Decode [M6 public fixtures](../api/fixtures/m6-v1.json) against reviewed Android M6 DTOs;
+  validate each M6 public example against its corresponding definition in the
+  [M6 schema](../api/schemas/m6-v1.schema.json). The fixture collection wrapper is metadata,
+  not one public DTO.
 - **Compose:** loading/empty/error, navigation, semantics, TalkBack focus and large text.
 - **Instrumented:** Room transactions, process recreation, secure session restore and cross-account isolation.
 - **Real backend/device:** dedicated alpha backend, operating workers, approved Supabase alpha configuration, second account and physical reference device.
