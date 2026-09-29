@@ -5,8 +5,8 @@ understand, practise, and create grow into a living personal world.
 
 Kanopi is Embyr's AI companion.
 
-**Project status:** Pre-implementation / architecture frozen, engineering
-foundation in progress.
+**Project status:** M6 backend complete; M7 Android Internal Alpha is planned,
+and the Android app has not been initialized. See the [M7 plan](docs/plans/m7-android-internal-alpha.md).
 
 Android will be developed first. The current technology direction is:
 
