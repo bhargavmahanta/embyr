@@ -29,7 +29,15 @@ WORKER_ROLE = "app_worker"
 MAINTENANCE_ROLE = "app_maintenance"
 MAINTENANCE_FUNCTION = "public.maintenance_delete_account"
 CLIENT_ROLES = ("anon", "authenticated", "service_role")
-HEAD = "0019_response_lock_security"
+HEAD = "0020_learner_projection_foundation"
+
+# 0012's learner policy matrix remains frozen; 0020 adds owner-scoped,
+# SELECT-only projection metadata policies with different write authorities.
+M6_TABLES = (
+    "projection_source_heads",
+    "projection_inputs",
+    "learner_projection_checkpoints",
+)
 
 LEARNER_TABLES = (
     "user_devices",
@@ -248,12 +256,12 @@ def test_rls_enabled_and_forced_for_all_learner_tables(migrated_connection):
                   and c.relname = any(:tables)
                 """
             ),
-            {"tables": list(LEARNER_TABLES)},
+            {"tables": [*LEARNER_TABLES, *M6_TABLES]},
         ).all()
     }
 
-    assert set(rows) == set(LEARNER_TABLES)
-    for table in LEARNER_TABLES:
+    assert set(rows) == set(LEARNER_TABLES) | set(M6_TABLES)
+    for table in (*LEARNER_TABLES, *M6_TABLES):
         enabled, forced = rows[table]
         assert enabled is True, f"{table} must enable RLS"
         assert forced is True, f"{table} must FORCE RLS"
@@ -291,14 +299,17 @@ def test_backend_policy_uses_nullif_identity(migrated_connection):
         ).all()
     }
 
-    assert set(rows) == set(LEARNER_TABLES)
+    assert set(rows) == set(LEARNER_TABLES) | set(M6_TABLES)
     for table, row in rows.items():
         assert list(row.roles) == [BACKEND_ROLE], table
-        assert row.cmd == "ALL", table
+        assert row.cmd == ("SELECT" if table in M6_TABLES else "ALL"), table
         qual = row.qual.lower()
-        check = row.with_check.lower()
         assert "nullif" in qual and "app.user_id" in qual, table
-        assert "nullif" in check and "app.user_id" in check, table
+        if table in M6_TABLES:
+            assert row.with_check is None, table
+        else:
+            check = row.with_check.lower()
+            assert "nullif" in check and "app.user_id" in check, table
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +380,13 @@ def test_runtime_roles_do_not_own_unapproved_application_objects(
     assert set(function_owners) == {
         ("maintenance_delete_account", MAINTENANCE_ROLE),
         ("validate_assessment_response_objective_version", MAINTENANCE_ROLE),
+        ("m6_append_input", MAINTENANCE_ROLE),
+        ("m6_capture_ledger", MAINTENANCE_ROLE),
+        ("m6_capture_event_trigger", MAINTENANCE_ROLE),
+        ("m6_capture_evidence_trigger", MAINTENANCE_ROLE),
+        ("m6_initialize_user", MAINTENANCE_ROLE),
+        ("m6_lock_source_owner", MAINTENANCE_ROLE),
+        ("m6_recapture_event", MAINTENANCE_ROLE),
     }
 
 
@@ -1014,7 +1032,7 @@ def test_canonical_tables_are_read_only_for_runtime_roles(migrated_connection):
                 ) is False, f"{role}.{table}.{privilege}"
 
 
-def test_maintenance_has_table_select_and_delete_only(migrated_connection):
+def test_maintenance_grants_match_legacy_and_m6_contracts(migrated_connection):
     for table in [*LEARNER_TABLES, "app_users"]:
         assert _has_table_privilege(
             migrated_connection, MAINTENANCE_ROLE, table, "SELECT"
@@ -1025,7 +1043,20 @@ def test_maintenance_has_table_select_and_delete_only(migrated_connection):
         for privilege in ("INSERT", "UPDATE"):
             assert _has_table_privilege(
                 migrated_connection, MAINTENANCE_ROLE, table, privilege
-            ) is False, f"{table}.{privilege}"
+            ) is (table == "jobs"), f"{table}.{privilege}"
+    for table in M6_TABLES:
+        assert _has_table_privilege(
+            migrated_connection, MAINTENANCE_ROLE, table, "SELECT"
+        ) is True, table
+        assert _has_table_privilege(
+            migrated_connection, MAINTENANCE_ROLE, table, "DELETE"
+        ) is True, table
+        assert _has_table_privilege(
+            migrated_connection, MAINTENANCE_ROLE, table, "INSERT"
+        ) is True, table
+        assert _has_table_privilege(
+            migrated_connection, MAINTENANCE_ROLE, table, "UPDATE"
+        ) is (table == "projection_source_heads"), table
 
 
 # ---------------------------------------------------------------------------
@@ -1529,7 +1560,7 @@ def test_downgrade_to_0011a_removes_security_and_upgrade_restores(
     with create_engine(database_url).connect() as connection:
         assert connection.execute(
             text("select count(*) from pg_policies where schemaname = 'public'")
-        ).scalar_one() == len(LEARNER_TABLES)
+        ).scalar_one() == len(LEARNER_TABLES) + len(M6_TABLES)
         owner = connection.execute(
             text(
                 """

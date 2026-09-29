@@ -1,9 +1,17 @@
 # M6 — Implementation plan after contract freeze
 
-Status: M6-01, M6-02 and M6-03 COMPLETED; M6-04 IN PROGRESS.
-M6-04 implementation baseline: `0f2f373e30b8062f06994d8ef5496acd21729561`.
-Worktree: `/home/bhargav/orca/workspaces/embyr/m6-04-memory-world-reads`.
-Branch: `bhargav/m6-04-memory-world-reads`; sole owner Codex.
+Status: M6-01 COMPLETED; M6-02 COMPLETED; M6-03 COMPLETED; M6-04 COMPLETED; M6-05 IN PROGRESS.
+M6-05 implementation baseline: `6f699d6f0d9095d3e680e5c1ed488a3442536c88`.
+Worktree: `/home/bhargav/orca/workspaces/embyr/m6-05-final-acceptance`.
+Branch: `bhargav/m6-05-final-acceptance`; sole owner Codex.
+
+[M6-05 final operator and acceptance gate](m6-05-final-gate.md) records the
+explicit historical import, read-only audit, safe requeue, and release checks.
+
+Historical M6-04 review-stage metadata: implementation baseline
+`0f2f373e30b8062f06994d8ef5496acd21729561`, worktree
+`/home/bhargav/orca/workspaces/embyr/m6-04-memory-world-reads`, branch
+`bhargav/m6-04-memory-world-reads`. The evidence below is preserved.
 
 [M6-04 read implementation and verification](m6-04-reads.md) records this issue's
 read-only boundary. #106 completed through PR #112 at the baseline above; #107

@@ -9,6 +9,7 @@ No PostgreSQL security semantics are mocked.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -17,12 +18,12 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from conftest import _validate_disposable_url, provision_runtime_roles
 from psycopg import sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ProgrammingError
-
-from conftest import provision_runtime_roles
+from testcontainers.community.postgres import PostgresContainer
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = REPOSITORY_ROOT / "database" / "tools" / "issue33_hosted_verifier.py"
@@ -45,6 +46,50 @@ def verifier():
 
 def _psycopg_url(sqlalchemy_url: str) -> str:
     return sqlalchemy_url.replace("postgresql+psycopg://", "postgresql://")
+
+
+@pytest.fixture(scope="module")
+def database_url():
+    """Pin the frozen Issue #33 verifier to the pre-M6 0019 schema.
+
+    The current repository head is 0020. Its stricter capture intentionally
+    rejects this historical verifier's synthetic Exploration event, so the
+    verifier must run against the schema it was written to inspect.
+    """
+    configured = os.getenv("EMBYR_TEST_DATABASE_URL")
+    if configured:
+        base = configured
+    else:
+        with PostgresContainer("pgvector/pgvector:pg16", driver="psycopg") as pg:
+            yield from _issue33_database(pg.get_connection_url())
+        return
+    yield from _issue33_database(base)
+
+
+def _issue33_database(base_url):
+    _validate_disposable_url(base_url)
+    name = f"embyr_issue33_frozen_test_{uuid4().hex}"
+    url = make_url(base_url).set(database=name).render_as_string(hide_password=False)
+    with psycopg.connect(_psycopg_url(base_url), autocommit=True) as conn:
+        conn.execute(sql.SQL("create database {}").format(sql.Identifier(name)))
+    try:
+        yield url
+    finally:
+        with psycopg.connect(_psycopg_url(base_url), autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("drop database {} with (force)").format(sql.Identifier(name))
+            )
+
+
+@pytest.fixture(scope="module")
+def migrated_engine(database_url):
+    engine = create_engine(database_url)
+    provision_runtime_roles(engine)
+    command.upgrade(_alembic_config(database_url), "0019_response_lock_security")
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
@@ -247,10 +292,12 @@ def test_rls_inventory_has_34_unique_entries(verifier):
 
 
 def test_final_inventory_matches_migration_application_relations(verifier):
-    from app.db.base import Base
     from app.db import models  # noqa: F401
+    from app.db.base import Base
 
-    assert set(verifier.FINAL_0013_APPLICATION_TABLES) == set(Base.metadata.tables)
+    assert set(verifier.FINAL_0013_APPLICATION_TABLES) == set(Base.metadata.tables) - {
+        "projection_source_heads", "projection_inputs", "learner_projection_checkpoints",
+    }
     assert set(verifier.LEGACY_0006_APPLICATION_TABLES) <= set(
         verifier.FINAL_0013_APPLICATION_TABLES
     )
@@ -1241,7 +1288,9 @@ def hosted_behavioral_state(database_url, migrated_engine, verifier):
                 cur.execute("create schema extensions")
                 cur.execute("create extension if not exists vector with schema public")
                 cur.execute("create extension if not exists pgcrypto with schema extensions")
-        command.upgrade(_alembic_config(role_url("app_owner")), "head")
+        command.upgrade(
+            _alembic_config(role_url("app_owner")), "0019_response_lock_security"
+        )
         yield {
             "admin_url": role_url(admin_role),
             "owner_url": role_url("app_owner"),
