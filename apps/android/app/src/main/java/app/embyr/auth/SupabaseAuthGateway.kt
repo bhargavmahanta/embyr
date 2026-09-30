@@ -79,8 +79,9 @@ class SupabaseAuthGateway(
         clearLocalSession()
     }
 
-    override suspend fun accessToken(): String? =
+    override suspend fun accessToken(): String? = refreshMutex.withLock {
         if (state.value is AuthState.TokenAvailable) client.auth.currentAccessTokenOrNull() else null
+    }
 
     private suspend fun stateFromSdk(): AuthState {
         val status = client.auth.sessionStatus.value

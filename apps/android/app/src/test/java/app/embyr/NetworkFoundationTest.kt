@@ -65,6 +65,16 @@ class NetworkFoundationTest {
         assertEquals("PENDING", answer.value.evaluationStatus)
     }
 
+    @Test fun recommendationWithNullPresentationCopyStillDecodes() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"id":"00000000-0000-0000-0000-000000000001","target_type":"LEARNING_ENTITY","entity":{"id":"entity-1","title":"Example"},"practical_challenge":null,"mode":"DISCOVER","distance_band":"NEAR","hook":null,"reason":null,"presented_at":"2026-09-30T00:00:00Z"}"""
+        ))
+        val result = RetrofitEmbyrApi(config, auth).nextRecommendation("{}".toByteArray(), "key-null-copy")
+        val recommendation = (result as ApiResult.Success).value as RecommendationResult.Found
+        assertEquals(null, recommendation.recommendation.hook)
+        assertEquals(null, recommendation.recommendation.reason)
+    }
+
     @Test fun keyedMutationReplaysOneExactRequestAfter401() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401))
         server.enqueue(MockResponse().setBody("{\"recommendation\":null}"))

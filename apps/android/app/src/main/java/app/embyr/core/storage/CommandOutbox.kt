@@ -6,6 +6,8 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
@@ -80,6 +82,11 @@ sealed interface TransmissionOutcome {
 
 /** The only send path accepts a command that has already committed in Room. */
 class CommandDispatcher(private val outbox: CommandOutbox, private val owners: OwnerSession) {
+    private companion object {
+        // Shared by dispatcher instances in this process; fixed stripes avoid retaining one lock per command.
+        val retryLocks = Array(64) { Mutex() }
+    }
+
     suspend fun <T> persistThenSend(
         ownerId: String,
         method: String,
@@ -111,13 +118,13 @@ class CommandDispatcher(private val outbox: CommandOutbox, private val owners: O
         id: String,
         nowEpochMs: Long,
         transmit: suspend (CommandEntity) -> TransmissionOutcome,
-    ): CommandState {
+    ): CommandState = retryLocks[((31 * ownerId.hashCode() + id.hashCode()) and Int.MAX_VALUE) % retryLocks.size].withLock {
         val command = outbox.get(ownerId, id) ?: error("No command for owner")
         val prior = CommandState.valueOf(command.state)
-        if (prior == CommandState.ACKNOWLEDGED || prior == CommandState.RESOLVED || prior == CommandState.EXPIRED) return prior
+        if (prior == CommandState.ACKNOWLEDGED || prior == CommandState.RESOLVED || prior == CommandState.EXPIRED) return@withLock prior
         if (!ReplayWindow.mayReplay(command.createdAtEpochMs, nowEpochMs)) {
             outbox.mark(ownerId, id, CommandState.EXPIRED)
-            return CommandState.EXPIRED
+            return@withLock CommandState.EXPIRED
         }
         outbox.markAttempt(ownerId, id, nowEpochMs)
         val attempt = owners.scopeFor(ownerId).async { transmit(command) }
@@ -136,6 +143,6 @@ class CommandDispatcher(private val outbox: CommandOutbox, private val owners: O
             TransmissionOutcome.Rejected -> CommandState.RESOLVED
         }
         outbox.mark(ownerId, id, next, (outcome as? TransmissionOutcome.Acknowledged)?.resultReference)
-        return next
+        next
     }
 }

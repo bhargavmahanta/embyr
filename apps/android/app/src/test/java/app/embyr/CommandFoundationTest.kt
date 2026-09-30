@@ -10,7 +10,10 @@ import app.embyr.core.storage.ReplayWindow
 import app.embyr.core.storage.TransmissionOutcome
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -73,6 +76,34 @@ class CommandFoundationTest {
         work.join()
         assertTrue(work.isCancelled)
         assertEquals("owner-b", owners.requireOwner())
+    }
+
+    @Test fun concurrentRetriesCannotOverwriteAcknowledgment() = runBlocking {
+        val outbox = MemoryOutbox()
+        val owners = OwnerSession().apply { switchTo("owner-a") }
+        outbox.enqueue(CommandEntity("id", "owner-a", "POST", "api/v1/test", byteArrayOf(1), "key", 1000, "AMBIGUOUS"))
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val first = async {
+            CommandDispatcher(outbox, owners).retry("owner-a", "id", 2000) {
+                firstStarted.complete(Unit)
+                releaseFirst.await()
+                TransmissionOutcome.Acknowledged("known-result")
+            }
+        }
+        firstStarted.await()
+        val second = async {
+            CommandDispatcher(outbox, owners).retry("owner-a", "id", 2000) {
+                error("A concurrent retry transmitted after acknowledgment")
+            }
+        }
+        yield()
+        assertFalse(second.isCompleted)
+        releaseFirst.complete(Unit)
+        assertEquals(CommandState.ACKNOWLEDGED, first.await())
+        assertEquals(CommandState.ACKNOWLEDGED, second.await())
+        assertEquals("known-result", outbox.get("owner-a", "id")?.knownResultReference)
+        assertEquals(1, outbox.get("owner-a", "id")?.attempts)
     }
 
     private class MemoryOutbox : CommandOutbox {

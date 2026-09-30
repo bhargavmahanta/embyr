@@ -151,8 +151,8 @@ data class RecommendationDto(
     @SerialName("practical_challenge") val practicalChallenge: String?,
     val mode: String,
     @SerialName("distance_band") val distanceBand: String,
-    val hook: String,
-    val reason: String,
+    val hook: String?,
+    val reason: String?,
     @SerialName("presented_at") val presentedAt: String,
 )
 
