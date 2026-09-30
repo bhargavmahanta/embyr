@@ -17,9 +17,13 @@ htmlcov/
 
 # Android, Kotlin, and Gradle
 .gradle/
+.kotlin/
 **/build/
 local.properties
 *.iml
+*.jks
+*.keystore
+*.p12
 
 # IDE and editor files
 .idea/
