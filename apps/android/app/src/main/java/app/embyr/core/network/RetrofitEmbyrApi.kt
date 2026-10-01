@@ -4,6 +4,12 @@ import app.embyr.auth.AuthGateway
 import app.embyr.core.config.AppConfig
 import app.embyr.core.model.AnswerAcknowledgmentDto
 import app.embyr.core.model.ProfileDto
+import app.embyr.core.model.StarterInterestPageDto
+import app.embyr.core.model.OnboardingResultDto
+import app.embyr.core.model.ExplorationPageDto
+import app.embyr.core.model.AcceptedExplorationDto
+import app.embyr.core.model.SkippedRecommendationDto
+import app.embyr.core.model.RecommendationDecisionResult
 import app.embyr.core.model.RecommendationDto
 import app.embyr.core.model.RecommendationResult
 import app.embyr.core.model.WorldDeltaPageDto
@@ -38,6 +44,17 @@ import okhttp3.ResponseBody
 private interface RawService {
     @POST("api/v1/session/bootstrap") suspend fun bootstrap(): Response<ResponseBody>
     @GET("api/v1/me") suspend fun profile(): Response<ResponseBody>
+    @GET("api/v1/catalog/starter-interests") suspend fun starterInterests(): Response<ResponseBody>
+    @POST("api/v1/me/onboarding/complete")
+    suspend fun completeOnboarding(@Header("Idempotency-Key") key: String, @Body body: RequestBody): Response<ResponseBody>
+    @GET("api/v1/explorations")
+    suspend fun explorations(@Query("limit") limit: Int, @Query("cursor") cursor: String?): Response<ResponseBody>
+    @POST("api/v1/recommendations/{id}/decision")
+    suspend fun decideRecommendation(
+        @Path("id") recommendationId: String,
+        @Header("Idempotency-Key") key: String,
+        @Body body: RequestBody,
+    ): Response<ResponseBody>
     @GET("api/v1/world") suspend fun world(): Response<ResponseBody>
     @GET("api/v1/world/changes") suspend fun worldChanges(@Query("after_revision") after: Long): Response<ResponseBody>
     @POST("api/v1/recommendations/next")
@@ -81,6 +98,24 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
 
     override suspend fun bootstrap() = execute({ service.bootstrap() }) { json.decodeFromString(ProfileDto.serializer(), it) }
     override suspend fun profile() = execute({ service.profile() }) { json.decodeFromString(ProfileDto.serializer(), it) }
+    override suspend fun starterInterests() = execute({ service.starterInterests() }) {
+        json.decodeFromString(StarterInterestPageDto.serializer(), it)
+    }
+    override suspend fun completeOnboarding(canonicalPayload: ByteArray, idempotencyKey: String) =
+        execute({ service.completeOnboarding(idempotencyKey, canonicalPayload.toRequestBody(mediaType)) }) {
+            json.decodeFromString(OnboardingResultDto.serializer(), it)
+        }
+    override suspend fun explorations(limit: Int, cursor: String?) = execute({ service.explorations(limit, cursor) }) {
+        json.decodeFromString(ExplorationPageDto.serializer(), it)
+    }
+    override suspend fun decideRecommendation(recommendationId: String, canonicalPayload: ByteArray, idempotencyKey: String) =
+        execute({ service.decideRecommendation(recommendationId, idempotencyKey, canonicalPayload.toRequestBody(mediaType)) }) { raw ->
+            if (json.parseToJsonElement(raw).jsonObject["decision"]?.jsonPrimitive?.content == "SKIP") {
+                RecommendationDecisionResult.Skipped(json.decodeFromString(SkippedRecommendationDto.serializer(), raw))
+            } else {
+                RecommendationDecisionResult.Accepted(json.decodeFromString(AcceptedExplorationDto.serializer(), raw))
+            }
+        }
     override suspend fun world() = execute({ service.world() }) { json.decodeFromString(WorldSnapshotDto.serializer(), it) }
     override suspend fun worldChanges(afterRevision: Long) = execute({ service.worldChanges(afterRevision) }) {
         json.decodeFromString(WorldDeltaPageDto.serializer(), it)
@@ -127,7 +162,10 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
                 ApiResult.Failure(TransportError.Decode(status))
             }
         }
-        if (status == 401) return ApiResult.Failure(TransportError.Authentication)
+        if (status == 401) {
+            val authProblem = runCatching { json.decodeFromString(ProblemDetails.serializer(), body) }.getOrNull()
+            return ApiResult.Failure(TransportError.Authentication(authProblem))
+        }
         if (status == 409) {
             val resync = runCatching { json.decodeFromString(WorldResyncRequiredDto.serializer(), body) }.getOrNull()
             if (resync?.code == "WORLD_RESYNC_REQUIRED") return ApiResult.Failure(TransportError.WorldResync(resync))

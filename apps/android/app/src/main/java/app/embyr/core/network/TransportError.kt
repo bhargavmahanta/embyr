@@ -35,7 +35,7 @@ sealed interface TransportError {
     data class WorldResync(val response: WorldResyncRequiredDto) : TransportError
     data class UnexpectedHttp(val httpStatus: Int, val requestId: String?) : TransportError
     data class Decode(val httpStatus: Int) : TransportError
-    data object Authentication : TransportError
+    data class Authentication(val details: ProblemDetails? = null) : TransportError
 }
 
 sealed interface ApiResult<out T> {

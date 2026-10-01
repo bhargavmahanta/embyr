@@ -48,3 +48,14 @@ data class WorldAuxEntity(
     val connectionsJson: String,
     val artifactsJson: String,
 )
+
+@Entity(tableName = "journey_state", primaryKeys = ["ownerId"])
+data class JourneyEntity(
+    val ownerId: String,
+    val draftStarterIdsJson: String = "[]",
+    val presentationJson: String? = null,
+    val noResult: Boolean = false,
+    val acceptedExplorationId: String? = null,
+    val acceptedRecommendationId: String? = null,
+    val skippedRecommendationId: String? = null,
+)

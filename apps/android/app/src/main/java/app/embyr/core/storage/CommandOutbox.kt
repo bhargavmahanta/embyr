@@ -76,6 +76,7 @@ object ReplayWindow {
 
 sealed interface TransmissionOutcome {
     data class Acknowledged(val resultReference: String? = null) : TransmissionOutcome
+    data class Resolved(val resultReference: String? = null) : TransmissionOutcome
     data object Ambiguous : TransmissionOutcome
     data object Rejected : TransmissionOutcome
 }
@@ -139,10 +140,16 @@ class CommandDispatcher(private val outbox: CommandOutbox, private val owners: O
         }
         val next = when (outcome) {
             is TransmissionOutcome.Acknowledged -> CommandState.ACKNOWLEDGED
+            is TransmissionOutcome.Resolved -> CommandState.RESOLVED
             TransmissionOutcome.Ambiguous -> CommandState.AMBIGUOUS
             TransmissionOutcome.Rejected -> CommandState.RESOLVED
         }
-        outbox.mark(ownerId, id, next, (outcome as? TransmissionOutcome.Acknowledged)?.resultReference)
+        val reference = when (outcome) {
+            is TransmissionOutcome.Acknowledged -> outcome.resultReference
+            is TransmissionOutcome.Resolved -> outcome.resultReference
+            else -> null
+        }
+        outbox.mark(ownerId, id, next, reference)
         next
     }
 }
