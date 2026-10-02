@@ -131,6 +131,7 @@ private fun OnboardingPage(ui: JourneyUiState, viewModel: JourneyActions) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Heading("Choose starter interests") }
+            item { OutlinedButton(onClick = viewModel::signOut) { Text("Sign out") } }
             item { Text("Choose up to 20, or continue with none. You can change direction later.") }
             item { Text("${ui.selectedIds.size} of 20 selected") }
             item { Status(ui) }

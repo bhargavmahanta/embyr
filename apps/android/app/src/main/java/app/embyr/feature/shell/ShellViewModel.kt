@@ -75,9 +75,24 @@ class ShellViewModel(private val container: AppContainer) : ViewModel(), Journey
     private val recommendations = RecommendationRepository(container.embyrApi, container.ownerSession, container.journeyStore, container.commandOutbox, container.commandDispatcher)
     private val mutable = MutableStateFlow(JourneyUiState())
     private var currentAction: Job? = null
+    private var restoreJob: Job? = null
     val ui: StateFlow<JourneyUiState> = mutable
 
-    init { viewModelScope.launch { restore() } }
+    init {
+        viewModelScope.launch {
+            auth.state.collect { state ->
+                if (state == AuthState.SignedOut) {
+                    currentAction?.cancel()
+                    currentAction = null
+                    restoreJob?.cancel()
+                    restoreJob = null
+                    mutable.value = JourneyUiState(screen = JourneyScreen.SIGNED_OUT)
+                }
+            }
+        }
+        restoreJob = viewModelScope.launch(start = CoroutineStart.LAZY) { restore() }
+        restoreJob?.start()
+    }
 
     override fun setEmail(value: String) { mutable.value = mutable.value.copy(email = value, message = null) }
     override fun setCode(value: String) { mutable.value = mutable.value.copy(code = value, message = null) }
@@ -196,6 +211,10 @@ class ShellViewModel(private val container: AppContainer) : ViewModel(), Journey
     }
 
     private suspend fun enterFromSession(outcome: SessionOutcome) {
+        if (auth.state.value == AuthState.SignedOut) {
+            mutable.value = JourneyUiState(screen = JourneyScreen.SIGNED_OUT)
+            return
+        }
         when (outcome) {
             SessionOutcome.SignedOut -> mutable.value = JourneyUiState(screen = JourneyScreen.SIGNED_OUT)
             is SessionOutcome.Recoverable -> mutable.value = mutable.value.copy(screen = JourneyScreen.RECOVERABLE_ERROR, message = outcome.error?.let(::messageFor) ?: "Profile could not be verified. Retry.")

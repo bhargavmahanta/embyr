@@ -9,6 +9,7 @@ import app.embyr.core.storage.CommandState
 import app.embyr.core.storage.ReplayWindow
 import app.embyr.core.storage.TransmissionOutcome
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -76,6 +77,34 @@ class CommandFoundationTest {
         work.join()
         assertTrue(work.isCancelled)
         assertEquals("owner-b", owners.requireOwner())
+    }
+
+    @Test fun ownerLossDuringSendLeavesInFlightCommandRecoverableWithoutFalseAcknowledgment() = runBlocking {
+        val outbox = MemoryOutbox()
+        val owners = OwnerSession().apply { switchTo("owner-a") }
+        val dispatcher = CommandDispatcher(outbox, owners)
+        outbox.enqueue(CommandEntity("id", "owner-a", "POST", "api/v1/test", byteArrayOf(1), "key", 1000, "PENDING"))
+        val started = CompletableDeferred<Unit>()
+        val send = async {
+            try {
+                dispatcher.retry("owner-a", "id", 2000) {
+                    started.complete(Unit)
+                    awaitCancellation()
+                }
+            } catch (_: CancellationException) { }
+        }
+        started.await()
+        owners.switchTo(null)
+        send.await()
+        assertEquals(CommandState.IN_FLIGHT.name, outbox.commands.getValue("id").state)
+        assertEquals("key", outbox.commands.getValue("id").idempotencyKey)
+        owners.switchTo("owner-a")
+        assertEquals(CommandState.ACKNOWLEDGED, dispatcher.retry("owner-a", "id", 3000) {
+            assertEquals("key", it.idempotencyKey)
+            assertArrayEquals(byteArrayOf(1), it.canonicalPayload)
+            TransmissionOutcome.Acknowledged("result")
+        })
+        assertEquals(1, outbox.commands.size)
     }
 
     @Test fun concurrentRetriesCannotOverwriteAcknowledgment() = runBlocking {

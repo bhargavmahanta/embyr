@@ -42,6 +42,25 @@ class JourneyComposeTest {
         assertEquals(listOf("starter:starter", "onboarding:false"), actions.calls)
     }
 
+    @Test fun onboardingOffersExistingSignOutAction() {
+        compose.setContent { JourneyContent(JourneyUiState(screen = JourneyScreen.ONBOARDING), actions) }
+        compose.onNodeWithText("Sign out").assertIsDisplayed().performClick()
+        assertEquals(listOf("sign-out"), actions.calls)
+    }
+
+    @Test fun signedOutRootHidesPreviousOnboardingContent() {
+        val state = mutableStateOf(JourneyUiState(
+            screen = JourneyScreen.ONBOARDING,
+            starters = listOf(StarterInterestDto("starter", "AREA", 1, "Private starter", "Owner only")),
+        ))
+        compose.setContent { JourneyContent(state.value, actions) }
+        compose.onNodeWithText("Private starter").assertIsDisplayed()
+        compose.runOnUiThread { state.value = JourneyUiState(screen = JourneyScreen.SIGNED_OUT) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Sign in").assertIsDisplayed()
+        compose.onNodeWithText("Private starter").assertDoesNotExist()
+    }
+
     @Test fun entryDoesNotGenerateUntilLearnerChoosesMode() {
         compose.setContent { JourneyContent(JourneyUiState(screen = JourneyScreen.ENTRY), actions) }
         compose.onNodeWithText("Ready to explore").assertIsDisplayed()

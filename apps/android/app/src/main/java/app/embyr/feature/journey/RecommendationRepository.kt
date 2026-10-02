@@ -200,7 +200,7 @@ class RecommendationRepository(
         command.relativeRoute.removePrefix(decisionPrefix).removeSuffix("/decision")
 
     private fun classifyFailure(error: TransportError, set: (RecommendationOutcome) -> Unit): TransmissionOutcome {
-        return if (error is TransportError.Network || error is TransportError.AmbiguousTimeout || error.code() == "COMMAND_IN_PROGRESS") {
+        return if (error is TransportError.Authentication || error is TransportError.Network || error is TransportError.AmbiguousTimeout || error.code() == "COMMAND_IN_PROGRESS") {
             set(RecommendationOutcome.Pending)
             TransmissionOutcome.Ambiguous
         } else {

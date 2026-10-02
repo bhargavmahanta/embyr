@@ -63,6 +63,51 @@ class JourneyFlowTest {
         )
     }
 
+    @Test fun onboardingAuthenticationLossKeepsExactCommandForSameOwnerReauth() = runBlocking {
+        val fixture = Fixture(ownerA)
+        val auth = FakeAuth()
+        fixture.api.onboardingResults += ApiResult.Failure(TransportError.Authentication())
+        fixture.api.onboardingResults += ok(OnboardingResultDto(preferences(), "2026-10-01T00:00:00Z"))
+        assertEquals(OnboardingOutcome.Pending, fixture.onboarding().submit(emptyList()))
+        val original = fixture.outbox.commands.values.single()
+        assertEquals(CommandState.AMBIGUOUS.name, original.state)
+        auth.state.value = AuthState.SignedOut
+        fixture.owners.switchTo(null)
+        assertEquals(null, fixture.owners.owner.value)
+        assertEquals(AuthState.SignedOut, auth.state.value)
+        auth.state.value = AuthState.TokenAvailable(SessionIdentity("external-subject"))
+        assertTrue(SessionRepository(auth, fixture.api, fixture.owners).bootstrap() is SessionOutcome.Ready)
+        assertEquals(OnboardingOutcome.Completed, fixture.onboarding().resume())
+        assertEquals(1, fixture.outbox.commands.size)
+        assertEquals(fixture.api.onboardingCalls[0], fixture.api.onboardingCalls[1])
+        assertEquals(original.idempotencyKey, fixture.outbox.commands.values.single().idempotencyKey)
+        assertArrayEquals(original.canonicalPayload, fixture.outbox.commands.values.single().canonicalPayload)
+    }
+
+    @Test fun interruptedOnboardingCommandIsInvisibleToAnotherOwnerAndAvailableOnReturn() = runBlocking {
+        val fixture = Fixture(ownerA)
+        val auth = FakeAuth()
+        fixture.api.onboardingResults += ApiResult.Failure(TransportError.Authentication())
+        fixture.api.onboardingResults += ok(OnboardingResultDto(preferences(), "2026-10-01T00:00:00Z"))
+        assertEquals(OnboardingOutcome.Pending, fixture.onboarding().submit(emptyList()))
+        val original = fixture.outbox.commands.values.single()
+        auth.state.value = AuthState.SignedOut
+        fixture.owners.switchTo(null)
+        auth.state.value = AuthState.TokenAvailable(SessionIdentity("other-external-subject"))
+        fixture.api.profileValue = profile(ownerB)
+        assertTrue(SessionRepository(auth, fixture.api, fixture.owners).bootstrap() is SessionOutcome.Ready)
+        assertEquals(emptyList<CommandEntity>(), fixture.outbox.unresolved(ownerB))
+        assertEquals(null, fixture.outbox.get(ownerB, original.id))
+        assertEquals(null, fixture.onboarding().resume())
+        assertEquals(1, fixture.api.onboardingCalls.size)
+        assertEquals(original, fixture.outbox.commands.values.single())
+        fixture.owners.switchTo(null)
+        fixture.api.profileValue = profile(ownerA)
+        assertTrue(SessionRepository(auth, fixture.api, fixture.owners).bootstrap() is SessionOutcome.Ready)
+        assertEquals(OnboardingOutcome.Completed, fixture.onboarding().resume())
+        assertEquals(fixture.api.onboardingCalls[0], fixture.api.onboardingCalls[1])
+    }
+
     @Test fun expiredOnboardingReconcilesWithMeWithoutPost() = runBlocking {
         val fixture = Fixture(ownerA, now = ReplayWindow.SAFE_WINDOW_MS + 1)
         fixture.outbox.enqueue(command("api/v1/me/onboarding/complete", ownerA, 0))
@@ -102,6 +147,46 @@ class JourneyFlowTest {
         assertEquals(RecommendationOutcome.NoResult, fixture.recommendations().generate("SURPRISE"))
         assertTrue(fixture.store.read(ownerA).noResult)
         assertEquals(2, fixture.outbox.commands.size)
+    }
+
+    @Test fun recommendationAuthenticationLossReplaysSameGenerationAfterReauth() = runBlocking {
+        val fixture = Fixture(ownerA)
+        val auth = FakeAuth()
+        fixture.api.recommendationResults += ApiResult.Failure(TransportError.Authentication())
+        fixture.api.recommendationResults += ok(RecommendationResult.NoResult)
+        assertEquals(RecommendationOutcome.Pending, fixture.recommendations().generate("EXPLORE"))
+        val original = fixture.outbox.commands.values.single()
+        assertEquals(CommandState.AMBIGUOUS.name, original.state)
+        auth.state.value = AuthState.SignedOut
+        fixture.owners.switchTo(null)
+        auth.state.value = AuthState.TokenAvailable(SessionIdentity("external-subject"))
+        fixture.api.profileValue = profile(ownerA, complete = true)
+        assertTrue(SessionRepository(auth, fixture.api, fixture.owners).bootstrap() is SessionOutcome.Ready)
+        assertEquals(RecommendationOutcome.NoResult, fixture.recommendations().resumeGeneration())
+        assertEquals(1, fixture.outbox.commands.size)
+        assertEquals(fixture.api.recommendationCalls[0], fixture.api.recommendationCalls[1])
+        assertEquals(original.idempotencyKey, fixture.outbox.commands.values.single().idempotencyKey)
+        assertArrayEquals(original.canonicalPayload, fixture.outbox.commands.values.single().canonicalPayload)
+    }
+
+    @Test fun decisionAuthenticationLossReplaysSameAcceptAfterReauth() = runBlocking {
+        val fixture = Fixture(ownerA)
+        val auth = FakeAuth()
+        fixture.api.decisionResults += ApiResult.Failure(TransportError.Authentication())
+        fixture.api.decisionResults += ok(RecommendationDecisionResult.Accepted(accepted()))
+        assertEquals(RecommendationOutcome.Pending, fixture.recommendations().decide(recId, "ACCEPT"))
+        val original = fixture.outbox.commands.values.single()
+        assertEquals(CommandState.AMBIGUOUS.name, original.state)
+        auth.state.value = AuthState.SignedOut
+        fixture.owners.switchTo(null)
+        auth.state.value = AuthState.TokenAvailable(SessionIdentity("external-subject"))
+        fixture.api.profileValue = profile(ownerA, complete = true)
+        assertTrue(SessionRepository(auth, fixture.api, fixture.owners).bootstrap() is SessionOutcome.Ready)
+        assertEquals(RecommendationOutcome.Accepted(recId, explorationId), fixture.recommendations().resumeDecision())
+        assertEquals(1, fixture.outbox.commands.size)
+        assertEquals(fixture.api.decisionCalls[0], fixture.api.decisionCalls[1])
+        assertEquals(original.idempotencyKey, fixture.outbox.commands.values.single().idempotencyKey)
+        assertArrayEquals(original.canonicalPayload, fixture.outbox.commands.values.single().canonicalPayload)
     }
 
     @Test fun commandInProgressRetriesSameRecommendationCommandWithBoundedBackoff() = runBlocking {

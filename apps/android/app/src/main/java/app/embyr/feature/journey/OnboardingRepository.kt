@@ -112,7 +112,7 @@ class OnboardingRepository(
                     } else set(OnboardingOutcome.Failed(result.error))
                     TransmissionOutcome.Rejected
                 }
-                result.error is TransportError.Network || result.error is TransportError.AmbiguousTimeout || result.error.code() == "COMMAND_IN_PROGRESS" -> {
+                result.error is TransportError.Authentication || result.error is TransportError.Network || result.error is TransportError.AmbiguousTimeout || result.error.code() == "COMMAND_IN_PROGRESS" -> {
                     set(OnboardingOutcome.Pending)
                     TransmissionOutcome.Ambiguous
                 }
