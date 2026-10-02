@@ -13,7 +13,7 @@ import app.embyr.feature.shell.ShellViewModel
 
 class MainActivity : ComponentActivity() {
     private val viewModel by viewModels<ShellViewModel> {
-        ShellViewModel.Factory((application as EmbyrApplication).container.authGateway)
+        ShellViewModel.Factory((application as EmbyrApplication).container)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

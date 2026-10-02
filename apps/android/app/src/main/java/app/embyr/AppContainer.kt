@@ -18,8 +18,10 @@ import app.embyr.core.storage.CommandOutbox
 import app.embyr.core.storage.CommandDispatcher
 import app.embyr.core.storage.DataStoreUiPreferences
 import app.embyr.core.storage.EmbyrDatabase
+import app.embyr.core.storage.MIGRATION_1_2
 import app.embyr.core.storage.RoomCommandOutbox
 import app.embyr.core.storage.RoomWorldStore
+import app.embyr.core.storage.RoomJourneyStore
 import app.embyr.core.storage.UiPreferences
 import app.embyr.core.storage.WorldStore
 
@@ -35,9 +37,10 @@ class AppContainer(context: Context) {
         context.applicationContext,
         EmbyrDatabase::class.java,
         "embyr-private.db",
-    ).build()
+    ).addMigrations(MIGRATION_1_2).build()
     val commandOutbox: CommandOutbox = RoomCommandOutbox(database.commandDao(), ownerSession)
     val commandDispatcher = CommandDispatcher(commandOutbox, ownerSession)
+    val journeyStore = RoomJourneyStore(database.journeyDao(), ownerSession)
     val worldStore: WorldStore = RoomWorldStore(database, ownerSession)
     val uiPreferences: UiPreferences = DataStoreUiPreferences(context)
 }

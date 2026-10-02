@@ -8,6 +8,7 @@ import app.embyr.core.network.ApiResult
 import app.embyr.core.network.RetrofitEmbyrApi
 import app.embyr.core.network.TransportError
 import app.embyr.core.model.RecommendationResult
+import app.embyr.core.model.RecommendationDecisionResult
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -123,6 +124,42 @@ class NetworkFoundationTest {
         assertEquals(0, auth.refreshes)
     }
 
+    @Test fun journeyEndpointsStayTypedAndPreserveKeyedBodies() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"00000000-0000-0000-0000-000000000001","entity_type":"AREA","entity_version":2,"title":"Space","summary":"Look up"}]}"""))
+        server.enqueue(MockResponse().setBody("""{"preferences":{"adventure_preference":"BALANCED","preferred_effort":"15_20_MIN","support_style":"SMALL_HINT","practical_opt_in":false,"version":1},"onboarding_completed_at":"2026-10-01T00:00:00Z"}"""))
+        server.enqueue(MockResponse().setBody("""{"items":[{"id":"00000000-0000-0000-0000-000000000002","recommendation_id":"00000000-0000-0000-0000-000000000003","status":"ACTIVE"}],"next_cursor":"next"}"""))
+        server.enqueue(MockResponse().setBody("""{"recommendation_id":"00000000-0000-0000-0000-000000000003","decision":"SKIP"}"""))
+        server.enqueue(MockResponse().setBody("""{"id":"00000000-0000-0000-0000-000000000002","entity":{"id":"00000000-0000-0000-0000-000000000004","title":"Space"},"entity_version":2,"practical_challenge_id":null,"learning_intent":"DIRECT_INTEREST","status":"ACTIVE","started_at":"2026-10-01T00:00:00Z","returned_at":null,"paused_at":null,"completed_at":null,"version":1}"""))
+        val api = RetrofitEmbyrApi(config, auth)
+        assertEquals("AREA", (api.starterInterests() as ApiResult.Success).value.items.single().entityType)
+        assertEquals("/api/v1/catalog/starter-interests", server.takeRequest().path)
+        val onboarding = api.completeOnboarding("{\"fixed\":true}".toByteArray(), "onboarding-key") as ApiResult.Success
+        assertEquals("BALANCED", onboarding.value.preferences.adventurePreference)
+        val onRequest = server.takeRequest()
+        assertEquals("onboarding-key", onRequest.getHeader("Idempotency-Key"))
+        assertEquals("{\"fixed\":true}", onRequest.body.readUtf8())
+        val page = api.explorations(100, "previous") as ApiResult.Success
+        assertEquals("next", page.value.nextCursor)
+        assertEquals("/api/v1/explorations?limit=100&cursor=previous", server.takeRequest().path)
+        val skipped = api.decideRecommendation("00000000-0000-0000-0000-000000000003", "{}".toByteArray(), "skip-key") as ApiResult.Success
+        assertTrue(skipped.value is RecommendationDecisionResult.Skipped)
+        assertEquals("skip-key", server.takeRequest().getHeader("Idempotency-Key"))
+        val accepted = api.decideRecommendation("00000000-0000-0000-0000-000000000003", "{}".toByteArray(), "accept-key") as ApiResult.Success
+        assertTrue(accepted.value is RecommendationDecisionResult.Accepted)
+        assertEquals("accept-key", server.takeRequest().getHeader("Idempotency-Key"))
+    }
+
+    @Test fun unmappedIdentityRetainsProblemCodeAndRequestId() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401).setBody(
+            """{"type":"about:blank","title":"Unmapped identity","status":401,"code":"UNMAPPED_IDENTITY","request_id":"request-123"}"""
+        ))
+        val result = RetrofitEmbyrApi(config, auth).bootstrap() as ApiResult.Failure
+        val error = result.error as TransportError.Authentication
+        assertEquals("UNMAPPED_IDENTITY", error.details?.code)
+        assertEquals("request-123", error.details?.requestId)
+        assertEquals(0, auth.refreshes)
+    }
+
     private class FakeAuth : AuthGateway {
         private val mutable = MutableStateFlow<AuthState>(AuthState.TokenAvailable(SessionIdentity("external")))
         override val state: StateFlow<AuthState> = mutable
@@ -132,6 +169,8 @@ class NetworkFoundationTest {
         override suspend fun refreshSession(expectedAccessToken: String?): Boolean { refreshes++; token = "new-token"; return true }
         override suspend fun signOut() { mutable.value = AuthState.SignedOut }
         override suspend fun accessToken() = token
+        override suspend fun requestEmailCode(email: String) = app.embyr.auth.EmailCodeResult.Sent
+        override suspend fun verifyEmailCode(email: String, code: String) = app.embyr.auth.EmailCodeResult.Authenticated
     }
 
     companion object {

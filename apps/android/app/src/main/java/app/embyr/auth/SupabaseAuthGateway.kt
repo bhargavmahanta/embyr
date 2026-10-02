@@ -5,6 +5,9 @@ import io.github.jan.supabase.annotations.SupabaseExperimental
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.AuthConfig
 import io.github.jan.supabase.auth.FlowType
+import io.github.jan.supabase.auth.providers.builtin.OTP
+import io.github.jan.supabase.auth.OtpType
+import io.github.jan.supabase.auth.OtpVerifyResult
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.createSupabaseClient
@@ -36,6 +39,8 @@ internal interface AuthSessionBackend {
     suspend fun sessionIdentityOrNull(): SessionIdentity?
     suspend fun refreshCurrentSession()
     suspend fun clearSession()
+    suspend fun requestEmailCode(email: String)
+    suspend fun verifyEmailCode(email: String, code: String): Boolean
 }
 
 private class SupabaseAuthBackend(
@@ -67,6 +72,14 @@ private class SupabaseAuthBackend(
 
     override suspend fun refreshCurrentSession() { client.auth.refreshCurrentSession() }
     override suspend fun clearSession() { client.auth.clearSession() }
+    override suspend fun requestEmailCode(email: String) {
+        client.auth.signInWith(OTP, redirectUrl = null) {
+            this.email = email
+            createUser = false
+        }
+    }
+    override suspend fun verifyEmailCode(email: String, code: String): Boolean =
+        client.auth.verifyEmailOtp(OtpType.Email.EMAIL, email, code) is OtpVerifyResult.Authenticated
 }
 
 class SupabaseAuthGateway internal constructor(
@@ -137,6 +150,35 @@ class SupabaseAuthGateway internal constructor(
 
     override suspend fun accessToken(): String? = authMutex.withLock {
         if (state.value is AuthState.TokenAvailable) currentAccessTokenLocked() else null
+    }
+
+    override suspend fun requestEmailCode(email: String): EmailCodeResult = try {
+        backend.requestEmailCode(email.trim())
+        EmailCodeResult.Sent
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        EmailCodeResult.Failed("Code request failed. Check the address and try again.")
+    }
+
+    override suspend fun verifyEmailCode(email: String, code: String): EmailCodeResult = authMutex.withLock {
+        try {
+            if (!backend.verifyEmailCode(email.trim(), code.trim())) {
+                return@withLock EmailCodeResult.Failed("Verification did not create a session. Try again.")
+            }
+            val next = stateFromSdkLocked()
+            if (next !is AuthState.TokenAvailable) {
+                clearLocalSessionLocked()
+                mutableState.value = AuthState.SignedOut
+                return@withLock EmailCodeResult.Failed("Verification did not create a session. Try again.")
+            }
+            mutableState.value = next
+            EmailCodeResult.Authenticated
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            EmailCodeResult.Failed("Code invalid or expired. Request a new code and try again.")
+        }
     }
 
     private fun currentAccessTokenLocked(): String? = backend.accessTokenOrNull()

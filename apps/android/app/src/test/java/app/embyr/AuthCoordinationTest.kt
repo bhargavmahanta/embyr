@@ -2,6 +2,7 @@ package app.embyr
 
 import app.embyr.auth.AuthSessionBackend
 import app.embyr.auth.AuthState
+import app.embyr.auth.EmailCodeResult
 import app.embyr.auth.OwnerSession
 import app.embyr.auth.SecureCodeVerifierCache
 import app.embyr.auth.SecureSessionManager
@@ -95,6 +96,39 @@ class AuthCoordinationTest {
         assertEquals(1, backend.refreshes)
     }
 
+    @Test fun emailCodeRequestUsesClosedEnrollmentAndVerificationPublishesOnlyAuthenticatedSession() = runBlocking {
+        val backend = FakeBackend()
+        val gateway = gateway(backend)
+        gateway.restoreSession()
+        gateway.signOut()
+        assertEquals(EmailCodeResult.Sent, gateway.requestEmailCode(" learner@example.com "))
+        assertEquals("learner@example.com", backend.requestedEmail)
+        backend.verifyAuthenticated = false
+        assertTrue(gateway.verifyEmailCode("learner@example.com", "123456") is EmailCodeResult.Failed)
+        assertEquals(AuthState.SignedOut, gateway.state.value)
+        backend.verifyAuthenticated = true
+        assertEquals(EmailCodeResult.Authenticated, gateway.verifyEmailCode("learner@example.com", "123456"))
+        assertTrue(gateway.state.value is AuthState.TokenAvailable)
+    }
+
+    @Test fun verificationWaitsForRefreshUnderOneAuthMutex() = runBlocking {
+        val backend = FakeBackend()
+        val gateway = gateway(backend)
+        gateway.restoreSession()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        backend.pauseRefresh(started, release)
+        val refresh = async(start = CoroutineStart.UNDISPATCHED) { gateway.refreshSession("old-token") }
+        started.await()
+        val verify = async(start = CoroutineStart.UNDISPATCHED) { gateway.verifyEmailCode("learner@example.com", "123456") }
+        yield()
+        assertFalse(verify.isCompleted)
+        release.complete(Unit)
+        assertTrue(refresh.await())
+        assertEquals(EmailCodeResult.Authenticated, verify.await())
+        assertEquals("otp-token", gateway.accessToken())
+    }
+
     private fun gateway(backend: FakeBackend) =
         SupabaseAuthGateway(backend, MemoryStore(), MemoryStore(), OwnerSession())
 
@@ -108,6 +142,8 @@ class AuthCoordinationTest {
     private class FakeBackend : AuthSessionBackend {
         val loadAutoRefreshValues = mutableListOf<Boolean>()
         var refreshes = 0
+        var requestedEmail: String? = null
+        var verifyAuthenticated = true
         private var token: String? = null
         private var refreshStarted: CompletableDeferred<Unit>? = null
         private var releaseRefresh: CompletableDeferred<Unit>? = null
@@ -136,5 +172,10 @@ class AuthCoordinationTest {
         }
 
         override suspend fun clearSession() { token = null }
+        override suspend fun requestEmailCode(email: String) { requestedEmail = email }
+        override suspend fun verifyEmailCode(email: String, code: String): Boolean {
+            if (verifyAuthenticated) token = "otp-token"
+            return verifyAuthenticated
+        }
     }
 }

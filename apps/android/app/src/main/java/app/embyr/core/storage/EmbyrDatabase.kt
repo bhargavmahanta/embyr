@@ -58,12 +58,22 @@ interface WorldDao {
     suspend fun putNodes(nodes: List<WorldNodeEntity>)
 }
 
+@Dao
+interface JourneyDao {
+    @Query("SELECT * FROM journey_state WHERE ownerId = :ownerId")
+    suspend fun get(ownerId: String): JourneyEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(state: JourneyEntity)
+}
+
 @Database(
-    entities = [CommandEntity::class, WorldMetaEntity::class, WorldRegionEntity::class, WorldNodeEntity::class, WorldAuxEntity::class],
-    version = 1,
+    entities = [CommandEntity::class, WorldMetaEntity::class, WorldRegionEntity::class, WorldNodeEntity::class, WorldAuxEntity::class, JourneyEntity::class],
+    version = 2,
     exportSchema = true,
 )
 abstract class EmbyrDatabase : RoomDatabase() {
     abstract fun commandDao(): CommandDao
     abstract fun worldDao(): WorldDao
+    abstract fun journeyDao(): JourneyDao
 }

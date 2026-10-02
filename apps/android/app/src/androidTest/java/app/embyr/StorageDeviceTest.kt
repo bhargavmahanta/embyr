@@ -10,11 +10,14 @@ import app.embyr.auth.OwnerSession
 import app.embyr.auth.SecureCodeVerifierCache
 import app.embyr.core.model.WorldRegionDto
 import app.embyr.core.model.WorldSnapshotDto
+import app.embyr.core.model.RecommendationDto
+import app.embyr.core.model.RecommendationEntityDto
 import app.embyr.core.storage.CommandEntity
 import app.embyr.core.storage.CommandState
 import app.embyr.core.storage.EmbyrDatabase
 import app.embyr.core.storage.RoomCommandOutbox
 import app.embyr.core.storage.RoomWorldStore
+import app.embyr.core.storage.RoomJourneyStore
 import java.io.File
 import java.security.KeyStore
 import kotlinx.coroutines.runBlocking
@@ -123,6 +126,29 @@ class StorageDeviceTest {
         assertEquals("private-pkce-verifier", reopened.loadCodeVerifier())
         reopened.deleteCodeVerifier()
         assertFalse(encrypted.exists())
+    }
+
+    @Test fun journeyDraftAndPresentationSurviveReopenWithoutCrossingOwners() = runBlocking {
+        val starterId = "00000000-0000-0000-0000-000000000001"
+        val recommendationId = "00000000-0000-0000-0000-000000000002"
+        val original = RoomJourneyStore(database.journeyDao(), owners)
+        original.saveDraft("owner-a", listOf(starterId))
+        original.savePresentation(
+            "owner-a",
+            RecommendationDto(recommendationId, "LEARNING_ENTITY", RecommendationEntityDto(starterId, "Astronomy"), null, "EXPLORE", "NEAR", null, null, "2026-10-01T00:00:00Z"),
+        )
+        database.close()
+        database = openDatabase()
+        val reopened = RoomJourneyStore(database.journeyDao(), owners)
+        assertEquals(listOf(starterId), reopened.read("owner-a").selectedStarterIds)
+        assertEquals(recommendationId, reopened.read("owner-a").presentation?.id)
+        owners.switchTo("owner-b")
+        assertTrue(reopened.read("owner-b").selectedStarterIds.isEmpty())
+        assertNull(reopened.read("owner-b").presentation)
+        try {
+            reopened.read("owner-a")
+            fail("Cross-owner journey read was permitted")
+        } catch (_: IllegalStateException) { }
     }
 
     private fun openDatabase() = Room.databaseBuilder(context, EmbyrDatabase::class.java, databaseName).build()
