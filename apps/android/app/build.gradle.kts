@@ -80,6 +80,7 @@ dependencies {
     testImplementation(libs.mockwebserver)
     testImplementation(libs.room.testing)
     androidTestImplementation(platform(libs.compose.bom))
+    debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
