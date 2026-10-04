@@ -161,6 +161,19 @@ def isolated_migrated_database(
 
 
 @pytest.fixture
+def isolated_migration_server() -> Iterator[MigrationDatabase]:
+    """Use a disposable cluster when a migration test changes cluster roles."""
+    with PostgresContainer(PGVECTOR_IMAGE, driver="psycopg") as postgres:
+        url = _psycopg_url(postgres.get_connection_url())
+        engine = create_engine(url)
+        try:
+            provision_runtime_roles(engine)
+            yield MigrationDatabase(url, engine)
+        finally:
+            engine.dispose()
+
+
+@pytest.fixture
 def isolated_migrated_server() -> Iterator[MigrationDatabase]:
     """Use a separate cluster when a test drops a cluster-wide runtime role."""
     with PostgresContainer(PGVECTOR_IMAGE, driver="psycopg") as postgres:

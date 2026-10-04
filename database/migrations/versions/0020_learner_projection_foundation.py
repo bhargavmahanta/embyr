@@ -609,11 +609,6 @@ def upgrade():
     op.execute(TRIGGERS)
     op.execute("grant select,insert,update on public.jobs to app_maintenance")
     op.execute("grant create on schema public to app_maintenance")
-    for function in FUNCTIONS:
-        op.execute(
-            f"revoke all on function public.{function} from public,app_backend,app_worker"
-        )
-        op.execute(f"alter function public.{function} owner to app_maintenance")
     guards = (
         "m6_input_shape()",
         "m6_input_immutable()",
@@ -621,20 +616,26 @@ def upgrade():
         "m6_job_shape()",
         "m6_final_run_snapshot()",
     )
-    for function in guards:
-        op.execute(
-            f"revoke all on function public.{function} from public,app_backend,app_worker"
-        )
+    # app_owner can revoke client grants only while it still owns these
+    # functions; it does not inherit app_maintenance's ownership privileges.
     for function in (*FUNCTIONS, *guards):
         op.execute(f"""do $$ declare r text; begin
          for r in select rolname from pg_roles where rolname in ('anon','authenticated','service_role') loop
           execute format('revoke all on function public.{function} from %I',r);
          end loop; end $$""")
-    op.execute("revoke create on schema public from app_maintenance")
+    for function in (*FUNCTIONS, *guards):
+        op.execute(
+            f"revoke all on function public.{function} from public,app_backend,app_worker"
+        )
     op.execute(
         "grant execute on function public.m6_recapture_event(uuid,uuid),public.m6_lock_source_owner(uuid) to app_backend,app_worker"
     )
-    op.execute(_deletion_sql(expanded=True))
+    for function in FUNCTIONS:
+        op.execute(f"alter function public.{function} owner to app_maintenance")
+    # This predecessor function is already owned by app_maintenance under
+    # 0012; replace it as that role while its schema CREATE grant is active.
+    _maintenance_execute(_deletion_sql(expanded=True))
+    op.execute("revoke create on schema public from app_maintenance")
 
 
 def downgrade():
