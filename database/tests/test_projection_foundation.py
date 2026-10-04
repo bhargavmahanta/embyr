@@ -818,6 +818,74 @@ def test_deleted_owner_cannot_be_resurrected_by_late_source_or_job(
             assert execute(c, f"select count(*) from {table}").scalar_one() == 0
 
 
+def test_hosted_owner_can_upgrade_0020_with_noninherited_maintenance_role(
+    isolated_migration_database,
+):
+    from sqlalchemy.engine import make_url
+
+    db = isolated_migration_database
+    with db.engine.connect() as c:
+        original_inherit, original_set = execute(
+            c,
+            "select inherit_option,set_option from pg_auth_members "
+            "where roleid='app_maintenance'::regrole and member='app_owner'::regrole",
+        ).one()
+    try:
+        with db.engine.begin() as c:
+            for role in ("anon", "authenticated", "service_role"):
+                if not execute(
+                    c, "select 1 from pg_roles where rolname=:r", r=role
+                ).scalar():
+                    execute(c, f"create role {role} nologin")
+            execute(c, "grant app_maintenance to app_owner with inherit false, set true")
+            # These are installed by Supabase before Embyr migrations.
+            execute(c, "create extension if not exists pgcrypto")
+            execute(c, "create extension if not exists vector")
+        owner_config = make_alembic_config(
+            make_url(db.url)
+            .set(username="app_owner")
+            .render_as_string(hide_password=False)
+        )
+        command.upgrade(owner_config, "0019_response_lock_security")
+        with db.engine.connect() as c:
+            assert not execute(
+                c, "select pg_has_role('app_owner','app_maintenance','USAGE')"
+            ).scalar_one()
+            assert execute(
+                c, "select pg_has_role('app_owner','app_maintenance','SET')"
+            ).scalar_one()
+        command.upgrade(owner_config, "head")
+        with db.engine.connect() as c:
+            assert (
+                execute(c, "select version_num from alembic_version").scalar_one()
+                == "0020_learner_projection_foundation"
+            )
+            assert (
+                execute(
+                    c,
+                    "select pg_get_userbyid(proowner) from pg_proc where "
+                    "oid='public.m6_append_input(uuid,text,text,timestamptz,jsonb,uuid,uuid)'::regprocedure",
+                ).scalar_one()
+                == "app_maintenance"
+            )
+            for role in ("anon", "authenticated", "service_role"):
+                assert not execute(
+                    c,
+                    "select has_function_privilege(:role,"
+                    "'public.m6_append_input(uuid,text,text,timestamptz,jsonb,uuid,uuid)',"
+                    "'EXECUTE')",
+                    role=role,
+                ).scalar_one()
+    finally:
+        # Membership is cluster-wide; restore it for other isolated DB tests.
+        with db.engine.begin() as c:
+            execute(
+                c,
+                "grant app_maintenance to app_owner with "
+                f"inherit {str(original_inherit).lower()}, set {str(original_set).lower()}",
+            )
+
+
 def test_non_superuser_migration_owner_sees_preflight_and_initializes_old_users(
     isolated_migration_database,
 ):
