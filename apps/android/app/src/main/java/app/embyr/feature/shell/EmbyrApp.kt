@@ -40,6 +40,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import app.embyr.core.storage.ThemeChoice
+import app.embyr.feature.exploration.*
+import app.embyr.feature.assessment.*
+import app.embyr.navigation.ExplorationListRoute
+import app.embyr.navigation.ExplorationDetailRoute
+import app.embyr.navigation.AssessmentRoute
+import androidx.navigation.toRoute
+import androidx.lifecycle.compose.LifecycleStartEffect
 import app.embyr.navigation.BootstrapRoute
 import app.embyr.navigation.ExplorationReadyRoute
 import app.embyr.navigation.OnboardingRoute
@@ -49,13 +56,13 @@ import app.embyr.navigation.RecoverableErrorRoute
 import app.embyr.navigation.SignedOutRoute
 
 @Composable
-fun EmbyrApp(viewModel: ShellViewModel, theme: ThemeChoice = ThemeChoice.SYSTEM) {
+fun EmbyrApp(viewModel: ShellViewModel, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    JourneyContent(ui, viewModel, theme)
+    JourneyContent(ui, viewModel, theme, explorations, assessments)
 }
 
 @Composable
-fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeChoice = ThemeChoice.SYSTEM) {
+fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null) {
     val dark = when (theme) {
         ThemeChoice.DARK -> true
         ThemeChoice.LIGHT -> false
@@ -63,7 +70,11 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
     }
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
         val nav = rememberNavController()
-        LaunchedEffect(ui.screen) {
+        val explorationState = explorations?.ui?.collectAsStateWithLifecycle()?.value
+        val activeOwner = explorations?.activeOwner?.collectAsStateWithLifecycle()?.value
+        val assessmentState = assessments?.ui?.collectAsStateWithLifecycle()?.value
+        val featureBound = activeOwner != null && activeOwner == ui.profile?.id && explorationState?.owner == activeOwner
+        LaunchedEffect(ui.screen, ui.profile?.id) {
             when (ui.screen) {
                 JourneyScreen.RESTORING -> Unit
                 JourneyScreen.SIGNED_OUT -> nav.replaceRoot(SignedOutRoute)
@@ -74,14 +85,57 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                 JourneyScreen.RECOVERABLE_ERROR -> nav.replaceRoot(RecoverableErrorRoute)
             }
         }
+        LaunchedEffect(ui.screen, featureBound, explorationState?.restoreExploration, explorationState?.restoreSession) {
+            if (featureBound && ui.screen == JourneyScreen.ENTRY && explorationState?.restoreExploration != null) {
+                val id = explorationState.restoreExploration
+                nav.navigate(ExplorationDetailRoute(id)) { launchSingleTop = true }
+                explorationState.restoreSession?.let { nav.navigate(AssessmentRoute(it)) { launchSingleTop = true } }
+                explorations?.consumeRestore()
+            }
+        }
         Surface(Modifier.fillMaxSize()) {
             NavHost(nav, startDestination = BootstrapRoute) {
                 composable<BootstrapRoute> { SimplePage("Checking your session") { Text("Preparing your space…") } }
                 composable<SignedOutRoute> { SignedOutPage(ui, viewModel) }
                 composable<OnboardingRoute> { OnboardingPage(ui, viewModel) }
-                composable<ReadyShellRoute> { EntryPage(ui, viewModel) }
+                composable<ReadyShellRoute> {
+                    EntryPage(ui, viewModel, browse = if (featureBound) ({ nav.navigate(ExplorationListRoute) }) else null,
+                        open = if (featureBound) ({ id -> nav.navigate(ExplorationDetailRoute(id)) }) else null)
+                }
                 composable<RecommendationRoute> { RecommendationPage(ui, viewModel) }
-                composable<ExplorationReadyRoute> { ReadyPage(ui, viewModel) }
+                composable<ExplorationReadyRoute> {
+                    if (featureBound && ui.acceptedExplorationId != null) {
+                        LaunchedEffect(ui.acceptedExplorationId) { nav.navigate(ExplorationDetailRoute(ui.acceptedExplorationId)) { launchSingleTop = true } }
+                    } else ReadyPage(ui, viewModel)
+                }
+                composable<ExplorationListRoute> {
+                    if (featureBound && explorations != null && explorationState != null) {
+                        LaunchedEffect(activeOwner) { explorations.list() }
+                        ExplorationListScreen(explorationState, { nav.navigate(ExplorationDetailRoute(it)) }, explorations::list, explorations::more, { viewModel.backToEntry(); nav.replaceRoot(ReadyShellRoute) })
+                    } else SimplePage("Checking your session") { Text("Preparing your space…") }
+                }
+                composable<ExplorationDetailRoute> { entry ->
+                    val route = entry.toRoute<ExplorationDetailRoute>()
+                    if (featureBound && explorations != null && explorationState != null) {
+                        LaunchedEffect(activeOwner,route.id) { explorations.open(route.id) }
+                        ExplorationDetailScreen(explorationState, explorations::refresh, explorations::deliver, explorations::action,
+                            explorations::complete, explorations::recover, explorations::setDraft, explorations::saveReflection, explorations::recheckEdit,
+                            { nav.navigate(AssessmentRoute(it)) }, { confidence -> assessments?.start(route.id,confidence) { nav.navigate(AssessmentRoute(it)) } },
+                            { explorations.list(); nav.navigate(ExplorationListRoute) { popUpTo<ExplorationListRoute> { inclusive = true }; launchSingleTop = true } })
+                    } else SimplePage("Checking your session") { Text("Preparing your space…") }
+                }
+                composable<AssessmentRoute> { entry ->
+                    val route = entry.toRoute<AssessmentRoute>()
+                    if (featureBound && assessments != null && assessmentState?.owner == activeOwner) {
+                        LaunchedEffect(activeOwner,route.id) { assessments.open(route.id) }
+                        LifecycleStartEffect(activeOwner,route.id) {
+                            assessments.foreground(true)
+                            onStopOrDispose { assessments.foreground(false) }
+                        }
+                        AssessmentScreen(assessmentState, assessments::support, assessments::answer, assessments::retry, assessments::recheck,
+                            { assessments.leave { explorations?.refresh(); nav.popBackStack() } })
+                    } else SimplePage("Checking your session") { Text("Preparing your space…") }
+                }
                 composable<RecoverableErrorRoute> {
                     SimplePage("Could not finish signing in") {
                         Status(ui)
@@ -163,7 +217,7 @@ private fun OnboardingPage(ui: JourneyUiState, viewModel: JourneyActions) {
 }
 
 @Composable
-private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions) {
+private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions, browse: (() -> Unit)? = null, open: ((String) -> Unit)? = null) {
     SimplePage("Ready to explore") {
         Text("Choose how to find your next exploration.")
         if (ui.explorations.isEmpty()) Text("No explorations yet.")
@@ -173,8 +227,9 @@ private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions) {
         if (ui.recommendation != null || ui.noResult) {
             OutlinedButton(onClick = viewModel::showLatestRecommendation, enabled = !ui.busy) { Text("View latest suggestion") }
         }
+        browse?.let { OutlinedButton(onClick = it, enabled = !ui.busy) { Text("Your explorations") } }
         if (ui.acceptedExplorationId != null) {
-            OutlinedButton(onClick = viewModel::showExplorationReady, enabled = !ui.busy) { Text("Exploration ready") }
+            OutlinedButton(onClick = { if (open != null) open(ui.acceptedExplorationId) else viewModel.showExplorationReady() }, enabled = !ui.busy) { Text("Exploration ready") }
         }
         Status(ui)
         OutlinedButton(onClick = viewModel::refreshEntry, enabled = !ui.busy) { Text("Refresh") }

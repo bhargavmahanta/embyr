@@ -1,6 +1,11 @@
 package app.embyr
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import app.embyr.core.storage.LearningCommands
+import app.embyr.feature.exploration.ExplorationRepository
+import app.embyr.feature.assessment.AssessmentRepository
 import androidx.room.Room
 import app.embyr.auth.AuthGateway
 import app.embyr.auth.AuthSecretKind
@@ -19,27 +24,38 @@ import app.embyr.core.storage.CommandDispatcher
 import app.embyr.core.storage.DataStoreUiPreferences
 import app.embyr.core.storage.EmbyrDatabase
 import app.embyr.core.storage.MIGRATION_1_2
+import app.embyr.core.storage.MIGRATION_2_3
+import app.embyr.core.storage.RoomLearningStore
 import app.embyr.core.storage.RoomCommandOutbox
 import app.embyr.core.storage.RoomWorldStore
 import app.embyr.core.storage.RoomJourneyStore
 import app.embyr.core.storage.UiPreferences
 import app.embyr.core.storage.WorldStore
 
-class AppContainer(context: Context) {
+class AppContainer(private val context: Context) {
     val config: AppConfig = BuildAppConfig()
     val logger: AppLogger = AndroidAppLogger()
     val ownerSession = OwnerSession()
     val sessionStore: SessionStore = KeystoreSessionStore(context)
     private val codeVerifierStore: SessionStore = KeystoreSessionStore(context, AuthSecretKind.CODE_VERIFIER)
     val authGateway: AuthGateway = SupabaseAuthGateway(config, sessionStore, codeVerifierStore, ownerSession)
-    val embyrApi: EmbyrApi = RetrofitEmbyrApi(config, authGateway)
+    val embyrApi = RetrofitEmbyrApi(config, authGateway)
     val database: EmbyrDatabase = Room.databaseBuilder(
         context.applicationContext,
         EmbyrDatabase::class.java,
         "embyr-private.db",
-    ).addMigrations(MIGRATION_1_2).build()
+    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     val commandOutbox: CommandOutbox = RoomCommandOutbox(database.commandDao(), ownerSession)
     val commandDispatcher = CommandDispatcher(commandOutbox, ownerSession)
+    val learningStore = RoomLearningStore(database.learningDao(), ownerSession)
+    val learningCommands = LearningCommands(commandOutbox, commandDispatcher, ownerSession, learningStore)
+    val explorations = ExplorationRepository(embyrApi, ownerSession, learningStore, learningCommands)
+    val assessments = AssessmentRepository(embyrApi, embyrApi, ownerSession, learningStore, learningCommands)
+    fun isOnline(): Boolean {
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val network = manager.activeNetwork ?: return false
+        return manager.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }
     val journeyStore = RoomJourneyStore(database.journeyDao(), ownerSession)
     val worldStore: WorldStore = RoomWorldStore(database, ownerSession)
     val uiPreferences: UiPreferences = DataStoreUiPreferences(context)

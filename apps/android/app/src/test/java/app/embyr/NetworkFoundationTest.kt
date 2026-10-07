@@ -76,6 +76,67 @@ class NetworkFoundationTest {
         assertEquals(null, recommendation.recommendation.reason)
     }
 
+    @Test fun supportIs200AndVersionedPatchHasNoIdempotencyHeader() = runBlocking {
+        val support = """{"id":"support","level":"SMALL_NUDGE","content":{"text":"Reviewed nudge"}}"""
+        val reflection = """{"id":"reflection","exploration_id":"exploration","entity_id":"entity","text":"Updated draft","version":3,"created_at":"now","updated_at":"now"}"""
+        server.enqueue(MockResponse().setBody(support))
+        server.enqueue(MockResponse().setResponseCode(202).setBody(support))
+        server.enqueue(MockResponse().setBody(reflection))
+        val api = RetrofitEmbyrApi(config, auth)
+        val payload = "{\"interaction_id\":\"interaction\",\"level\":\"SMALL_NUDGE\"}".toByteArray()
+        val result = api.requestSupport("session", payload, "support-key") as ApiResult.Success
+        assertEquals("Reviewed nudge", result.value.content.text)
+        val request = server.takeRequest()
+        assertEquals("/api/v1/assessment-sessions/session/support-requests", request.path)
+        assertEquals(payload.decodeToString(), request.body.readUtf8())
+        assertEquals("support-key", request.getHeader("Idempotency-Key"))
+        assertTrue(api.requestSupport("session", payload, "support-key") is ApiResult.Failure)
+        server.takeRequest()
+        val edit = "{\"base_version\":2,\"text\":\"Updated draft\"}".toByteArray()
+        assertEquals(3L, (api.editReflection("reflection", edit) as ApiResult.Success).value.version)
+        val patch = server.takeRequest()
+        assertEquals("PATCH", patch.method)
+        assertEquals("/api/v1/reflections/reflection", patch.path)
+        assertEquals(null, patch.getHeader("Idempotency-Key"))
+        assertEquals(edit.decodeToString(), patch.body.readUtf8())
+    }
+
+    @Test fun originalAnswerAckAndCurrentResponseHaveDifferentProgress() = runBlocking {
+        val ack = """{"response_id":"response","evaluation_status":"PENDING","session_status":"WAITING_FOR_EVALUATION","next_interaction":null}"""
+        val current = """{"response_id":"response","assessment_session_id":"session","session_status":"COMPLETED","support_used":null,"evaluation_run_id":"run","evaluation_status":"SUCCEEDED","result":"UNDERSTOOD","confidence":0.8,"feedback":"Reviewed feedback","failure_category":null,"retry_allowed":false}"""
+        server.enqueue(MockResponse().setResponseCode(202).setBody(ack))
+        server.enqueue(MockResponse().setBody(current))
+        val api = RetrofitEmbyrApi(config, auth)
+        assertEquals("PENDING", (api.submitAnswer("session", "{}".toByteArray(), "key") as ApiResult.Success).value.evaluationStatus)
+        server.takeRequest()
+        val response = (api.assessmentResponse("response") as ApiResult.Success).value
+        assertEquals("SUCCEEDED", response.evaluationStatus)
+        assertEquals("run", response.evaluationRunId)
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test fun retryRequires202AndPreservesEmptyBodyAndKey() = runBlocking {
+        val body = """{"response_id":"response","evaluation_status":"PENDING","session_status":"WAITING_FOR_EVALUATION","next_interaction":null,"evaluation_run_id":"new-run"}"""
+        server.enqueue(MockResponse().setResponseCode(202).setBody(body))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val api = RetrofitEmbyrApi(config, auth)
+        assertEquals("new-run", (api.retryEvaluation("response", "{}".toByteArray(), "new-key") as ApiResult.Success).value.evaluationRunId)
+        val request = server.takeRequest()
+        assertEquals("/api/v1/assessment-responses/response/evaluation-retries", request.path)
+        assertEquals("{}", request.body.readUtf8())
+        assertEquals("new-key", request.getHeader("Idempotency-Key"))
+        assertTrue(api.retryEvaluation("response", "{}".toByteArray(), "new-key") is ApiResult.Failure)
+    }
+
+    @Test fun answerRejectsSynchronousSuccessStatus() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(
+            """{"response_id":"response","evaluation_status":"PENDING","session_status":"WAITING_FOR_EVALUATION","next_interaction":null}"""
+        ))
+        val result = RetrofitEmbyrApi(config, auth).submitAnswer("session", "{}".toByteArray(), "answer-key")
+        assertTrue("An immutable asynchronous answer requires HTTP202", result is ApiResult.Failure)
+        assertEquals(200, ((result as ApiResult.Failure).error as TransportError.UnexpectedHttp).httpStatus)
+    }
+
     @Test fun keyedMutationReplaysOneExactRequestAfter401() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(401))
         server.enqueue(MockResponse().setBody("{\"recommendation\":null}"))
