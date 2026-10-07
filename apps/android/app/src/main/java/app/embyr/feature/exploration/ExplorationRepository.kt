@@ -14,10 +14,10 @@ class ExplorationRepository(
     private val json = LearningJson.codec
     private val editMutex = Mutex()
     suspend fun restoreReceipts() = commands.recoverReceipts()
-    suspend fun pending(id: String): List<String> = commands.pending("api/v1/explorations/$id/").map { it.relativeRoute.substringAfterLast('/') }.distinct()
+    suspend fun pending(id: String): List<String> = commands.pending("api/v1/explorations/$id/").map { it.relativeRoute.substringAfterLast('/') }.filter { it in setOf("delivery","actions","completion","reflections") }.distinct()
     suspend fun recover(id: String): LearningOutcome {
         var outcome: LearningOutcome = LearningOutcome.Done
-        commands.pending("api/v1/explorations/$id/").forEach { command ->
+        commands.pending("api/v1/explorations/$id/").filter { it.relativeRoute.substringAfterLast('/') in setOf("delivery","actions","completion","reflections") }.forEach { command ->
             val result = when (command.relativeRoute.substringAfterLast('/')) {
                 "delivery" -> deliver(id)
                 "actions" -> action(id,json.decodeFromString(ExplorationActionRequest.serializer(),command.canonicalPayload.decodeToString()).action)
@@ -40,7 +40,7 @@ class ExplorationRepository(
                 store.updateExploration(owner, id) { row -> row.copy(
                     detailJson = json.encodeToString(ExplorationDetailDto.serializer(), result.value),
                     draft = if (row.draftInitialized) row.draft else result.value.reflection?.text.orEmpty(),
-                    draftInitialized = true,
+                    draftInitialized = true, lifecycleNeedsRefresh = false,
                 ) }
                 LearningOutcome.Done
             }
@@ -56,15 +56,18 @@ class ExplorationRepository(
     }
     suspend fun deliver(id: String): LearningOutcome {
         val owner = owners.requireOwner()
-        return commands.post("api/v1/explorations/$id/delivery", EmptyLearningRequest.serializer(), EmptyLearningRequest(), DeliveryDto.serializer(),
+        val result = commands.post("api/v1/explorations/$id/delivery", EmptyLearningRequest.serializer(), EmptyLearningRequest(), DeliveryDto.serializer(),
             send = { api.deliver(id, it.canonicalPayload, it.idempotencyKey) },
-            persist = { delivery -> store.updateExploration(owner,id) { row -> row.copy(detailJson = json.encodeToString(ExplorationDetailDto.serializer(), requireNotNull(row.detail()).copy(delivery = delivery))) } },
+            persist = { delivery -> store.updateExploration(owner,id) { row -> row.copy(detailJson = json.encodeToString(ExplorationDetailDto.serializer(), requireNotNull(row.detail()).copy(delivery = delivery)), lifecycleNeedsRefresh = true) } },
             reference = { it.contentId }, reconcile = { open(id); read(id).detail()?.delivery })
+        return if (result == LearningOutcome.Done) open(id) else result
     }
     suspend fun action(id: String, action: String): LearningOutcome {
         require(action in setOf("RETURN", "PAUSE", "RESUME"))
         val owner = owners.requireOwner()
-        val detail = read(id).detail() ?: return LearningOutcome.Invalid("Refresh this exploration first.")
+        val row = read(id)
+        val detail = row.detail() ?: return LearningOutcome.Invalid("Refresh this exploration first.")
+        if (row.lifecycleNeedsRefresh) return LearningOutcome.Invalid("Refresh the exploration before changing its lifecycle.")
         if (!commands.hasPending("api/v1/explorations/$id/actions") && (detail.status == "COMPLETED" || (action == "PAUSE" && detail.status != "ACTIVE") || (action == "RESUME" && detail.status != "PAUSED"))) return LearningOutcome.Invalid("This action is unavailable in the current state.")
         val result = commands.post("api/v1/explorations/$id/actions", ExplorationActionRequest.serializer(), ExplorationActionRequest(action, detail.version), ExplorationDto.serializer(),
             send = { api.explorationAction(id, it.canonicalPayload, it.idempotencyKey) }, persist = { saveLifecycle(owner, it) }, reference = { it.id },
@@ -74,7 +77,9 @@ class ExplorationRepository(
     }
     suspend fun complete(id: String): LearningOutcome {
         val owner = owners.requireOwner()
-        val detail = read(id).detail() ?: return LearningOutcome.Invalid("Refresh this exploration first.")
+        val row = read(id)
+        val detail = row.detail() ?: return LearningOutcome.Invalid("Refresh this exploration first.")
+        if (row.lifecycleNeedsRefresh) return LearningOutcome.Invalid("Refresh the exploration before changing its lifecycle.")
         if (detail.status == "COMPLETED" && !commands.hasPending("api/v1/explorations/$id/completion")) return LearningOutcome.Done
         val result = commands.post("api/v1/explorations/$id/completion", CompletionRequest.serializer(), CompletionRequest(detail.version), ExplorationDto.serializer(),
             send = { api.completeExploration(id, it.canonicalPayload, it.idempotencyKey) }, persist = { saveLifecycle(owner, it) }, reference = { it.id },

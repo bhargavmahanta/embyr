@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 3,
-    "identityHash": "b3b341139527f467891f2e4054cc0392",
+    "identityHash": "560e0e6d691dc9c004809a886d96c617",
     "entities": [
       {
         "tableName": "commands",
@@ -307,7 +307,7 @@
       },
       {
         "tableName": "exploration_state",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerId` TEXT NOT NULL, `explorationId` TEXT NOT NULL, `detailJson` TEXT, `draft` TEXT NOT NULL, `draftInitialized` INTEGER NOT NULL, `editJson` TEXT, `editReflectionId` TEXT, `editState` TEXT, PRIMARY KEY(`ownerId`, `explorationId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerId` TEXT NOT NULL, `explorationId` TEXT NOT NULL, `detailJson` TEXT, `draft` TEXT NOT NULL, `draftInitialized` INTEGER NOT NULL, `lifecycleNeedsRefresh` INTEGER NOT NULL, `editJson` TEXT, `editReflectionId` TEXT, `editState` TEXT, PRIMARY KEY(`ownerId`, `explorationId`))",
         "fields": [
           {
             "fieldPath": "ownerId",
@@ -335,6 +335,12 @@
           {
             "fieldPath": "draftInitialized",
             "columnName": "draftInitialized",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lifecycleNeedsRefresh",
+            "columnName": "lifecycleNeedsRefresh",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -486,7 +492,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b3b341139527f467891f2e4054cc0392')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '560e0e6d691dc9c004809a886d96c617')"
     ]
   }
 }

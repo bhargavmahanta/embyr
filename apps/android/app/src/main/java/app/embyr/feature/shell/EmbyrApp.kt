@@ -117,10 +117,11 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                 composable<ExplorationDetailRoute> { entry ->
                     val route = entry.toRoute<ExplorationDetailRoute>()
                     if (featureBound && explorations != null && explorationState != null) {
-                        LaunchedEffect(activeOwner,route.id) { explorations.open(route.id) }
-                        ExplorationDetailScreen(explorationState, explorations::refresh, explorations::deliver, explorations::action,
+                        LaunchedEffect(activeOwner,route.id) { explorations.open(route.id); assessments?.bindExploration(route.id) }
+                        ExplorationDetailScreen(if (assessmentState != null) explorationState.withAssessmentStart(assessmentState) else explorationState, explorations::refresh, explorations::deliver, explorations::action,
                             explorations::complete, explorations::recover, explorations::setDraft, explorations::saveReflection, explorations::recheckEdit,
                             { nav.navigate(AssessmentRoute(it)) }, { confidence -> assessments?.start(route.id,confidence) { nav.navigate(AssessmentRoute(it)) } },
+                            { assessments?.recoverStart(route.id) { nav.navigate(AssessmentRoute(it)) } },
                             { explorations.list(); nav.navigate(ExplorationListRoute) { popUpTo<ExplorationListRoute> { inclusive = true }; launchSingleTop = true } })
                     } else SimplePage("Checking your session") { Text("Preparing your space…") }
                 }

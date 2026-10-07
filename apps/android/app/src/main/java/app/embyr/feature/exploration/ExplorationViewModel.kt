@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.*
     val owner: String? = null, val items: List<ExplorationDto> = emptyList(), val nextCursor: String? = null,
     val selected: String? = null, val detail: ExplorationDetailDto? = null, val draft: String = "",
     val busy: Boolean = false, val message: String? = null, val editOutstanding: Boolean = false,
-    val pendingOperations: List<String> = emptyList(), val restoreExploration: String? = null, val restoreSession: String? = null,
+    val assessmentStartPending: Boolean = false, val lifecycleNeedsRefresh: Boolean = false, val pendingOperations: List<String> = emptyList(), val restoreExploration: String? = null, val restoreSession: String? = null,
 )
 class ExplorationViewModel(private val owners: OwnerSession, private val store: LearningStore, private val repository: ExplorationRepository) : ViewModel() {
     private val mutable = MutableStateFlow(ExplorationUiState())
@@ -55,10 +55,13 @@ class ExplorationViewModel(private val owners: OwnerSession, private val store: 
             }
         }
     }
-    fun open(id: String) = runAction {
+    fun open(id: String) {
+        actionJob?.cancel(); epoch++
+        runAction {
         mutable.value = mutable.value.copy(selected = id, detail = null, draft = "", message = null)
         repository.select(id)
         val outcome = repository.open(id); render(id, outcome)
+        }
     }
     fun refresh() = runAction { mutable.value.selected?.let { render(it, repository.open(it)) } }
     fun setDraft(value: String) {
@@ -85,7 +88,7 @@ class ExplorationViewModel(private val owners: OwnerSession, private val store: 
     }
     private suspend fun render(id: String, result: LearningOutcome) {
         val row = repository.read(id)
-        mutable.value = mutable.value.copy(detail = row.detail(), draft = row.draft, editOutstanding = row.editJson != null, pendingOperations = repository.pending(id), message = learningMessage(result))
+        mutable.value = mutable.value.copy(detail = row.detail(), draft = row.draft, editOutstanding = row.editJson != null, lifecycleNeedsRefresh = row.lifecycleNeedsRefresh, pendingOperations = repository.pending(id), message = learningMessage(result))
     }
     private fun runAction(block: suspend () -> Unit) {
         val owner = owners.owner.value ?: return
@@ -121,4 +124,9 @@ fun learningMessage(outcome: LearningOutcome): String? = when (outcome) {
         }
         else -> "Could not connect. Your saved data remains available; try again."
     }
+}
+
+fun ExplorationUiState.withAssessmentStart(assessment: app.embyr.feature.assessment.AssessmentUiState): ExplorationUiState {
+    if (owner == null || assessment.owner != owner || assessment.startTarget != selected) return this
+    return copy(busy = busy || assessment.busy, message = assessment.message ?: message, assessmentStartPending = assessment.startPending)
 }

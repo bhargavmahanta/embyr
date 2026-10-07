@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 @Composable fun ExplorationDetailScreen(
     state: ExplorationUiState, refresh: () -> Unit, deliver: () -> Unit, action: (String) -> Unit,
     complete: () -> Unit, recover: () -> Unit, draft: (String) -> Unit, save: (Boolean) -> Unit, recheck: () -> Unit,
-    assessment: (String) -> Unit, startAssessment: (String) -> Unit, back: () -> Unit,
+    assessment: (String) -> Unit, startAssessment: (String) -> Unit, recoverStart: () -> Unit, back: () -> Unit,
 ) {
     var confidence by rememberSaveable(state.selected) { mutableStateOf<String?>(null) }
     var confirm by rememberSaveable(state.selected) { mutableStateOf(false) }
@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
             Text("Saved request needs checking: ${state.pendingOperations.joinToString(", ")}")
             OutlinedButton(onClick = recover, enabled = !state.busy) { Text("Check saved request") }
         }
+        if (state.assessmentStartPending) OutlinedButton(onClick = recoverStart, enabled = !state.busy) { Text("Check saved check start") }
+        if (state.lifecycleNeedsRefresh) Text("Reviewed work is retained. Refresh before changing the lifecycle.")
         val detail = state.detail
         if (detail != null) {
             Text("Status: ${detail.status.lowercase()}")
@@ -62,10 +64,10 @@ import androidx.compose.ui.unit.dp
                 Text(delivery.reflectionPrompt)
             }
             if (detail.status != "COMPLETED") {
-                OutlinedButton(onClick = { action("RETURN") }, enabled = !state.busy) { Text("Return to this exploration") }
-                if (detail.status == "ACTIVE") OutlinedButton(onClick = { action("PAUSE") }, enabled = !state.busy) { Text("Pause exploration") }
-                if (detail.status == "PAUSED") Button(onClick = { action("RESUME") }, enabled = !state.busy) { Text("Resume exploration") }
-                Button(onClick = { confirm = true }, enabled = !state.busy) { Text("Mark exploration complete") }
+                OutlinedButton(onClick = { action("RETURN") }, enabled = !state.busy && !state.lifecycleNeedsRefresh) { Text("Return to this exploration") }
+                if (detail.status == "ACTIVE") OutlinedButton(onClick = { action("PAUSE") }, enabled = !state.busy && !state.lifecycleNeedsRefresh) { Text("Pause exploration") }
+                if (detail.status == "PAUSED") Button(onClick = { action("RESUME") }, enabled = !state.busy && !state.lifecycleNeedsRefresh) { Text("Resume exploration") }
+                Button(onClick = { confirm = true }, enabled = !state.busy && !state.lifecycleNeedsRefresh) { Text("Mark exploration complete") }
                 Text("Completion records your intent. The optional check is independent.")
             } else Text("Completed. You can still reflect and read any late check feedback.")
             OutlinedTextField(value = state.draft, onValueChange = draft, label = { Text("Your reflection") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth(), minLines = 3)

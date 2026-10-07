@@ -10,6 +10,44 @@ class AssessmentRepository(
     private val store: LearningStore, private val commands: LearningCommands,
 ) {
     private val json = LearningJson.codec
+    suspend fun hasPendingStart(exploration: String) = commands.hasPending("api/v1/explorations/$exploration/assessment-sessions")
+    suspend fun recoverStart(exploration: String): LearningOutcome {
+        val original = commands.pending("api/v1/explorations/$exploration/assessment-sessions").firstOrNull()
+            ?: return LearningOutcome.Invalid("There is no saved start request to recover.")
+        val body = json.decodeFromString(AssessmentStartRequest.serializer(),original.canonicalPayload.decodeToString())
+        return start(exploration,body.confidenceBefore)
+    }
+    suspend fun pending(id: String): List<String> {
+        val row = read(id) ?: return emptyList()
+        return buildList {
+            if (hasPendingStart(row.explorationId)) add("start")
+            commands.pending("api/v1/assessment-sessions/$id/").forEach {
+                add(if (it.relativeRoute.endsWith("/responses")) "answer" else "support")
+            }
+            row.responseId?.let { rid -> if (commands.hasPending("api/v1/assessment-responses/$rid/evaluation-retries")) add("retry") }
+        }.distinct()
+    }
+    suspend fun recover(id: String): LearningOutcome {
+        val row = read(id) ?: return LearningOutcome.Invalid("Refresh the assessment first.")
+        var outcome: LearningOutcome = LearningOutcome.Done
+        for (kind in pending(id)) {
+            val result = when (kind) {
+                "start" -> recoverStart(row.explorationId)
+                "answer" -> {
+                    val original = commands.pending("api/v1/assessment-sessions/$id/responses").first()
+                    answer(id,json.decodeFromString(AnswerRequest.serializer(),original.canonicalPayload.decodeToString()).content.optionId)
+                }
+                "support" -> {
+                    val original = commands.pending("api/v1/assessment-sessions/$id/support-requests").first()
+                    support(id,json.decodeFromString(SupportRequest.serializer(),original.canonicalPayload.decodeToString()).level)
+                }
+                "retry" -> retry(id)
+                else -> LearningOutcome.Unknown
+            }
+            if (result != LearningOutcome.Done) outcome = result
+        }
+        return outcome
+    }
     suspend fun leave() {
         val owner = owners.requireOwner(); store.putActivity(store.activity(owner).copy(sessionId = null))
     }
@@ -25,10 +63,12 @@ class AssessmentRepository(
         val owner = owners.requireOwner()
         val result = commands.post("api/v1/explorations/$exploration/assessment-sessions", AssessmentStartRequest.serializer(), AssessmentStartRequest(confidence), AssessmentSessionDto.serializer(),
             send = { api.startAssessment(exploration, it.canonicalPayload, it.idempotencyKey) }, persist = { check(it.explorationId == exploration); saveSession(owner,it); store.putActivity(ActivityStateEntity(owner,exploration,it.id)) }, reference = { it.id },
-            reconcile = { when (val detail = api.exploration(exploration)) {
+            reconcile = { command ->
+                val original = json.decodeFromString(AssessmentStartRequest.serializer(),command.canonicalPayload.decodeToString())
+                when (val detail = api.exploration(exploration)) {
                 is ApiResult.Failure -> null
                 is ApiResult.Success -> detail.value.assessmentSession?.let { ref ->
-                    (api.assessmentSession(ref.id) as? ApiResult.Success)?.value?.takeIf { it.explorationId == exploration && it.confidenceBefore == confidence }
+                    (api.assessmentSession(ref.id) as? ApiResult.Success)?.value?.takeIf { it.explorationId == exploration && it.confidenceBefore == original.confidenceBefore }
                 }
             } })
         return result

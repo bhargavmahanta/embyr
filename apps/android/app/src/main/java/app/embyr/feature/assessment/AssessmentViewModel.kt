@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.*
  data class AssessmentUiState(
     val owner: String? = null, val session: AssessmentSessionDto? = null,
     val response: AssessmentResponseDto? = null, val responseId: String? = null, val selectedOptionId: String? = null,
-    val busy: Boolean = false, val polling: Boolean = false, val message: String? = null,
+    val startPending: Boolean = false, val unconfirmedRequests: List<String> = emptyList(), val startTarget: String? = null, val busy: Boolean = false, val polling: Boolean = false, val message: String? = null,
 )
 class AssessmentViewModel(
     private val owners: OwnerSession, private val repository: AssessmentRepository,
@@ -30,9 +30,22 @@ class AssessmentViewModel(
             mutable.value = AssessmentUiState(owner = owner)
         }
     } }
+    fun bindExploration(exploration: String) = action {
+        val pending = repository.hasPendingStart(exploration)
+        mutable.value = mutable.value.copy(startTarget = exploration, startPending = pending, message = if (pending) "The original check start is unconfirmed. Check that saved request." else null)
+    }
+    fun recoverStart(exploration: String, onStarted: (String) -> Unit) = action {
+        mutable.value = mutable.value.copy(startTarget = exploration)
+        val result = repository.recoverStart(exploration)
+        showStart(exploration,result,onStarted)
+    }
     fun start(exploration: String, confidence: String, onStarted: (String) -> Unit) = action {
+        mutable.value = mutable.value.copy(startTarget = exploration)
         val result = repository.start(exploration,confidence)
-        mutable.value = mutable.value.copy(message = learningMessage(result))
+        showStart(exploration,result,onStarted)
+    }
+    private suspend fun showStart(exploration: String, result: LearningOutcome, onStarted: (String) -> Unit) {
+        mutable.value = mutable.value.copy(startPending = repository.hasPendingStart(exploration), message = learningMessage(result))
         if (result == LearningOutcome.Done) {
             // The session ID is from the persisted public resource, never inferred from ACCEPT.
             val row = repository.activitySession()
@@ -57,14 +70,23 @@ class AssessmentViewModel(
         pollJob?.cancel(); epoch++
         action { mutable.value.session?.id?.let { render(it,repository.retry(it)); beginPolling() } }
     }
-    fun recheck() = action { mutable.value.session?.id?.let { render(it,repository.refresh(it)); beginPolling() } }
+    fun recheck() {
+        if (actionJob?.isActive == true) return
+        pollJob?.cancel(); epoch++
+        action { mutable.value.session?.id?.let { id ->
+            val recovered = repository.recover(id)
+            val fetched = repository.refresh(id)
+            render(id,if (recovered == LearningOutcome.Done) fetched else recovered)
+            beginPolling()
+        } }
+    }
     fun foreground(value: Boolean) {
         foreground = value
         if (value) beginPolling() else { pollJob?.cancel(); mutable.value = mutable.value.copy(polling = false) }
     }
     private suspend fun render(id: String, result: LearningOutcome) {
         val row = repository.read(id) ?: return
-        mutable.value = mutable.value.copy(session = row.session(), response = row.response(), responseId = row.responseId, selectedOptionId = row.selectedOptionId, message = learningMessage(result))
+        mutable.value = mutable.value.copy(session = row.session(), response = row.response(), responseId = row.responseId, selectedOptionId = row.selectedOptionId, unconfirmedRequests = repository.pending(id), message = learningMessage(result))
     }
     private fun beginPolling() {
         val state = mutable.value

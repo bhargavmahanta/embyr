@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.ktor.cio)
 
+    testImplementation(libs.coroutines.test)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)
     testImplementation(libs.room.testing)

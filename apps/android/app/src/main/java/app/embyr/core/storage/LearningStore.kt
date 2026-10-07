@@ -14,7 +14,7 @@ import kotlinx.serialization.json.Json
 @Entity(tableName = "exploration_state", primaryKeys = ["ownerId", "explorationId"])
 data class ExplorationStateEntity(
     val ownerId: String, val explorationId: String, val detailJson: String? = null,
-    val draft: String = "", val draftInitialized: Boolean = false,
+    val draft: String = "", val draftInitialized: Boolean = false, val lifecycleNeedsRefresh: Boolean = false,
     val editJson: String? = null, val editReflectionId: String? = null, val editState: String? = null,
 )
 @Entity(tableName = "assessment_state", primaryKeys = ["ownerId", "sessionId"])

@@ -34,6 +34,12 @@ class LearningComposeTest {
         compose.onNodeWithText("Recheck evaluation").assertIsDisplayed()
         compose.onNodeWithText("Submit choice").assertDoesNotExist()
     }
+    @Test fun succeededFeedbackDoesNotHideOriginalUnconfirmedCommand() {
+        compose.setContent { AssessmentScreen(AssessmentUiState(owner = "a",session = session(),response = response("SUCCEEDED",false),responseId = "response",unconfirmedRequests = listOf("answer")),{}, {}, {}, {}, {}) }
+        compose.onNodeWithText("Feedback ready").assertIsDisplayed()
+        compose.onNodeWithText("Original request unconfirmed: answer").assertIsDisplayed()
+        compose.onNodeWithText("Check original request").assertIsDisplayed()
+    }
     @Test fun emptyExplorationListProvidesRefreshAndEntryRecovery() {
         compose.setContent { ExplorationListScreen(ExplorationUiState(owner = "a"),{}, {}, {}, {}) }
         compose.onNodeWithText("No explorations yet. Accept a suggestion to begin.").assertIsDisplayed()
