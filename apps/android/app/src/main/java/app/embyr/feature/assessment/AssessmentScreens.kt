@@ -18,6 +18,7 @@ import app.embyr.feature.exploration.LearningStatus
             Text("Original request unconfirmed: ${state.unconfirmedRequests.joinToString(", ")}")
             OutlinedButton(onClick = recheck, enabled = !state.busy) { Text("Check original request") }
         }
+        if (session == null) OutlinedButton(onClick = recheck, enabled = !state.busy) { Text("Refresh optional check") }
         if (session != null) {
             Text(session.interaction.prompt, style = MaterialTheme.typography.titleLarge)
             val immutable = state.responseId != null || state.selectedOptionId != null

@@ -60,3 +60,18 @@ asynchronous success and reviewed failure injection/retry, lifecycle/reflection
 conflicts, process/lost-response/auth/account recovery, accessibility and redacted
 logs. Historical M7-03 evidence does not prove these new paths. Issue #119 remains
 open until all six acceptance items receive independent evidence approval.
+
+## Navigation and upgrade identity
+
+Changing checks supersedes the old UI action and clears its presentation. Old
+commands remain in the owner outbox for exact recovery. Current route/session IDs
+fence display and callbacks. Leaving a detail fences a delayed start callback;
+its public session result persists independently of selected navigation. Assessment
+snapshot merges share the Room store lock, so a stale poll cannot replace a newly
+acknowledged run between the read and write.
+
+For a local alpha upgrade, optional EMBYR_DEBUG_KEYSTORE selects the existing
+debug signing identity through ignored local configuration. Verify the resulting
+APK/test-APK certificates against retained evidence before installing with data
+preserved. A different builder's default debug key must not lead to uninstalling
+or clearing the alpha app. CI continues to use its default disposable signing key.

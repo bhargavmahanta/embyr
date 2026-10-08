@@ -39,6 +39,12 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        getByName("debug") {
+            clientConfig("EMBYR_DEBUG_KEYSTORE").takeIf { it.isNotBlank() }?.let { storeFile = file(it) }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

@@ -304,8 +304,48 @@ class LearningFlowTest {
         f.api.startResult = ApiResult.Success(s,200)
         assertEquals(LearningOutcome.Done,f.assessment().recoverStart(d.id))
         assertEquals(f.api.starts[0],f.api.starts[1]); assertEquals(1,f.outbox.rows.size)
-        assertEquals(s.id,f.store.activity("a").sessionId)
+        assertEquals(s.id,f.assessment().storedSession(d.id))
         assertFalse(f.assessment().hasPendingStart(d.id))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun openingAnotherCheckSupersedesSuspendedPreviousAction() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val f = Fixture(); val waiting = CompletableDeferred<Unit>()
+        try {
+            val a = session().copy(id = "session-a",status = "ACTIVE",responseId = null)
+            val b = a.copy(id = "session-b",explorationId = "exploration-b")
+            f.api.session = a; f.api.supportWait = waiting
+            val vm = AssessmentViewModel(f.owners,f.assessment(),{ true })
+            runCurrent(); vm.open(a.id); runCurrent(); vm.support("SMALL_NUDGE"); runCurrent()
+            withContext(Dispatchers.Default) { withTimeout(3000) { f.api.supportEntered.await() } }
+            f.api.session = b; vm.open(b.id); runCurrent()
+            assertEquals(b.id,vm.ui.value.session?.id)
+            waiting.complete(Unit); runCurrent()
+            assertEquals(b.id,vm.ui.value.session?.id)
+            assertTrue(f.outbox.unresolved("a").any { it.relativeRoute == "api/v1/assessment-sessions/session-a/support-requests" })
+        } finally { waiting.complete(Unit); f.owners.switchTo(null); runCurrent(); Dispatchers.resetMain() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun lateStartDoesNotNavigateOrOverwriteDepartedDestination() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val f = Fixture(); val waiting = CompletableDeferred<Unit>()
+        try {
+            val d = detail(); val s = session().copy(explorationId = d.id)
+            f.api.startWait = waiting; f.api.startResult = ApiResult.Success(s,200)
+            val vm = AssessmentViewModel(f.owners,f.assessment(),{ true }); var navigations = 0
+            runCurrent(); vm.bindExploration(d.id); runCurrent()
+            vm.start(d.id,"FUZZY") { navigations++ }; runCurrent()
+            withContext(Dispatchers.Default) { withTimeout(3000) { f.api.startEntered.await() } }
+            vm.unbindExploration(d.id); f.store.putActivity(ActivityStateEntity("a","other-exploration"))
+            waiting.complete(Unit); runCurrent()
+            withContext(Dispatchers.Default) { withTimeout(3000) { vm.ui.first { !it.busy } } }
+            assertEquals(0,navigations)
+            assertEquals("other-exploration",f.store.activity("a").explorationId)
+            assertNotNull(f.store.assessment("a",s.id))
+            assertEquals(CommandState.ACKNOWLEDGED.name,f.outbox.rows.values.single().state)
+        } finally { waiting.complete(Unit); f.owners.switchTo(null); runCurrent(); Dispatchers.resetMain() }
     }
 
     private fun response(sessionId: String, status: String, run: String, retry: Boolean) = AssessmentResponseDto("response", sessionId, "WAITING_FOR_EVALUATION", null, run, status, null, null, null, if (status == "FAILED") "PROCESSING_UNAVAILABLE" else null, retry)
@@ -326,6 +366,8 @@ class MemoryLearningStore(private val owners: OwnerSession) : LearningStore {
     override suspend fun exploration(owner: String, id: String): ExplorationStateEntity { check(owners.requireOwner() == owner); return explorations[owner to id] ?: ExplorationStateEntity(owner, id) }
     override suspend fun updateExploration(owner: String, id: String, change: (ExplorationStateEntity) -> ExplorationStateEntity) { explorations[owner to id] = change(exploration(owner,id)) }
     override suspend fun assessment(owner: String, id: String): AssessmentStateEntity? { check(owners.requireOwner() == owner); return assessments[owner to id] }
+    override suspend fun assessmentForExploration(owner: String, exploration: String): List<AssessmentStateEntity> { check(owners.requireOwner() == owner); return assessments.values.filter { it.ownerId == owner && it.explorationId == exploration } }
+    override suspend fun updateAssessment(owner: String, id: String, change: (AssessmentStateEntity?) -> AssessmentStateEntity) { putAssessment(change(assessment(owner,id))) }
     override suspend fun putAssessment(row: AssessmentStateEntity) { check(owners.requireOwner() == row.ownerId); assessments[row.ownerId to row.sessionId] = row }
     override suspend fun activity(owner: String) = activities[owner] ?: ActivityStateEntity(owner)
     override suspend fun putActivity(row: ActivityStateEntity) { activities[row.ownerId] = row }
@@ -354,6 +396,10 @@ class TestLearningApi : LearningApi, EmbyrApi {
     val starts = mutableListOf<Pair<String,String>>()
     var startResult: ApiResult<AssessmentSessionDto> = ApiResult.Failure(TransportError.Network("offline"))
     var pageWait: CompletableDeferred<Unit>? = null
+    var startWait: CompletableDeferred<Unit>? = null
+    val startEntered = CompletableDeferred<Unit>()
+    var supportWait: CompletableDeferred<Unit>? = null
+    val supportEntered = CompletableDeferred<Unit>()
     var afterDelivery: (() -> Unit)? = null
     val deliveries = mutableListOf<Pair<String,String>>()
     val actions = mutableListOf<String>()
@@ -373,9 +419,9 @@ class TestLearningApi : LearningApi, EmbyrApi {
     override suspend fun completeExploration(id: String, payload: ByteArray, key: String): ApiResult<ExplorationDto> { completions += payload.decodeToString(); return completionResult }
     override suspend fun createReflection(id: String, payload: ByteArray, key: String): ApiResult<ReflectionDto> = error("Unused")
     override suspend fun editReflection(id: String, payload: ByteArray): ApiResult<ReflectionDto> { edits++; return editResult }
-    override suspend fun startAssessment(id: String, payload: ByteArray, key: String): ApiResult<AssessmentSessionDto> { starts += key to payload.decodeToString(); return startResult }
+    override suspend fun startAssessment(id: String, payload: ByteArray, key: String): ApiResult<AssessmentSessionDto> { starts += key to payload.decodeToString(); startEntered.complete(Unit); startWait?.await(); return startResult }
     override suspend fun assessmentSession(id: String) = ApiResult.Success(session,200)
-    override suspend fun requestSupport(id: String, payload: ByteArray, key: String): ApiResult<SupportDto> = error("Unused")
+    override suspend fun requestSupport(id: String, payload: ByteArray, key: String): ApiResult<SupportDto> { supportEntered.complete(Unit); supportWait?.await(); return ApiResult.Success(SupportDto("support","SMALL_NUDGE",SupportContentDto("Reviewed nudge")),200) }
     override suspend fun assessmentResponse(id: String) = ApiResult.Success(current, 200)
     override suspend fun retryEvaluation(id: String, payload: ByteArray, key: String): ApiResult<EvaluationRetryDto> { retries++; retryRequests += key to payload.decodeToString(); return retryResult }
     override suspend fun submitAnswer(sessionId: String, canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<AnswerAcknowledgmentDto> { answerCalls++; answerRequests += idempotencyKey to canonicalPayload.decodeToString(); return answerResult }

@@ -23,6 +23,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -46,6 +47,7 @@ import app.embyr.navigation.ExplorationListRoute
 import app.embyr.navigation.ExplorationDetailRoute
 import app.embyr.navigation.AssessmentRoute
 import androidx.navigation.toRoute
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.lifecycle.compose.LifecycleStartEffect
 import app.embyr.navigation.BootstrapRoute
 import app.embyr.navigation.ExplorationReadyRoute
@@ -117,11 +119,15 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                 composable<ExplorationDetailRoute> { entry ->
                     val route = entry.toRoute<ExplorationDetailRoute>()
                     if (featureBound && explorations != null && explorationState != null) {
-                        LaunchedEffect(activeOwner,route.id) { explorations.open(route.id); assessments?.bindExploration(route.id) }
+                        LaunchedEffect(activeOwner,route.id) { explorations.open(route.id) }
+                        DisposableEffect(activeOwner,route.id,assessmentState?.owner) {
+                            if (assessmentState?.owner == activeOwner) assessments?.bindExploration(route.id)
+                            onDispose { assessments?.unbindExploration(route.id) }
+                        }
                         ExplorationDetailScreen(if (assessmentState != null) explorationState.withAssessmentStart(assessmentState) else explorationState, explorations::refresh, explorations::deliver, explorations::action,
                             explorations::complete, explorations::recover, explorations::setDraft, explorations::saveReflection, explorations::recheckEdit,
-                            { nav.navigate(AssessmentRoute(it)) }, { confidence -> assessments?.start(route.id,confidence) { nav.navigate(AssessmentRoute(it)) } },
-                            { assessments?.recoverStart(route.id) { nav.navigate(AssessmentRoute(it)) } },
+                            { nav.navigate(AssessmentRoute(it)) }, { confidence -> assessments?.start(route.id,confidence) { nav.openCheckFromDetail(route.id,it) } },
+                            { assessments?.recoverStart(route.id) { nav.openCheckFromDetail(route.id,it) } },
                             { explorations.list(); nav.navigate(ExplorationListRoute) { popUpTo<ExplorationListRoute> { inclusive = true }; launchSingleTop = true } })
                     } else SimplePage("Checking your session") { Text("Preparing your space…") }
                 }
@@ -133,8 +139,9 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                             assessments.foreground(true)
                             onStopOrDispose { assessments.foreground(false) }
                         }
-                        AssessmentScreen(assessmentState, assessments::support, assessments::answer, assessments::retry, assessments::recheck,
+                        if (assessmentState.requestedSessionId == route.id) AssessmentScreen(assessmentState, assessments::support, assessments::answer, assessments::retry, assessments::recheck,
                             { assessments.leave { explorations?.refresh(); nav.popBackStack() } })
+                        else SimplePage("Opening optional check") { Text("Fetching this check…") }
                     } else SimplePage("Checking your session") { Text("Preparing your space…") }
                 }
                 composable<RecoverableErrorRoute> {
@@ -146,6 +153,13 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                 }
             }
         }
+    }
+}
+
+private fun NavHostController.openCheckFromDetail(explorationId: String, sessionId: String) {
+    val entry = currentBackStackEntry ?: return
+    if (entry.destination.hasRoute<ExplorationDetailRoute>() && entry.toRoute<ExplorationDetailRoute>().id == explorationId) {
+        navigate(AssessmentRoute(sessionId))
     }
 }
 

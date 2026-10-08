@@ -36,6 +36,7 @@ data class LearningReceiptEntity(val ownerId: String, val commandId: String, val
     @Query("SELECT * FROM exploration_state WHERE ownerId = :owner AND explorationId = :id") suspend fun exploration(owner: String, id: String): ExplorationStateEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putExploration(row: ExplorationStateEntity)
     @Query("SELECT * FROM assessment_state WHERE ownerId = :owner AND sessionId = :id") suspend fun assessment(owner: String, id: String): AssessmentStateEntity?
+    @Query("SELECT * FROM assessment_state WHERE ownerId = :owner AND explorationId = :exploration") suspend fun assessmentForExploration(owner: String, exploration: String): List<AssessmentStateEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putAssessment(row: AssessmentStateEntity)
     @Query("SELECT * FROM activity_state WHERE ownerId = :owner") suspend fun activity(owner: String): ActivityStateEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putActivity(row: ActivityStateEntity)
@@ -47,6 +48,8 @@ interface LearningStore {
     suspend fun exploration(owner: String, id: String): ExplorationStateEntity
     suspend fun updateExploration(owner: String, id: String, change: (ExplorationStateEntity) -> ExplorationStateEntity)
     suspend fun assessment(owner: String, id: String): AssessmentStateEntity?
+    suspend fun assessmentForExploration(owner: String, exploration: String): List<AssessmentStateEntity>
+    suspend fun updateAssessment(owner: String, id: String, change: (AssessmentStateEntity?) -> AssessmentStateEntity)
     suspend fun putAssessment(row: AssessmentStateEntity)
     suspend fun activity(owner: String): ActivityStateEntity
     suspend fun putActivity(row: ActivityStateEntity)
@@ -70,7 +73,14 @@ class RoomLearningStore(private val dao: LearningDao, private val owners: OwnerS
     override suspend fun assessment(owner: String, id: String): AssessmentStateEntity? {
         checkOwner(owner); val row = dao.assessment(owner, id); checkOwner(owner); return row
     }
-    override suspend fun putAssessment(row: AssessmentStateEntity) { checkOwner(row.ownerId); dao.putAssessment(row); checkOwner(row.ownerId) }
+    override suspend fun assessmentForExploration(owner: String, exploration: String): List<AssessmentStateEntity> {
+        checkOwner(owner); val rows = dao.assessmentForExploration(owner,exploration); checkOwner(owner); return rows
+    }
+    override suspend fun updateAssessment(owner: String, id: String, change: (AssessmentStateEntity?) -> AssessmentStateEntity) = mutex.withLock {
+        checkOwner(owner); val row = change(dao.assessment(owner,id)); checkOwner(owner)
+        check(row.ownerId == owner && row.sessionId == id); dao.putAssessment(row); checkOwner(owner)
+    }
+    override suspend fun putAssessment(row: AssessmentStateEntity) = mutex.withLock { checkOwner(row.ownerId); dao.putAssessment(row); checkOwner(row.ownerId) }
     override suspend fun activity(owner: String): ActivityStateEntity {
         checkOwner(owner); val row = dao.activity(owner); checkOwner(owner); return row ?: ActivityStateEntity(owner)
     }

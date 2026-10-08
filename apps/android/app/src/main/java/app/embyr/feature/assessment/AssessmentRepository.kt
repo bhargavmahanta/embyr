@@ -48,21 +48,23 @@ class AssessmentRepository(
         }
         return outcome
     }
-    suspend fun leave() {
-        val owner = owners.requireOwner(); store.putActivity(store.activity(owner).copy(sessionId = null))
+    suspend fun leave(id: String) {
+        val owner = owners.requireOwner(); val current = store.activity(owner)
+        if (current.sessionId == id) store.putActivity(current.copy(sessionId = null))
     }
-    suspend fun activitySession(): String? = store.activity(owners.requireOwner()).sessionId
+    suspend fun storedSession(exploration: String): String? = store.assessmentForExploration(owners.requireOwner(),exploration).singleOrNull()?.sessionId
     suspend fun read(id: String) = store.assessment(owners.requireOwner(),id)
     private suspend fun saveSession(owner: String, value: AssessmentSessionDto) {
-        val prior = store.assessment(owner, value.id)
-        store.putAssessment((prior ?: AssessmentStateEntity(owner,value.id,value.explorationId,""))
-            .copy(sessionJson = json.encodeToString(AssessmentSessionDto.serializer(), value), responseId = prior?.responseId ?: value.responseId))
+        store.updateAssessment(owner,value.id) { prior ->
+            (prior ?: AssessmentStateEntity(owner,value.id,value.explorationId,""))
+                .copy(sessionJson = json.encodeToString(AssessmentSessionDto.serializer(),value),responseId = prior?.responseId ?: value.responseId)
+        }
     }
     suspend fun start(exploration: String, confidence: String): LearningOutcome {
         require(confidence in setOf("FUZZY","MAIN_IDEA","COULD_EXPLAIN","CHALLENGE_ME"))
         val owner = owners.requireOwner()
         val result = commands.post("api/v1/explorations/$exploration/assessment-sessions", AssessmentStartRequest.serializer(), AssessmentStartRequest(confidence), AssessmentSessionDto.serializer(),
-            send = { api.startAssessment(exploration, it.canonicalPayload, it.idempotencyKey) }, persist = { check(it.explorationId == exploration); saveSession(owner,it); store.putActivity(ActivityStateEntity(owner,exploration,it.id)) }, reference = { it.id },
+            send = { api.startAssessment(exploration, it.canonicalPayload, it.idempotencyKey) }, persist = { check(it.explorationId == exploration); saveSession(owner,it) }, reference = { it.id },
             reconcile = { command ->
                 val original = json.decodeFromString(AssessmentStartRequest.serializer(),command.canonicalPayload.decodeToString())
                 when (val detail = api.exploration(exploration)) {
@@ -84,19 +86,23 @@ class AssessmentRepository(
             }
         }
     }
-    suspend fun refresh(id: String): LearningOutcome {
+    suspend fun refresh(id: String, followCurrent: Boolean = false): LearningOutcome {
         val owner = owners.requireOwner(); val row = store.assessment(owner,id) ?: return LearningOutcome.Invalid("Refresh the assessment first.")
         val responseId = row.responseId ?: return LearningOutcome.Done
         return when (val result = api.assessmentResponse(responseId)) {
             is ApiResult.Failure -> LearningOutcome.Failed(result.error)
             is ApiResult.Success -> {
                 val value = result.value; check(value.responseId == responseId && value.assessmentSessionId == id)
-                val latest = store.assessment(owner,id) ?: return LearningOutcome.Unknown
-                // An overlapping retry replaces this request's run; never paint its late response.
-                if (latest.knownRunId != row.knownRunId) return LearningOutcome.Pending
-                if (row.responseJson == null && row.knownRunId != null && value.evaluationRunId != row.knownRunId) return LearningOutcome.Pending
-                store.putAssessment(latest.copy(responseJson = json.encodeToString(AssessmentResponseDto.serializer(),value), knownRunId = value.evaluationRunId ?: latest.knownRunId))
-                LearningOutcome.Done
+                var accepted = false
+                store.updateAssessment(owner,id) { latestRow ->
+                    val latest = requireNotNull(latestRow)
+                    if (latest.knownRunId != row.knownRunId || (!followCurrent && row.responseJson == null && row.knownRunId != null && value.evaluationRunId != row.knownRunId)) latest
+                    else {
+                        accepted = true
+                        latest.copy(responseJson = json.encodeToString(AssessmentResponseDto.serializer(),value), knownRunId = value.evaluationRunId ?: latest.knownRunId)
+                    }
+                }
+                if (accepted) LearningOutcome.Done else LearningOutcome.Pending
             }
         }
     }
@@ -110,9 +116,11 @@ class AssessmentRepository(
         }
         return commands.post(route, SupportRequest.serializer(), SupportRequest(s.interaction.id,level), SupportDto.serializer(),
             send = { api.requestSupport(id,it.canonicalPayload,it.idempotencyKey) }, persist = { value ->
-                val latest = requireNotNull(store.assessment(owner,id)); val session = latest.session()
-                val next = session.copy(deliveredSupport = session.deliveredSupport.filterNot { it.id == value.id } + value)
-                store.putAssessment(latest.copy(sessionJson = json.encodeToString(AssessmentSessionDto.serializer(),next)))
+                store.updateAssessment(owner,id) { row ->
+                    val latest = requireNotNull(row); val session = latest.session()
+                    val next = session.copy(deliveredSupport = session.deliveredSupport.filterNot { it.id == value.id } + value)
+                    latest.copy(sessionJson = json.encodeToString(AssessmentSessionDto.serializer(),next))
+                }
             }, reference = { it.id }, reconcile = { command ->
                 val submitted = json.decodeFromString(SupportRequest.serializer(),command.canonicalPayload.decodeToString())
                 (api.assessmentSession(id) as? ApiResult.Success)?.value?.takeIf { it.interaction.id == submitted.interactionId }?.deliveredSupport?.firstOrNull { it.level == submitted.level }
@@ -128,8 +136,7 @@ class AssessmentRepository(
         }
         val result = commands.post(route, AnswerRequest.serializer(), AnswerRequest(s.interaction.id,content = ChoiceContent(option)), AnswerAcknowledgmentDto.serializer(),
             send = { answerApi.submitAnswer(id,it.canonicalPayload,it.idempotencyKey) }, persist = { ack ->
-                val latest = requireNotNull(store.assessment(owner,id))
-                store.putAssessment(latest.copy(responseId = ack.responseId))
+                store.updateAssessment(owner,id) { latest -> requireNotNull(latest).copy(responseId = ack.responseId) }
             }, reference = { it.responseId }, reconcile = { command ->
                 command.knownResultReference?.let { rid -> (api.assessmentResponse(rid) as? ApiResult.Success)?.value }
                     ?.takeIf { it.assessmentSessionId == id }?.let { AnswerAcknowledgmentDto(it.responseId,"PENDING","WAITING_FOR_EVALUATION",null) }
@@ -146,13 +153,15 @@ class AssessmentRepository(
         val result = commands.post(route, EmptyLearningRequest.serializer(), EmptyLearningRequest(), EvaluationRetryDto.serializer(),
             send = { api.retryEvaluation(responseId,it.canonicalPayload,it.idempotencyKey) }, persist = { ack ->
                 check(ack.responseId == responseId)
-                val latest = requireNotNull(store.assessment(owner,id))
-                if (latest.knownRunId != ack.evaluationRunId) store.putAssessment(latest.copy(knownRunId = ack.evaluationRunId, responseJson = null))
+                store.updateAssessment(owner,id) { latestRow ->
+                    val latest = requireNotNull(latestRow)
+                    if (latest.knownRunId != ack.evaluationRunId) latest.copy(knownRunId = ack.evaluationRunId,responseJson = null) else latest
+                }
             }, reference = { it.evaluationRunId }, reconcile = { command ->
                 command.knownResultReference?.let { run -> (api.assessmentResponse(responseId) as? ApiResult.Success)?.value?.takeIf { it.evaluationRunId == run } }
                     ?.let { EvaluationRetryDto(responseId,"PENDING","WAITING_FOR_EVALUATION",null,requireNotNull(it.evaluationRunId)) }
             })
-        if (result == LearningOutcome.Done) refresh(id)
+        if (result == LearningOutcome.Done) refresh(id,followCurrent = true)
         return result
     }
 }
