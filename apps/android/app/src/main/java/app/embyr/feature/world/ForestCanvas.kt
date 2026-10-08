@@ -10,6 +10,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -47,11 +50,11 @@ private fun rememberForestMotion(): Boolean {
 
 /** No inferred growth: existing nodes transition only when the authoritative category changes. */
 @Composable
-fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>) {
+fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>, modifier: Modifier = Modifier, showForest: Boolean = true, header: @Composable () -> Unit = {}) {
     val allowMotion = rememberForestMotion()
     val ordered = remember(nodes) { ForestGeometry.painterOrder(nodes) }
     val growths = remember { mutableStateMapOf<String,Double>() }
-    val targets = ordered.associate { it.id to ForestGeometry.growthSize(it.growthState) }
+    val targets = remember(ordered) { ordered.associate { it.id to ForestGeometry.growthSize(it.growthState) } }
     LaunchedEffect(targets,allowMotion) {
         growths.keys.toList().filter { it !in targets }.forEach { growths.remove(it) }
         targets.forEach { (id,target) ->
@@ -62,7 +65,9 @@ fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>
             }
         }
     }
-    val trees = ordered.map { ForestGeometry.tree(it,growths[it.id] ?: ForestGeometry.growthSize(it.growthState)) }
+    val trees by remember(ordered) { derivedStateOf {
+        ordered.map { ForestGeometry.tree(it,growths[it.id] ?: ForestGeometry.growthSize(it.growthState)) }
+    } }
     // Fit uses the final maximum silhouette, so a growth transition does not move the camera.
     val scene = remember(ordered) { ForestGeometry.scene(ordered.map { ForestGeometry.tree(it,1.0) }) }
     var camera by remember { mutableStateOf(ForestGeometry.defaultCamera(scene)) }
@@ -73,8 +78,10 @@ fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>
         if (selectedId !in nodes.map { it.id }) selectedId = null
     }
     val touchPixels = with(LocalDensity.current) { 48.dp.toPx().toDouble() }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ForestCanvas(trees,scene,camera,selectedId,Modifier.fillMaxWidth().height(320.dp).onSizeChanged { size = it }
+    LazyColumn(modifier.testTag("forest"),verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "header") { header() }
+        if(showForest) {
+        item(key = "canvas") { ForestCanvas(trees,scene,camera,selectedId,Modifier.fillMaxWidth().height(320.dp).onSizeChanged { size = it }
             .semantics { contentDescription = "Forest map. Select a tree using the list below, or pan and pinch to zoom." }
             .pointerInput(scene,size) {
                 detectTransformGestures { centroid,pan,zoom,_ ->
@@ -82,20 +89,21 @@ fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>
                 }
             }.pointerInput(trees,scene,size) {
                 detectTapGestures { point -> selectedId = ForestGeometry.hit(trees,ForestPoint(point.x.toDouble(),point.y.toDouble()),camera,scene,size.width.toDouble(),size.height.toDouble(),touchPixels) }
-            })
+            }) }
         // Wrapped controls stay reachable at large font sizes.
-        OutlinedButton(onClick = { camera = ForestGeometry.defaultCamera(scene) }) { Text("Reset view") }
-        OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom*1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom < 8) { Text("Zoom in") }
-        OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom/1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom > 1) { Text("Zoom out") }
-        Text("${nodes.size} trees. Growth reflects recorded encounters, reflections or completion, and recognition evidence.")
-        ordered.forEach { node ->
-            val label = names[node.entityId to node.entityVersion] ?: "Tree ${node.id.takeLast(8)} — name unavailable"
+        item(key = "reset") { OutlinedButton(onClick = { camera = ForestGeometry.defaultCamera(scene) }) { Text("Reset view") } }
+        item(key = "zoom-in") { OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom*1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom < 8) { Text("Zoom in") } }
+        item(key = "zoom-out") { OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom/1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom > 1) { Text("Zoom out") } }
+        item(key = "facts") { Text("${nodes.size} trees. Growth reflects recorded encounters, reflections or completion, and recognition evidence.") }
+        items(ordered,key = { it.id }) { node ->
+            val label = names[node.entityId to node.entityVersion] ?: "Tree ${node.id} — name unavailable"
             OutlinedButton(onClick = {
                 selectedId = node.id
                 camera = ForestGeometry.constrain(ForestCamera(ForestGeometry.tree(node).anchor, maxOf(2.0,camera.zoom)),scene,size.width.toDouble(),size.height.toDouble())
             }, modifier = Modifier.fillMaxWidth().semantics { selected = selectedId == node.id }) {
                 Text("$label · ${node.growthState.lowercase()}${if(selectedId == node.id) " · selected" else ""}")
             }
+        }
         }
     }
 }
