@@ -10,7 +10,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LearningStorageDeviceTest {
-    @Test fun draftsReceiptsAndAssessmentReferencesSurviveReopenAndOwnerSwitch() = runBlocking {
+    @Test fun draftsReceiptsAndAssessmentReferencesSurviveReopenAndOwnerSwitch(): Unit = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>(); val name = "m704-owned-state.db"
         context.deleteDatabase(name)
         val owners = OwnerSession().apply { switchTo("a") }
