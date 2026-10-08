@@ -40,6 +40,16 @@ class LearningComposeTest {
         compose.onNodeWithText("Original request unconfirmed: answer").assertIsDisplayed()
         compose.onNodeWithText("Check original request").assertIsDisplayed()
     }
+    @Test fun nativeBackUsesTheSameLeaveActionAsTheVisibleBackButton() {
+        val left = mutableStateOf(false)
+        compose.setContent {
+            if (left.value) androidx.compose.material3.Text("Back at exploration")
+            else AssessmentScreen(AssessmentUiState(owner = "a",session = session(),responseId = "response"),{}, {}, {}, {}, { left.value = true })
+        }
+        compose.onNodeWithText("Optional check").assertIsDisplayed()
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.onNodeWithText("Back at exploration").assertIsDisplayed()
+    }
     @Test fun emptyExplorationListProvidesRefreshAndEntryRecovery() {
         compose.setContent { ExplorationListScreen(ExplorationUiState(owner = "a"),{}, {}, {}, {}) }
         compose.onNodeWithText("No explorations yet. Accept a suggestion to begin.").assertIsDisplayed()

@@ -348,6 +348,24 @@ class LearningFlowTest {
         } finally { waiting.complete(Unit); f.owners.switchTo(null); runCurrent(); Dispatchers.resetMain() }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun leavingCheckClearsSelectionButBackgroundKeepsRestoration() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler)); val f = Fixture()
+        try {
+            val s = session().copy(responseId = "response",status = "WAITING_FOR_EVALUATION"); f.api.session = s; f.api.current = response(s.id,"PENDING","run",false)
+            val vm = AssessmentViewModel(f.owners,f.assessment(),{ true })
+            runCurrent(); vm.open(s.id); runCurrent()
+            assertEquals(s.id,f.store.activity("a").sessionId)
+            vm.foreground(false); runCurrent()
+            assertEquals(s.id,f.store.activity("a").sessionId)
+            val left = CompletableDeferred<Unit>(); vm.leave { left.complete(Unit) }; runCurrent()
+            withContext(Dispatchers.Default) { withTimeout(3000) { left.await() } }
+            assertNull(f.store.activity("a").sessionId)
+            assertEquals(s.explorationId,f.store.activity("a").explorationId)
+            assertNotNull(f.store.assessment("a",s.id)?.responseId)
+        } finally { f.owners.switchTo(null); runCurrent(); Dispatchers.resetMain() }
+    }
+
     private fun response(sessionId: String, status: String, run: String, retry: Boolean) = AssessmentResponseDto("response", sessionId, "WAITING_FOR_EVALUATION", null, run, status, null, null, null, if (status == "FAILED") "PROCESSING_UNAVAILABLE" else null, retry)
 
     private inner class Fixture {

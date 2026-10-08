@@ -1,6 +1,7 @@
 package app.embyr.feature.assessment
 
 import androidx.compose.foundation.layout.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -10,6 +11,7 @@ import app.embyr.feature.exploration.LearningPage
 import app.embyr.feature.exploration.LearningStatus
 
 @Composable fun AssessmentScreen(state: AssessmentUiState, support: (String) -> Unit, answer: (String) -> Unit, retry: () -> Unit, recheck: () -> Unit, back: () -> Unit) {
+    BackHandler(onBack = back)
     var selectedOption by rememberSaveable(state.session?.id) { mutableStateOf<String?>(null) }
     val session = state.session
     LearningPage("Optional check") {
