@@ -163,3 +163,36 @@ sealed interface RecommendationResult {
     data object NoResult : RecommendationResult
     data class Found(val recommendation: RecommendationDto) : RecommendationResult
 }
+
+@Serializable
+data class ExplorationDto(
+    val id: String,
+    @SerialName("entity_id") val entityId: String,
+    @SerialName("entity_version") val entityVersion: Long,
+    @SerialName("recommendation_id") val recommendationId: String?,
+    @SerialName("practical_challenge_id") val practicalChallengeId: String?,
+    @SerialName("practical_challenge_version_id") val practicalChallengeVersionId: String?,
+    @SerialName("learning_intent") val learningIntent: String,
+    val status: String,
+    @SerialName("started_at") val startedAt: String,
+    @SerialName("returned_at") val returnedAt: String?,
+    @SerialName("paused_at") val pausedAt: String?,
+    @SerialName("completed_at") val completedAt: String?,
+    val version: Long,
+)
+
+@Serializable
+data class ExplorationListDto(val items: List<ExplorationDto>, @SerialName("next_cursor") val nextCursor: String?)
+
+@Serializable
+data class AssessmentResponseDto(
+    @SerialName("response_id") val responseId: String,
+    @SerialName("assessment_session_id") val assessmentSessionId: String,
+    @SerialName("session_status") val sessionStatus: String,
+    @SerialName("support_used") val supportUsed: String?,
+    @SerialName("evaluation_run_id") val evaluationRunId: String?,
+    @SerialName("evaluation_status") val evaluationStatus: String?,
+    val result: String?, val confidence: Double?, val feedback: String?,
+    @SerialName("failure_category") val failureCategory: String?,
+    @SerialName("retry_allowed") val retryAllowed: Boolean,
+)

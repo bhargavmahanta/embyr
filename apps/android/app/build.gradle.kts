@@ -39,6 +39,12 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        getByName("debug") {
+            clientConfig("EMBYR_DEBUG_KEYSTORE").takeIf { it.isNotBlank() }?.let { storeFile = file(it) }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -76,6 +82,7 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.ktor.cio)
 
+    testImplementation(libs.coroutines.test)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)
     testImplementation(libs.room.testing)
