@@ -91,7 +91,6 @@ class ForestFrameMetricsDeviceTest {
                 .put("deadline_misses",misses).put("deadline_miss_percent",100.0*misses/sorted.size).put("dropped_samples",dropped.get())
                 .put("release_performance_guarantee",false)
             instrument.targetContext.filesDir.resolve("m705-benchmark-$count.json").writeText(report.toString(2))
-            instrument.sendStatus(2,Bundle().apply { putString("m705_benchmark",report.toString()) })
         } finally {
             measuring.set(false); running.set(false)
             scenario.onActivity { activity -> callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; activity.window.removeOnFrameMetricsAvailableListener(listener) }
