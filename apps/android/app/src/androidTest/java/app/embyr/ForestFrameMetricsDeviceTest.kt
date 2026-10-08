@@ -40,6 +40,7 @@ class ForestFrameMetricsDeviceTest {
         val scene = ForestGeometry.scene(trees)
         val camera = mutableStateOf(ForestGeometry.defaultCamera(scene))
         val measuring = AtomicBoolean(false); val running = AtomicBoolean(true)
+        val listenerAttached = AtomicBoolean(false)
         val durations = Collections.synchronizedList(mutableListOf<Long>())
         val deadlines = Collections.synchronizedList(mutableListOf<Long>())
         val dropped = AtomicLong(0); var refresh = 0f
@@ -58,6 +59,7 @@ class ForestFrameMetricsDeviceTest {
                 start = SystemClock.elapsedRealtimeNanos()
                 activity.setContent { ForestCanvas(trees,scene,camera.value,null,Modifier.fillMaxSize()) }
                 activity.window.addOnFrameMetricsAvailableListener(listener,Handler(handlerThread.looper))
+                listenerAttached.set(true)
                 callback = object : Choreographer.FrameCallback {
                     override fun doFrame(frameTimeNanos: Long) {
                         if(!running.get()) return
@@ -75,7 +77,7 @@ class ForestFrameMetricsDeviceTest {
             measuring.set(true); SystemClock.sleep(20000); measuring.set(false)
             val measuredNs = SystemClock.elapsedRealtimeNanos()-measuredStart
             // Quiesce before copying paired frame metrics.
-            scenario.onActivity { activity -> running.set(false); callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; activity.window.removeOnFrameMetricsAvailableListener(listener) }
+            scenario.onActivity { activity -> running.set(false); callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; if(listenerAttached.getAndSet(false)) activity.window.removeOnFrameMetricsAvailableListener(listener) }
             handlerThread.quitSafely(); handlerThread.join(3000)
             val sorted = durations.toList().sorted()
             assertTrue("FrameMetrics produced too few samples",sorted.size >= 100)
@@ -93,7 +95,7 @@ class ForestFrameMetricsDeviceTest {
             instrument.targetContext.filesDir.resolve("m705-benchmark-$count.json").writeText(report.toString(2))
         } finally {
             measuring.set(false); running.set(false)
-            scenario.onActivity { activity -> callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; activity.window.removeOnFrameMetricsAvailableListener(listener) }
+            scenario.onActivity { activity -> callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; if(listenerAttached.getAndSet(false)) activity.window.removeOnFrameMetricsAvailableListener(listener) }
             scenario.close(); handlerThread.quitSafely()
         }
     }

@@ -72,9 +72,14 @@ class MemoryWorldComposeTest {
         val count = compose.onAllNodes(hasText("Topic",substring = true) and hasClickAction()).fetchSemanticsNodes().size
         assertTrue("Only visible list rows should compose",count in 1..15)
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.filesDir.resolve("m705-list-composition.json").writeText("{\"synthetic_nodes\":500,\"eager_semantic_rows\":$baselineCount,\"lazy_semantic_rows\":$count,\"metric\":\"composed selectable list rows; not frame duration\"}")
+        val phase = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.filesDir.resolve("m705-list-phase.txt")
+        phase.writeText("before-last-scroll")
         compose.onNodeWithTag("forest").performScrollToNode(hasText("Topic 500",substring = true))
+        phase.writeText("after-last-scroll")
         compose.onNodeWithText("Topic 500",substring = true).performClick()
+        phase.writeText("after-selection")
         compose.onNodeWithText("Topic 500",substring = true).assertIsSelected()
+        phase.writeText("complete")
     }
 
     @Test fun reducedMotionPolicyDisablesGrowthTransitions() {

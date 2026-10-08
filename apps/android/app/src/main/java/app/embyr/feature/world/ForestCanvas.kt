@@ -97,11 +97,14 @@ fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>
         item(key = "facts") { Text("${nodes.size} trees. Growth reflects recorded encounters, reflections or completion, and recognition evidence.") }
         items(ordered,key = { it.id }) { node ->
             val label = names[node.entityId to node.entityVersion] ?: "Tree ${node.id} — name unavailable"
+            // Capture selection during composition; semantics must not observe a shared mutable
+            // selection after a lazily disposed Material child has detached.
+            val isSelected = selectedId == node.id
             OutlinedButton(onClick = {
                 selectedId = node.id
                 camera = ForestGeometry.constrain(ForestCamera(ForestGeometry.tree(node).anchor, maxOf(2.0,camera.zoom)),scene,size.width.toDouble(),size.height.toDouble())
-            }, modifier = Modifier.fillMaxWidth().semantics { selected = selectedId == node.id }) {
-                Text("$label · ${node.growthState.lowercase()}${if(selectedId == node.id) " · selected" else ""}")
+            }, modifier = Modifier.fillMaxWidth().semantics { selected = isSelected }) {
+                Text("$label · ${node.growthState.lowercase()}${if(isSelected) " · selected" else ""}")
             }
         }
         }
