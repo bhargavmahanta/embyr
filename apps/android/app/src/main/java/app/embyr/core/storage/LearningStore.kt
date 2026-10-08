@@ -30,6 +30,7 @@ data class ActivityStateEntity(val ownerId: String, val explorationId: String? =
 data class LearningReceiptEntity(val ownerId: String, val commandId: String, val resultJson: String, val resultReference: String?)
 
 @Dao interface LearningDao {
+    @Query("SELECT * FROM exploration_state WHERE ownerId = :owner") suspend fun knownExplorations(owner: String): List<ExplorationStateEntity>
     @Query("SELECT * FROM learning_receipts WHERE ownerId = :owner AND commandId = :command") suspend fun receipt(owner: String, command: String): LearningReceiptEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putReceipt(row: LearningReceiptEntity)
 

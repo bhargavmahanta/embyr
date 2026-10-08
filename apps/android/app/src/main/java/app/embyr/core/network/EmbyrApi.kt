@@ -18,8 +18,10 @@ interface EmbyrApi {
     suspend fun completeOnboarding(canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<OnboardingResultDto>
     suspend fun explorations(limit: Int, cursor: String? = null): ApiResult<ExplorationPageDto>
     suspend fun decideRecommendation(recommendationId: String, canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<RecommendationDecisionResult>
+    suspend fun memorySummary(): ApiResult<app.embyr.core.model.MemorySummaryDto>
+    suspend fun updateInterest(entityId: String, canonicalPayload: ByteArray): ApiResult<app.embyr.core.model.InterestResultDto>
     suspend fun world(): ApiResult<WorldSnapshotDto>
-    suspend fun worldChanges(afterRevision: Long): ApiResult<WorldDeltaPageDto>
+    suspend fun worldChanges(afterRevision: Long, limit: Int = 500): ApiResult<WorldDeltaPageDto>
     suspend fun nextRecommendation(canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<RecommendationResult>
     suspend fun submitAnswer(sessionId: String, canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<AnswerAcknowledgmentDto>
 }

@@ -39,6 +39,7 @@ import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PATCH
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import okhttp3.ResponseBody
@@ -69,8 +70,10 @@ private interface RawService {
         @Header("Idempotency-Key") key: String,
         @Body body: RequestBody,
     ): Response<ResponseBody>
+    @GET("api/v1/memory/summary") suspend fun memorySummary(): Response<ResponseBody>
+    @PUT("api/v1/memory/interests/{id}") suspend fun updateInterest(@Path("id") id: String, @Body body: RequestBody): Response<ResponseBody>
     @GET("api/v1/world") suspend fun world(): Response<ResponseBody>
-    @GET("api/v1/world/changes") suspend fun worldChanges(@Query("after_revision") after: Long): Response<ResponseBody>
+    @GET("api/v1/world/changes") suspend fun worldChanges(@Query("after_revision") after: Long, @Query("limit") limit: Int): Response<ResponseBody>
     @POST("api/v1/recommendations/next")
     suspend fun nextRecommendation(@Header("Idempotency-Key") key: String, @Body body: RequestBody): Response<ResponseBody>
     @POST("api/v1/assessment-sessions/{id}/responses")
@@ -83,6 +86,7 @@ private interface RawService {
 
 class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClient? = null) : EmbyrApi, LearningApi {
     private val json = Json { ignoreUnknownKeys = true }
+    private val m6Json = Json { ignoreUnknownKeys = false }
     private val mediaType = "application/json; charset=utf-8".toMediaType()
     private val httpClient = (client?.newBuilder() ?: OkHttpClient.Builder())
         .addInterceptor(Interceptor { chain ->
@@ -130,9 +134,19 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
                 RecommendationDecisionResult.Accepted(json.decodeFromString(AcceptedExplorationDto.serializer(), raw))
             }
         }
-    override suspend fun world() = execute({ service.world() }) { json.decodeFromString(WorldSnapshotDto.serializer(), it) }
-    override suspend fun worldChanges(afterRevision: Long) = execute({ service.worldChanges(afterRevision) }) {
-        json.decodeFromString(WorldDeltaPageDto.serializer(), it)
+    override suspend fun memorySummary() = execute({ service.memorySummary() }, expectedStatus = 200) {
+        M6Contract.memory(m6Json.decodeFromString(MemorySummaryDto.serializer(), it))
+    }
+    override suspend fun updateInterest(entityId: String, canonicalPayload: ByteArray) =
+        execute({ service.updateInterest(entityId, canonicalPayload.toRequestBody(mediaType)) }, expectedStatus = 200) {
+            m6Json.decodeFromString(InterestResultDto.serializer(), it).also { result ->
+                M6Contract.id(result.entityId)
+                require(result.entityId == entityId && result.version > 0 && result.preference in M6Contract.preferences)
+            }
+        }
+    override suspend fun world() = execute({ service.world() }, expectedStatus = 200) { app.embyr.core.model.M6Contract.snapshot(m6Json.decodeFromString(WorldSnapshotDto.serializer(), it)) }
+    override suspend fun worldChanges(afterRevision: Long, limit: Int) = execute({ service.worldChanges(afterRevision, limit) }, expectedStatus = 200) {
+        app.embyr.core.model.M6Contract.delta(m6Json.decodeFromString(WorldDeltaPageDto.serializer(), it))
     }
     override suspend fun nextRecommendation(canonicalPayload: ByteArray, idempotencyKey: String) =
         execute({ service.nextRecommendation(idempotencyKey, canonicalPayload.toRequestBody(mediaType)) }) { raw ->
@@ -195,7 +209,7 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
             return ApiResult.Failure(TransportError.Authentication(authProblem))
         }
         if (status == 409) {
-            val resync = runCatching { json.decodeFromString(WorldResyncRequiredDto.serializer(), body) }.getOrNull()
+            val resync = runCatching { M6Contract.resync(m6Json.decodeFromString(WorldResyncRequiredDto.serializer(), body)) }.getOrNull()
             if (resync?.code == "WORLD_RESYNC_REQUIRED") return ApiResult.Failure(TransportError.WorldResync(resync))
         }
         if (status == 422) {

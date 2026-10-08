@@ -73,7 +73,7 @@ class StorageDeviceTest {
 
     @Test fun worldRevisionAndObjectsRollBackTogetherAndNeverCrossOwners() = runBlocking {
         val store = RoomWorldStore(database, owners)
-        val original = snapshot(1, listOf(region("region-1")))
+        val original = snapshot(1, listOf(region("00000000-0000-0000-0000-000000000001")))
         store.replaceSnapshot("owner-a", original, 1000)
         try {
             store.replaceSnapshot("owner-a", snapshot(0, emptyList()), 1500)
@@ -83,18 +83,18 @@ class StorageDeviceTest {
             store.getWorld("owner-b")
             fail("Cross-owner World query was permitted")
         } catch (_: IllegalStateException) { }
-        val invalid = snapshot(2, listOf(region("region-2"), region("region-2")))
+        val invalid = snapshot(2, listOf(region("00000000-0000-0000-0000-000000000002"), region("00000000-0000-0000-0000-000000000002")))
         try {
             store.replaceSnapshot("owner-a", invalid, 2000)
             fail("Duplicate region should have aborted the transaction")
-        } catch (_: android.database.sqlite.SQLiteConstraintException) {
-            // The second insert fails after deletion began; Room must roll everything back.
+        } catch (_: IllegalArgumentException) {
+            // Invalid public data is rejected before changing the committed snapshot.
         }
         database.close()
         database = openDatabase()
         val recovered = requireNotNull(RoomWorldStore(database, owners).getWorld("owner-a"))
         assertEquals(1L, recovered.revision)
-        assertEquals(listOf("region-1"), recovered.regions.map { it.id })
+        assertEquals(listOf("00000000-0000-0000-0000-000000000001"), recovered.regions.map { it.id })
         owners.switchTo("owner-b")
         assertNull(RoomWorldStore(database, owners).getWorld("owner-b"))
     }

@@ -13,3 +13,6 @@ import kotlinx.serialization.Serializable
 @Serializable data object ExplorationListRoute
 @Serializable data class ExplorationDetailRoute(val id: String)
 @Serializable data class AssessmentRoute(val id: String)
+
+@Serializable data object MemoryRoute
+@Serializable data object WorldRoute

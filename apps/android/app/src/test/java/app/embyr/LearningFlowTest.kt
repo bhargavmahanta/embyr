@@ -450,6 +450,8 @@ class TestLearningApi : LearningApi, EmbyrApi {
     override suspend fun explorations(limit: Int, cursor: String?): ApiResult<ExplorationPageDto> = error("Unused")
     override suspend fun decideRecommendation(recommendationId: String, canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<RecommendationDecisionResult> = error("Unused")
     override suspend fun world(): ApiResult<WorldSnapshotDto> = error("Unused")
-    override suspend fun worldChanges(afterRevision: Long): ApiResult<WorldDeltaPageDto> = error("Unused")
+    override suspend fun memorySummary(): ApiResult<app.embyr.core.model.MemorySummaryDto> = error("Unused")
+    override suspend fun updateInterest(entityId: String, canonicalPayload: ByteArray): ApiResult<app.embyr.core.model.InterestResultDto> = error("Unused")
+    override suspend fun worldChanges(afterRevision: Long, limit: Int): ApiResult<WorldDeltaPageDto> = error("Unused")
     override suspend fun nextRecommendation(canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<RecommendationResult> = error("Unused")
 }

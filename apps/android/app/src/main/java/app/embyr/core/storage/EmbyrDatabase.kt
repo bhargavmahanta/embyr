@@ -68,11 +68,12 @@ interface JourneyDao {
 }
 
 @Database(
-    entities = [CommandEntity::class, WorldMetaEntity::class, WorldRegionEntity::class, WorldNodeEntity::class, WorldAuxEntity::class, JourneyEntity::class, ExplorationStateEntity::class, AssessmentStateEntity::class, ActivityStateEntity::class, LearningReceiptEntity::class],
-    version = 3,
+    entities = [CommandEntity::class, WorldMetaEntity::class, WorldRegionEntity::class, WorldNodeEntity::class, WorldAuxEntity::class, JourneyEntity::class, ExplorationStateEntity::class, AssessmentStateEntity::class, ActivityStateEntity::class, LearningReceiptEntity::class, MemoryCacheEntity::class, InterestOperationEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class EmbyrDatabase : RoomDatabase() {
+    abstract fun memoryDao(): MemoryDao
     abstract fun commandDao(): CommandDao
     abstract fun worldDao(): WorldDao
     abstract fun learningDao(): LearningDao

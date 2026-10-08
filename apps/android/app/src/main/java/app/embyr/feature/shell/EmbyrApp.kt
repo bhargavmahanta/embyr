@@ -46,6 +46,11 @@ import app.embyr.feature.assessment.*
 import app.embyr.navigation.ExplorationListRoute
 import app.embyr.navigation.ExplorationDetailRoute
 import app.embyr.navigation.AssessmentRoute
+import app.embyr.navigation.MemoryRoute
+import app.embyr.navigation.WorldRoute
+import app.embyr.feature.memory.*
+import app.embyr.feature.world.*
+import androidx.activity.compose.BackHandler
 import androidx.navigation.toRoute
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -58,13 +63,13 @@ import app.embyr.navigation.RecoverableErrorRoute
 import app.embyr.navigation.SignedOutRoute
 
 @Composable
-fun EmbyrApp(viewModel: ShellViewModel, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null) {
+fun EmbyrApp(viewModel: ShellViewModel, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null, memory: MemoryViewModel? = null, world: WorldViewModel? = null) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    JourneyContent(ui, viewModel, theme, explorations, assessments)
+    JourneyContent(ui, viewModel, theme, explorations, assessments, memory, world)
 }
 
 @Composable
-fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null) {
+fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeChoice = ThemeChoice.SYSTEM, explorations: ExplorationViewModel? = null, assessments: AssessmentViewModel? = null, memory: MemoryViewModel? = null, world: WorldViewModel? = null) {
     val dark = when (theme) {
         ThemeChoice.DARK -> true
         ThemeChoice.LIGHT -> false
@@ -75,6 +80,11 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
         val explorationState = explorations?.ui?.collectAsStateWithLifecycle()?.value
         val activeOwner = explorations?.activeOwner?.collectAsStateWithLifecycle()?.value
         val assessmentState = assessments?.ui?.collectAsStateWithLifecycle()?.value
+        val memoryState = memory?.ui?.collectAsStateWithLifecycle()?.value
+        val worldState = world?.ui?.collectAsStateWithLifecycle()?.value
+        val binding = memory?.activeBinding?.collectAsStateWithLifecycle()?.value
+        val memoryBound = binding != null && binding.ownerId == ui.profile?.id && memoryState?.binding == binding
+        val worldBound = binding != null && binding.ownerId == ui.profile?.id && worldState?.binding == binding
         val featureBound = activeOwner != null && activeOwner == ui.profile?.id && explorationState?.owner == activeOwner
         LaunchedEffect(ui.screen, ui.profile?.id) {
             when (ui.screen) {
@@ -102,7 +112,24 @@ fun JourneyContent(ui: JourneyUiState, viewModel: JourneyActions, theme: ThemeCh
                 composable<OnboardingRoute> { OnboardingPage(ui, viewModel) }
                 composable<ReadyShellRoute> {
                     EntryPage(ui, viewModel, browse = if (featureBound) ({ nav.navigate(ExplorationListRoute) }) else null,
-                        open = if (featureBound) ({ id -> nav.navigate(ExplorationDetailRoute(id)) }) else null)
+                        open = if (featureBound) ({ id -> nav.navigate(ExplorationDetailRoute(id)) }) else null,
+                        memory = if(memoryBound) ({ nav.navigate(MemoryRoute) }) else null,
+                        world = if(worldBound) ({ nav.navigate(WorldRoute) }) else null)
+                }
+                composable<MemoryRoute> {
+                    BackHandler { viewModel.backToEntry(); nav.replaceRoot(ReadyShellRoute) }
+                    if(memoryBound && memory != null && memoryState != null) {
+                        LaunchedEffect(binding) { memory.open() }
+                        MemoryScreen(memoryState,memory::refresh,memory::put,memory::applySaved,memory::adopt,
+                            { viewModel.backToEntry(); nav.replaceRoot(ReadyShellRoute) })
+                    } else SimplePage("Checking your session") { Text("Preparing your space…") }
+                }
+                composable<WorldRoute> {
+                    BackHandler { viewModel.backToEntry(); nav.replaceRoot(ReadyShellRoute) }
+                    if(worldBound && world != null && worldState != null) {
+                        LaunchedEffect(binding) { world.open() }
+                        WorldScreen(worldState,world::refresh,{ viewModel.backToEntry(); nav.replaceRoot(ReadyShellRoute) })
+                    } else SimplePage("Checking your session") { Text("Preparing your space…") }
                 }
                 composable<RecommendationRoute> { RecommendationPage(ui, viewModel) }
                 composable<ExplorationReadyRoute> {
@@ -232,7 +259,7 @@ private fun OnboardingPage(ui: JourneyUiState, viewModel: JourneyActions) {
 }
 
 @Composable
-private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions, browse: (() -> Unit)? = null, open: ((String) -> Unit)? = null) {
+private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions, browse: (() -> Unit)? = null, open: ((String) -> Unit)? = null, memory: (() -> Unit)? = null, world: (() -> Unit)? = null) {
     SimplePage("Ready to explore") {
         Text("Choose how to find your next exploration.")
         if (ui.explorations.isEmpty()) Text("No explorations yet.")
@@ -242,6 +269,8 @@ private fun EntryPage(ui: JourneyUiState, viewModel: JourneyActions, browse: (()
         if (ui.recommendation != null || ui.noResult) {
             OutlinedButton(onClick = viewModel::showLatestRecommendation, enabled = !ui.busy) { Text("View latest suggestion") }
         }
+        memory?.let { OutlinedButton(onClick = it,enabled = !ui.busy) { Text("Your Memory") } }
+        world?.let { OutlinedButton(onClick = it,enabled = !ui.busy) { Text("Your World") } }
         browse?.let { OutlinedButton(onClick = it, enabled = !ui.busy) { Text("Your explorations") } }
         if (ui.acceptedExplorationId != null) {
             OutlinedButton(onClick = { if (open != null) open(ui.acceptedExplorationId) else viewModel.showExplorationReady() }, enabled = !ui.busy) { Text("Exploration ready") }

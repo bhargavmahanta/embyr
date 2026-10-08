@@ -1,0 +1,43 @@
+package app.embyr
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import app.embyr.auth.OwnerBinding
+import app.embyr.core.model.*
+import app.embyr.feature.memory.*
+import app.embyr.feature.world.*
+import app.embyr.core.storage.*
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+class MemoryWorldComposeTest {
+    @get:Rule val compose = createComposeRule()
+    @Test fun memorySeparatesCachedFreshnessAndFailedProjectionAndKeepsUnavailableChoice() {
+        val summary = MemorySummaryDto("memory-summary/v1",ProjectionDto("learner-projection/v1",1,2,"FAILED"),null,
+            listOf(ExplicitInterestDto(MemoryWorldStorageDeviceTest.ENTITY,null,null,"LESS",3,"2026-10-01T00:00:00Z","UNAVAILABLE")),emptyList(),emptyList(),emptyList(),emptyList(),TruncatedDto(false,false,false))
+        var back = false
+        compose.setContent { MaterialTheme { MemoryScreen(MemoryUiState(OwnerBinding("a",1),MemoryRead(summary,1000,false,null,emptyList())),{},{ _,_ -> },{},{},{ back = true }) } }
+        compose.onNodeWithText("Projection: FAILED").assertIsDisplayed()
+        compose.onNodeWithText("Saved copy",substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Interest 1 — unavailable").assertIsDisplayed()
+        compose.onNodeWithText("Back to entry").performClick()
+        assertTrue(back)
+    }
+    @Test fun worldControlsAndTreeListRemainAccessibleWithLargeText() {
+        val node = WorldNodeDto(MemoryWorldStorageDeviceTest.NODE,MemoryWorldStorageDeviceTest.ENTITY,1,MemoryWorldStorageDeviceTest.REGION,0.5,0.5,0,"branching_tree","b".repeat(64),"SPROUT",2)
+        val snapshot = WorldSnapshotDto(2,1,"a".repeat(64),listOf(WorldRegionDto(MemoryWorldStorageDeviceTest.REGION,"discovery",null,0,0,1,1,"grove")),listOf(node),emptyList(),emptyList())
+        compose.setContent { androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f,2f)) {
+            MaterialTheme { WorldScreen(WorldUiState(OwnerBinding("a",1),WorldRead(CachedWorld(snapshot,WorldStamp(2,1))),mapOf((node.entityId to 1L) to "Reviewed topic")),{},{}) }
+        } }
+        compose.onNodeWithText("Reset view").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Zoom in").performScrollTo().performClick()
+        compose.onNodeWithText("Reviewed topic",substring = true).performScrollTo().performClick()
+        compose.onNodeWithText("selected",substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Back to entry").performScrollTo().assertIsDisplayed()
+    }
+    @Test fun reducedMotionPolicyDisablesGrowthTransitions() {
+        assertFalse(forestMotionAllowed(0f)); assertTrue(forestMotionAllowed(1f))
+    }
+}
