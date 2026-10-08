@@ -279,6 +279,26 @@ class NetworkFoundationTest {
         assertEquals("/api/v1/world/changes?after_revision=0&limit=500", server.takeRequest().path)
     }
 
+    @Test fun interestPutDoesNotFollow503RetryAfterZero() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After","0"))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        val result = RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{\"base_version\":1,\"preference\":\"MORE\"}".toByteArray())
+        assertTrue(result is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+    @Test fun interestPutDoesNotFollow408() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(408))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        assertTrue(RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{}".toByteArray()) is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+    @Test fun interestPutDoesNotFollowRedirect() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(307).setHeader("Location",server.url("redirected")))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        assertTrue(RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{}".toByteArray()) is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+
     private fun m6Example(name: String): JsonObject {
         val root = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).canonicalFile) { it.parentFile }
             .first { File(it,"docs/api/fixtures/m6-v1.json").isFile }

@@ -87,7 +87,7 @@ fun NativeForest(nodes: List<WorldNodeDto>, names: Map<Pair<String,Long>,String>
         OutlinedButton(onClick = { camera = ForestGeometry.defaultCamera(scene) }) { Text("Reset view") }
         OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom*1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom < 8) { Text("Zoom in") }
         OutlinedButton(onClick = { camera = ForestGeometry.constrain(camera.copy(zoom = camera.zoom/1.5),scene,size.width.toDouble(),size.height.toDouble()) }, enabled = camera.zoom > 1) { Text("Zoom out") }
-        Text("${nodes.size} trees. Growth reflects recorded encounters, returns and recognition evidence.")
+        Text("${nodes.size} trees. Growth reflects recorded encounters, reflections or completion, and recognition evidence.")
         ordered.forEach { node ->
             val label = names[node.entityId to node.entityVersion] ?: "Tree ${node.id.takeLast(8)} — name unavailable"
             OutlinedButton(onClick = {

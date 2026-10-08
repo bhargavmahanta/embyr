@@ -21,8 +21,8 @@ class MemoryWorldComposeTest {
         compose.setContent { MaterialTheme { MemoryScreen(MemoryUiState(OwnerBinding("a",1),MemoryRead(summary,1000,false,null,emptyList())),{},{ _,_ -> },{},{},{ back = true }) } }
         compose.onNodeWithText("Projection: FAILED").assertIsDisplayed()
         compose.onNodeWithText("Saved copy",substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Interest 1 — unavailable").assertIsDisplayed()
-        compose.onNodeWithText("Back to entry").performClick()
+        compose.onNodeWithText("Interest ${MemoryWorldStorageDeviceTest.ENTITY} — unavailable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Back to entry").performScrollTo().performClick()
         assertTrue(back)
     }
     @Test fun worldControlsAndTreeListRemainAccessibleWithLargeText() {
@@ -37,6 +37,16 @@ class MemoryWorldComposeTest {
         compose.onNodeWithText("selected",substring = true).assertIsDisplayed()
         compose.onNodeWithText("Back to entry").performScrollTo().assertIsDisplayed()
     }
+    @Test fun unresolvedIntentsIdentifyTheirTargetsEvenWithoutSummary() {
+        val first = InterestOperationEntity("first","a",MemoryWorldStorageDeviceTest.ENTITY,1,"LESS","{}".toByteArray(),1000)
+        val second = first.copy(id = "second",entityId = MemoryWorldStorageDeviceTest.REGION)
+        compose.setContent { MaterialTheme { MemoryScreen(MemoryUiState(OwnerBinding("a",1),MemoryRead(null,null,false,null,listOf(first,second))),{},{ _,_ -> },{},{},{}) } }
+        compose.onNodeWithText("Interest reference: ${first.entityId}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Interest reference: ${second.entityId}").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Apply saved intent to current version").fetchSemanticsNodes().let { assertEquals(2,it.size) }
+        compose.onAllNodesWithText("Apply saved intent to current version")[1].assertIsNotEnabled()
+    }
+
     @Test fun reducedMotionPolicyDisablesGrowthTransitions() {
         assertFalse(forestMotionAllowed(0f)); assertTrue(forestMotionAllowed(1f))
     }

@@ -35,9 +35,9 @@ fun MemoryScreen(ui: MemoryUiState, refresh: () -> Unit, put: (ExplicitInterestD
             memory.learningPreferences?.let { Text("Adventure: ${it.adventurePreference}\nEffort: ${it.preferredEffort}\nSupport: ${it.supportStyle}\nPractical activities: ${if(it.practicalOptIn) "opted in" else "not opted in"}") } ?: Text("No recorded learning preferences.")
             Text("Explicit interests",style = MaterialTheme.typography.titleLarge,modifier = Modifier.semantics { heading() })
             if(memory.explicitInterests.isEmpty()) Text("No explicit choices in this summary.")
-            memory.explicitInterests.forEachIndexed { index,choice ->
+            memory.explicitInterests.forEach { choice ->
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(choice.title ?: "Interest ${index+1} — unavailable",style = MaterialTheme.typography.titleMedium)
+                    Text(choice.title ?: "Interest ${choice.entityId} — unavailable",style = MaterialTheme.typography.titleMedium)
                     Text("Saved choice: ${preferenceLabel(choice.preference)} · version ${choice.version}")
                     if(choice.availability == "UNAVAILABLE") Text("This content is unavailable. Your saved preference remains recorded.")
                     val pending = read.operations.any { it.entityId == choice.entityId }
@@ -48,17 +48,6 @@ fun MemoryScreen(ui: MemoryUiState, refresh: () -> Unit, put: (ExplicitInterestD
                 } }
             }
             if(memory.truncated.explicitInterests) Text("This summary contains only the 20 most recent explicit choices. Missing choices are unresolved, not absent.")
-            read.operations.forEach { operation ->
-                val current = memory.explicitInterests.find { it.entityId == operation.entityId }
-                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Saved intent: ${preferenceLabel(operation.preference)} · observed version ${operation.baseVersion}")
-                    Text(when(operation.state) { "CONFLICT" -> "A newer choice conflicted with this request."; "REJECTED" -> "This request was rejected. It has not been resent."; else -> "This request has no confirmed result. It has not been resent." })
-                    Text(current?.let { "Current choice: ${preferenceLabel(it.preference)} · version ${it.version}. A match does not confirm the original request." } ?: "This choice is outside the bounded summary. Keep the saved intent and refresh later.")
-                    OutlinedButton(onClick = { refresh() },enabled = !ui.busy) { Text("Read current choices") }
-                    Button(onClick = { applySaved(operation.id) },enabled = !ui.busy && read.fresh && current != null) { Text("Apply saved intent to current version") }
-                    OutlinedButton(onClick = { adopt(operation.id) },enabled = !ui.busy && read.fresh && current != null) { Text("Adopt current choice") }
-                } }
-            }
             Text("Exploration facts",style = MaterialTheme.typography.titleLarge,modifier = Modifier.semantics { heading() })
             memory.recentlyExplored.forEach { Text("${it.title}\nStarted ${it.startedCount} · Returned ${it.returnedCount} · Completed ${it.completedCount}") }
             if(memory.recentlyExplored.isEmpty()) Text("No recent Exploration facts.")
@@ -68,6 +57,22 @@ fun MemoryScreen(ui: MemoryUiState, refresh: () -> Unit, put: (ExplicitInterestD
             if(memory.recognitionEvidence.isEmpty()) Text("No recognition evidence in this summary.")
             if(memory.truncated.recognitionEvidence) Text("Showing only 10 recognition summaries.")
         }
+        if(read != null) {
+            read.operations.forEach { operation ->
+                val current = read.summary?.explicitInterests?.find { it.entityId == operation.entityId }
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Saved intent for: ${current?.title ?: "name unavailable"}",style = MaterialTheme.typography.titleMedium)
+                    Text("Interest reference: ${operation.entityId}")
+                    Text("Saved intent: ${preferenceLabel(operation.preference)} · observed version ${operation.baseVersion}")
+                    Text(when(operation.state) { "CONFLICT" -> "A newer choice conflicted with this request."; "REJECTED" -> "This request was rejected. It has not been resent."; else -> "This request has no confirmed result. It has not been resent." })
+                    Text(current?.let { "Current choice: ${preferenceLabel(it.preference)} · version ${it.version}. A match does not confirm the original request." } ?: "This choice is outside the bounded summary. Keep the saved intent and refresh later.")
+                    OutlinedButton(onClick = { refresh() },enabled = !ui.busy) { Text("Read current choices") }
+                    Button(onClick = { applySaved(operation.id) },enabled = !ui.busy && read.fresh && current != null) { Text("Apply saved intent to current version") }
+                    OutlinedButton(onClick = { adopt(operation.id) },enabled = !ui.busy && read.fresh && current != null) { Text("Adopt current choice") }
+                } }
+            }
+        }
+
     } }
 }
 fun preferenceLabel(value: String) = when(value) { "NEUTRAL" -> "Neutral"; "MORE" -> "More"; "LESS" -> "Less"; "PAUSED" -> "Paused"; "NOT_INTERESTED" -> "Not interested"; else -> "Unavailable choice" }

@@ -84,7 +84,7 @@ private interface RawService {
     ): Response<ResponseBody>
 }
 
-class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClient? = null) : EmbyrApi, LearningApi {
+class RetrofitEmbyrApi(private val config: AppConfig, auth: AuthGateway, client: OkHttpClient? = null) : EmbyrApi, LearningApi {
     private val json = Json { ignoreUnknownKeys = true }
     private val m6Json = Json { ignoreUnknownKeys = false }
     private val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -107,9 +107,13 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
             response.request.newBuilder().header("Authorization", "Bearer $token").build()
         })
         .build()
-    private val service = Retrofit.Builder()
+    private val service = rawService(httpClient)
+    // Unkeyed versioned PUTs must never be retried by transport or redirects.
+    private val interestService = rawService(httpClient.newBuilder()
+        .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build())
+    private fun rawService(client: OkHttpClient) = Retrofit.Builder()
         .baseUrl(config.embyrApiBaseUrl)
-        .client(httpClient)
+        .client(client)
         .addConverterFactory(json.asConverterFactory(mediaType))
         .build()
         .create(RawService::class.java)
@@ -138,7 +142,7 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
         M6Contract.memory(m6Json.decodeFromString(MemorySummaryDto.serializer(), it))
     }
     override suspend fun updateInterest(entityId: String, canonicalPayload: ByteArray) =
-        execute({ service.updateInterest(entityId, canonicalPayload.toRequestBody(mediaType)) }, expectedStatus = 200) {
+        execute({ interestService.updateInterest(entityId, oneShot(canonicalPayload)) }, expectedStatus = 200) {
             m6Json.decodeFromString(InterestResultDto.serializer(), it).also { result ->
                 M6Contract.id(result.entityId)
                 require(result.entityId == entityId && result.version > 0 && result.preference in M6Contract.preferences)
@@ -219,6 +223,13 @@ class RetrofitEmbyrApi(config: AppConfig, auth: AuthGateway, client: OkHttpClien
         val problem = runCatching { json.decodeFromString(ProblemDetails.serializer(), body) }.getOrNull()
         if (problem?.code != null || problem?.title != null) return ApiResult.Failure(TransportError.Problem(status, problem))
         return ApiResult.Failure(TransportError.UnexpectedHttp(status, response.headers()["X-Request-ID"]))
+    }
+
+    private fun oneShot(payload: ByteArray): RequestBody = object : RequestBody() {
+        override fun contentType() = mediaType
+        override fun contentLength() = payload.size.toLong()
+        override fun isOneShot() = true
+        override fun writeTo(sink: okio.BufferedSink) { sink.write(payload) }
     }
 
     private fun replayableAfter401(request: Request): Boolean {
