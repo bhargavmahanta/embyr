@@ -1,5 +1,6 @@
 package app.embyr.feature.exploration
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
     message?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
 }
 @Composable fun ExplorationListScreen(state: ExplorationUiState, open: (String) -> Unit, refresh: () -> Unit, more: () -> Unit, back: () -> Unit) {
+    BackHandler(onBack = back)
     LearningPage("Your explorations") {
         LearningStatus(state.busy,state.message)
         if (state.items.isEmpty() && !state.busy) Text("No explorations yet. Accept a suggestion to begin.")
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.dp
     complete: () -> Unit, recover: () -> Unit, draft: (String) -> Unit, save: (Boolean) -> Unit, recheck: () -> Unit,
     assessment: (String) -> Unit, startAssessment: (String) -> Unit, recoverStart: () -> Unit, back: () -> Unit,
 ) {
+    BackHandler(onBack = back)
     var confidence by rememberSaveable(state.selected) { mutableStateOf<String?>(null) }
     var confirm by rememberSaveable(state.selected) { mutableStateOf(false) }
     LearningPage(state.detail?.entity?.title ?: "Exploration") {

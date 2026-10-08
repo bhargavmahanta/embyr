@@ -56,4 +56,26 @@ class LearningComposeTest {
         compose.onNodeWithText("Refresh explorations").assertIsDisplayed()
         compose.onNodeWithText("Back to entry").assertIsDisplayed()
     }
+    @Test fun nativeDetailBackLeavesOnceInsteadOfReenteringAcceptHandoff() {
+        val left = mutableStateOf(false)
+        var leaves = 0
+        compose.setContent {
+            if (left.value) androidx.compose.material3.Text("Back at exploration list")
+            else ExplorationDetailScreen(ExplorationUiState(owner = "a"), {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { leaves++; left.value = true })
+        }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.onNodeWithText("Back at exploration list").assertIsDisplayed()
+        org.junit.Assert.assertEquals(1, leaves)
+    }
+    @Test fun nativeListBackLeavesOnceInsteadOfReturningToDetail() {
+        val left = mutableStateOf(false)
+        var leaves = 0
+        compose.setContent {
+            if (left.value) androidx.compose.material3.Text("Back at entry")
+            else ExplorationListScreen(ExplorationUiState(owner = "a"), {}, {}, {}, { leaves++; left.value = true })
+        }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.onNodeWithText("Back at entry").assertIsDisplayed()
+        org.junit.Assert.assertEquals(1, leaves)
+    }
 }
