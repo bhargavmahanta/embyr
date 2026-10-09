@@ -53,7 +53,8 @@ android {
         versionName = "0.1.0"
         manifestPlaceholders["appLabel"] = "Embyr"
         manifestPlaceholders["shellProfileable"] = "false"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = if (providers.gradleProperty("embyrTestBuildType").orNull == "release")
+            "app.embyr.AlphaPlatformRunner" else "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "EMBYR_API_BASE_URL", quoted(clientConfig("EMBYR_API_BASE_URL")))
         buildConfigField("String", "SUPABASE_URL", quoted(clientConfig("SUPABASE_URL")))
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", quoted(clientConfig("SUPABASE_PUBLISHABLE_KEY")))
