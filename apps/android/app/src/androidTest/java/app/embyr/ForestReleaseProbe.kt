@@ -16,12 +16,12 @@ object ForestReleaseProbe {
         val count = 100
         val nodes = ArrayList<WorldNodeDto>(count)
         for (i in 0 until count) {
-            val bytes = MessageDigest.getInstance("SHA-256").digest("m705-synthetic-$i".toByteArray(Charsets.UTF_8))
+            val bytes = MessageDigest.getInstance("SHA-256").digest("m705-synthetic-$i".toByteArray(java.nio.charset.StandardCharsets.UTF_8))
             val hex = StringBuilder()
-            for (value in bytes) hex.append(String.format(Locale.ROOT, "%02x", value.toInt() and 255))
+            for (value in bytes) hex.append(java.lang.String.format(Locale.ROOT, "%02x", value.toInt() and 255))
             nodes.add(WorldNodeDto(
-                String.format(Locale.ROOT,"%08x-0000-4000-8000-000000000001",i+1),
-                String.format(Locale.ROOT,"%08x-0000-4000-8000-000000000002",i+1),1,
+                java.lang.String.format(Locale.ROOT,"%08x-0000-4000-8000-000000000001",i+1),
+                java.lang.String.format(Locale.ROOT,"%08x-0000-4000-8000-000000000002",i+1),1,
                 "00000000-0000-4000-8000-000000000003",(i%25+0.5)/25.0,(i/25+0.5)/4.0,
                 0,"branching_tree",hex.toString(),arrayOf("SEED","SPROUT","YOUNG")[i%3],i+1L,
             ))
