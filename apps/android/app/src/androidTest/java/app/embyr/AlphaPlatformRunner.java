@@ -21,6 +21,9 @@ public final class AlphaPlatformRunner extends Instrumentation {
     private static final String TEST = "nonDebuggableAlphaLauncherCanBeInstrumented";
     private boolean storage;
     private boolean forest;
+    private boolean performance;
+    private boolean sceneIdentity;
+    private String scene;
     private String owner;
 
     @Override public void onCreate(Bundle arguments) {
@@ -35,8 +38,13 @@ public final class AlphaPlatformRunner extends Instrumentation {
         String operation = arguments.getString("operation", "launch");
         storage = "storage".equals(operation);
         forest = "forest".equals(operation);
+        performance = "performance".equals(operation);
+        sceneIdentity = "scene".equals(operation);
+        scene = arguments.getString("scene", "");
         owner = arguments.getString("owner", "");
-        if ((!storage && !forest && !"launch".equals(operation)) || (storage &&
+        if ((!storage && !forest && !performance && !sceneIdentity && !"launch".equals(operation)) ||
+            ((performance || sceneIdentity) && (!java.util.Arrays.asList("real", "100", "500").contains(scene) ||
+            ("real".equals(scene) && !owner.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")))) || (storage &&
             !owner.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))) {
             Bundle result = new Bundle();
             result.putString("shortMsg", "Unsupported Alpha probe arguments");
@@ -49,7 +57,8 @@ public final class AlphaPlatformRunner extends Instrumentation {
     private Bundle status() {
         Bundle status = new Bundle();
         status.putString("class", CLASS);
-        status.putString("test", storage ? "readonlyOwnerStorageCanBeInspected" : (forest ? "productionForestCanBePresented" : TEST));
+        status.putString("test", storage ? "readonlyOwnerStorageCanBeInspected" :
+            (sceneIdentity ? "releaseForestSceneIdentity" : (performance ? "releaseForestPerformanceCollection" : (forest ? "productionForestCanBePresented" : TEST))));
         status.putInt("numtests", 1);
         status.putInt("current", 1);
         return status;
@@ -64,6 +73,12 @@ public final class AlphaPlatformRunner extends Instrumentation {
             }
             if ((getTargetContext().getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
                 throw new AssertionError("Release target is debuggable");
+            }
+            if (sceneIdentity) {
+                JSONObject identity = ReleaseForestPerformance.sceneIdentity(getTargetContext(), scene, owner);
+                sendStatus(0, status());
+                Bundle result = new Bundle(); result.putString("m706_scene", identity.toString());
+                finish(Activity.RESULT_OK, result); return;
             }
             if (storage) {
                 JSONObject observation = inspectStorage();
@@ -82,6 +97,13 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity = startActivitySync(intent);
             waitForIdleSync();
+            if (performance) {
+                JSONObject samples = ReleaseForestPerformance.collect(this, (MainActivity) activity, scene, owner);
+                if (samples.toString().length() > 900_000) throw new AssertionError("Bounded performance result exceeded");
+                sendStatus(0, status());
+                Bundle result = new Bundle(); result.putString("m706_metrics", samples.toString());
+                finish(Activity.RESULT_OK, result); return;
+            }
             if (forest) {
                 final Activity foreground = activity;
                 runOnMainSync(() -> ForestReleaseProbe.present((MainActivity) foreground));
