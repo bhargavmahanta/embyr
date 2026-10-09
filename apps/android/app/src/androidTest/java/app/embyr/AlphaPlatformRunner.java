@@ -126,6 +126,10 @@ public final class AlphaPlatformRunner extends Instrumentation {
             sendStatus(-2, failed);
             Bundle result = new Bundle();
             result.putString("shortMsg", "Alpha framework release probe failed");
+            if (performance) {
+                String partial = ReleaseForestPerformance.partialJson();
+                if (partial != null && partial.length() <= 900_000) result.putString("m706_metrics_partial", partial);
+            }
             finish(Activity.RESULT_CANCELED, result);
         } finally {
             if (activity != null) {

@@ -30,6 +30,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function2;
 import org.json.JSONArray;
@@ -38,6 +40,8 @@ import org.json.JSONObject;
 /** Test APK only. Framework samples and real input; no persistence, API, grading or app flags. */
 public final class ReleaseForestPerformance {
     private ReleaseForestPerformance() {}
+    private static String partialEvidence;
+    public static String partialJson() { return partialEvidence; }
     private static final long SECOND = 1_000_000_000L;
     private static final String FOREST = "Forest map. Select a tree using the list below, or pan and pinch to zoom.";
 
@@ -195,6 +199,7 @@ public final class ReleaseForestPerformance {
     }
 
     public static JSONObject collect(Instrumentation instrument, MainActivity activity, String sceneName, String owner) throws Exception {
+        partialEvidence = null;
         if (!java.util.Arrays.asList("real", "100", "500").contains(sceneName)) throw new AssertionError("Unsupported scene");
         if (Settings.System.getFloat(activity.getContentResolver(), Settings.System.FONT_SCALE, 1) != 1 ||
             Settings.Global.getFloat(activity.getContentResolver(), Settings.Global.ANIMATOR_DURATION_SCALE, 1) != 1 ||
@@ -218,11 +223,17 @@ public final class ReleaseForestPerformance {
         HandlerThread samplesThread = new HandlerThread("m706-frame-metrics"); samplesThread.start();
         ArrayList<JSONObject> samples = new ArrayList<>();
         AtomicLong start = new AtomicLong(Long.MAX_VALUE), end = new AtomicLong(Long.MAX_VALUE), lost = new AtomicLong();
+        AtomicLong previousCallback = new AtomicLong(Long.MIN_VALUE);
+        CountDownLatch tailDelivered = new CountDownLatch(1);
         Window.OnFrameMetricsAvailableListener listener = (window, metrics, dropped) -> {
             long timestamp = metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP);
+            long previous = previousCallback.getAndSet(timestamp);
+            // A tail callback can report drops belonging to the last measured frames.
+            // Count conservatively when its delivery interval overlaps the window.
+            if (timestamp >= start.get() && previous < end.get()) lost.addAndGet(dropped);
+            if (end.get() != Long.MAX_VALUE && timestamp >= end.get()) tailDelivered.countDown();
             if (timestamp >= start.get() && timestamp < end.get()) {
                 synchronized (samples) {
-                    lost.addAndGet(dropped);
                     if (samples.size() >= 4096) { lost.incrementAndGet(); return; }
                     try { samples.add(new JSONObject().put("intended_vsync_ns", timestamp)
                         .put("total_duration_ns", metrics.getMetric(FrameMetrics.TOTAL_DURATION))
@@ -236,6 +247,7 @@ public final class ReleaseForestPerformance {
         Gesture gesture = new Gesture(instrument, bounds);
         JSONArray actions = new JSONArray();
         boolean marker = false;
+        boolean listenerRemoved = false;
         try {
             long warm = System.nanoTime();
             while (System.nanoTime() - warm < 5 * SECOND) { gesture.move((System.nanoTime() - warm) / 1e9); SystemClock.sleep(16); }
@@ -269,8 +281,14 @@ public final class ReleaseForestPerformance {
             }
             Trace.endSection(); marker = false;
             gesture.stop();
-            // Drain callbacks without widening the fixed intended-vsync population.
-            SystemClock.sleep(500);
+            // Force an unmeasured sentinel frame to report any trailing drops,
+            // then detach and stop the callback thread before freezing its data.
+            instrument.runOnMainSync(() -> activity.getWindow().getDecorView().invalidate());
+            if (!tailDelivered.await(5, TimeUnit.SECONDS)) throw new AssertionError("FrameMetrics tail not delivered");
+            instrument.runOnMainSync(() -> activity.getWindow().removeOnFrameMetricsAvailableListener(listener));
+            listenerRemoved = true;
+            samplesThread.quitSafely(); samplesThread.join(2000);
+            if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not quiesce");
             JSONArray population;
             synchronized (samples) { population = new JSONArray(samples); }
             AccessibilityNodeInfo selectedNode = find(instrument.getUiAutomation().getRootInActiveWindow(), "Tree ", true);
@@ -285,11 +303,23 @@ public final class ReleaseForestPerformance {
                 .put("framework_sample_population", "INTENDED_VSYNC_TIMESTAMP in fixed 20s window; first draws included")
                 .put("performance_grade", "NOT GRADED: pinned external extractor required");
         } finally {
-            if (marker) Trace.endSection();
-            gesture.stop();
-            instrument.runOnMainSync(() -> activity.getWindow().removeOnFrameMetricsAvailableListener(listener));
-            samplesThread.quitSafely(); samplesThread.join(2000);
-            if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not stop");
+            try {
+                if (marker) Trace.endSection();
+                gesture.stop();
+            } finally {
+                try {
+                    if (!listenerRemoved) instrument.runOnMainSync(() -> activity.getWindow().removeOnFrameMetricsAvailableListener(listener));
+                } finally {
+                    samplesThread.quitSafely(); samplesThread.join(2000);
+                    synchronized (samples) {
+                        partialEvidence = new JSONObject().put("scene", sceneName).put("scene_sha256", sceneHash)
+                            .put("samples", new JSONArray(samples)).put("lost_samples", lost.get())
+                            .put("collection_complete", false).put("callback_thread_stopped", !samplesThread.isAlive())
+                            .put("performance_grade", "NOT RUN: incomplete collection evidence only").toString();
+                    }
+                    if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not stop");
+                }
+            }
         }
     }
 }
