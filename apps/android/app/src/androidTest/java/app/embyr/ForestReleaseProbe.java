@@ -1,8 +1,5 @@
 package app.embyr;
 
-import android.app.Activity;
-import android.view.View;
-import androidx.compose.ui.Modifier;
 import androidx.compose.runtime.Composer;
 import androidx.compose.ui.platform.ComposeView;
 import app.embyr.core.model.WorldNodeDto;
@@ -49,8 +46,8 @@ public final class ForestReleaseProbe {
             ComposeView view = (ComposeView) match.newInstance(activity);
             Function2<Composer, Integer, Unit> header = (composer, flags) -> Unit.INSTANCE;
             Function2<Composer, Integer, Unit> content = (composer, flags) -> {
-                ForestCanvasKt.NativeForest(nodes, Collections.emptyMap(), Modifier.Companion,
-                    true, header, composer, 0, 0);
+                ForestCanvasKt.NativeForest(nodes, Collections.emptyMap(), null,
+                    true, header, composer, 0, 4);
                 return Unit.INSTANCE;
             };
             view.setContent(content);
