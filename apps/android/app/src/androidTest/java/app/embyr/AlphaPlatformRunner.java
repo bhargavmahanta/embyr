@@ -5,6 +5,7 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
 import android.util.Base64;
@@ -115,16 +116,11 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS)) {
             if (!db.isReadOnly() || db.getVersion() != 4) throw new AssertionError("Readonly Room4 required");
             result.put("room_version", db.getVersion());
-            // A deferred read transaction holds one consistent WAL snapshot.
-            db.execSQL("BEGIN DEFERRED TRANSACTION");
-            try {
-                result.put("commands", rows(db, "SELECT * FROM commands WHERE ownerId=? ORDER BY createdAtEpochMs,id LIMIT 2001"));
-                result.put("world_meta", rows(db, "SELECT * FROM world_meta WHERE ownerId=?"));
-                result.put("world_nodes", rows(db, "SELECT * FROM world_nodes WHERE ownerId=? ORDER BY objectId LIMIT 2001"));
-                result.put("world_regions", rows(db, "SELECT * FROM world_regions WHERE ownerId=? ORDER BY objectId LIMIT 2001"));
-                result.put("journey", rows(db, "SELECT * FROM journey_state WHERE ownerId=?"));
-            } finally {
-                db.execSQL("ROLLBACK");
+            // Android intercepts BEGIN as an exclusive transaction. Use one
+            // compound SELECT and require its complete result in one cursor window.
+            JSONObject snapshot = readSnapshot(db);
+            for (String table : new String[] { "commands", "world_meta", "world_nodes", "world_regions", "journey_state" }) {
+                result.put(table.equals("journey_state") ? "journey" : table, snapshot.getJSONArray(table));
             }
         }
         JSONObject stores = new JSONObject();
@@ -142,27 +138,55 @@ public final class AlphaPlatformRunner extends Instrumentation {
         return result;
     }
 
-    private JSONArray rows(SQLiteDatabase db, String sql) throws Exception {
-        JSONArray result = new JSONArray();
-        try (Cursor cursor = db.rawQuery(sql, new String[] { owner })) {
-            while (cursor.moveToNext()) {
-                JSONObject row = new JSONObject();
-                for (int index = 0; index < cursor.getColumnCount(); index++) {
-                    String name = cursor.getColumnName(index);
-                    switch (cursor.getType(index)) {
-                        case Cursor.FIELD_TYPE_NULL: row.put(name, JSONObject.NULL); break;
-                        case Cursor.FIELD_TYPE_INTEGER: row.put(name, cursor.getLong(index)); break;
-                        case Cursor.FIELD_TYPE_FLOAT: row.put(name, cursor.getDouble(index)); break;
-                        case Cursor.FIELD_TYPE_BLOB:
-                            row.put(name, new JSONObject().put("base64", Base64.encodeToString(cursor.getBlob(index), Base64.NO_WRAP)));
-                            break;
-                        default: row.put(name, cursor.getString(index));
-                    }
+    private JSONObject readSnapshot(SQLiteDatabase db) throws Exception {
+        String[] tables = { "commands", "world_meta", "world_nodes", "world_regions", "journey_state" };
+        String[] keys = { "id", "ownerId", "objectId", "objectId", "ownerId" };
+        java.util.ArrayList<String> terms = new java.util.ArrayList<>();
+        java.util.ArrayList<String> bindings = new java.util.ArrayList<>();
+        for (int table = 0; table < tables.length; table++) {
+            try (Cursor schema = db.rawQuery("PRAGMA table_info(\"" + tables[table] + "\")", null)) {
+                int index = schema.getColumnIndexOrThrow("name");
+                while (schema.moveToNext()) {
+                    String column = schema.getString(index);
+                    if (!column.matches("[A-Za-z0-9_]+")) throw new AssertionError("Unexpected schema column");
+                    terms.add("SELECT '" + tables[table] + "' AS kind, \"" + keys[table] + "\" AS row_key, '" + column +
+                        "' AS field, \"" + column + "\" AS value FROM (SELECT * FROM \"" + tables[table] +
+                        "\" WHERE ownerId=? LIMIT 2001)");
+                    bindings.add(owner);
                 }
-                result.put(row);
-                if (result.length() > 2000) throw new AssertionError("Truncated storage evidence is not allowed");
             }
         }
+        if (terms.isEmpty() || terms.size() > 100) throw new AssertionError("Unexpected Room4 schema");
+        String sql = String.join(" UNION ALL ", terms) + " ORDER BY 1,2,3";
+        java.util.Map<String, java.util.Map<String, JSONObject>> grouped = new java.util.LinkedHashMap<>();
+        for (String table : tables) grouped.put(table, new java.util.LinkedHashMap<>());
+        try (Cursor cursor = db.rawQuery(sql, bindings.toArray(new String[0]))) {
+            boolean hasRow = cursor.moveToFirst();
+            if (!(cursor instanceof SQLiteCursor)) throw new AssertionError("Native SQLite cursor required");
+            android.database.CursorWindow window = ((SQLiteCursor) cursor).getWindow();
+            if (hasRow && (window == null || window.getStartPosition() != 0 || window.getNumRows() != cursor.getCount())) {
+                throw new AssertionError("Snapshot would require cursor-window re-execution");
+            }
+            if (hasRow) do {
+                String kind = cursor.getString(0), key = cursor.getString(1), field = cursor.getString(2);
+                java.util.Map<String, JSONObject> rows = grouped.get(kind);
+                if (rows == null) throw new AssertionError("Unexpected table kind");
+                JSONObject row = rows.get(key);
+                if (row == null) { row = new JSONObject(); rows.put(key, row); }
+                if (rows.size() > 2000) throw new AssertionError("Truncated storage evidence is not allowed");
+                switch (cursor.getType(3)) {
+                    case Cursor.FIELD_TYPE_NULL: row.put(field, JSONObject.NULL); break;
+                    case Cursor.FIELD_TYPE_INTEGER: row.put(field, cursor.getLong(3)); break;
+                    case Cursor.FIELD_TYPE_FLOAT: row.put(field, cursor.getDouble(3)); break;
+                    case Cursor.FIELD_TYPE_BLOB:
+                        row.put(field, new JSONObject().put("base64", Base64.encodeToString(cursor.getBlob(3), Base64.NO_WRAP)));
+                        break;
+                    default: row.put(field, cursor.getString(3));
+                }
+            } while (cursor.moveToNext());
+        }
+        JSONObject result = new JSONObject();
+        for (String table : tables) result.put(table, new JSONArray(grouped.get(table).values()));
         return result;
     }
 }
