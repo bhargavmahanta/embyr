@@ -123,7 +123,7 @@ data class NodePayloadDto(
 
 object WorldPayloadSerializer : JsonContentPolymorphicSerializer<WorldPayloadDto>(WorldPayloadDto::class) {
     override fun selectDeserializer(element: JsonElement): DeserializationStrategy<WorldPayloadDto> =
-        if ("region_key" in element.jsonObject.getValue("object").jsonObject) {
+        if ("region_key" in (element.jsonObject["object"] ?: throw kotlinx.serialization.SerializationException("World replacement object missing")).jsonObject) {
             RegionPayloadDto.serializer()
         } else {
             NodePayloadDto.serializer()
@@ -163,3 +163,9 @@ data class WorldResyncRequiredDto(
     @SerialName("request_id") val requestId: String,
     val details: WorldResyncDetailsDto,
 )
+
+@Serializable
+data class InterestPutDto(@SerialName("base_version") val baseVersion: Long, val preference: String)
+
+@Serializable
+data class InterestResultDto(@SerialName("entity_id") val entityId: String, val preference: String, val version: Long)

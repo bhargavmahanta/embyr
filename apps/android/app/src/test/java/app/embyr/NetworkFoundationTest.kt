@@ -22,6 +22,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import kotlinx.serialization.json.*
 
 class NetworkFoundationTest {
     private lateinit var server: MockWebServer
@@ -219,6 +221,89 @@ class NetworkFoundationTest {
         assertEquals("UNMAPPED_IDENTITY", error.details?.code)
         assertEquals("request-123", error.details?.requestId)
         assertEquals(0, auth.refreshes)
+    }
+
+    @Test fun worldRejectsUnknownPublicFields() = runBlocking {
+        val body = JsonObject(m6Example("world_empty") + ("unexpected" to JsonPrimitive("hidden")))
+        server.enqueue(MockResponse().setBody(body.toString()))
+        val result = RetrofitEmbyrApi(config, auth).world()
+        assertTrue(result is ApiResult.Failure)
+        assertEquals(TransportError.Decode(200), (result as ApiResult.Failure).error)
+    }
+
+    @Test fun worldRejectsUnsupportedLayout() = runBlocking {
+        val body = JsonObject(m6Example("world_empty") + ("layout_version" to JsonPrimitive(2)))
+        server.enqueue(MockResponse().setBody(body.toString()))
+        assertTrue(RetrofitEmbyrApi(config, auth).world() is ApiResult.Failure)
+    }
+
+    @Test fun worldRejectsOutOfBoundsCoordinates() = runBlocking {
+        val original = m6Example("world_populated")
+        val nodes = original.getValue("nodes").jsonArray.toMutableList()
+        nodes[0] = JsonObject(nodes[0].jsonObject + ("logical_x" to JsonPrimitive(1.5)))
+        server.enqueue(MockResponse().setBody(JsonObject(original + ("nodes" to JsonArray(nodes))).toString()))
+        assertTrue(RetrofitEmbyrApi(config, auth).world() is ApiResult.Failure)
+    }
+
+    @Test fun deltaRejectsTypeAndReplacementMismatch() = runBlocking {
+        val original = m6Example("delta_page_1")
+        val changes = original.getValue("changes").jsonArray.toMutableList()
+        changes[0] = JsonObject(changes[0].jsonObject + ("type" to JsonPrimitive("NODE_ADDED")))
+        server.enqueue(MockResponse().setBody(JsonObject(original + ("changes" to JsonArray(changes))).toString()))
+        assertTrue(RetrofitEmbyrApi(config, auth).worldChanges(0) is ApiResult.Failure)
+    }
+
+    @Test fun memoryStrictnessAndPutNeverReplayOn401() = runBlocking {
+        val api = RetrofitEmbyrApi(config, auth)
+        val original = m6Example("memory_current")
+        server.enqueue(MockResponse().setBody(original.toString()))
+        assertTrue(api.memorySummary() is ApiResult.Success)
+        assertEquals("/api/v1/memory/summary", server.takeRequest().path)
+        server.enqueue(MockResponse().setBody(JsonObject(original + ("extra" to JsonPrimitive(true))).toString()))
+        assertEquals(TransportError.Decode(200), (api.memorySummary() as ApiResult.Failure).error)
+        server.takeRequest()
+        server.enqueue(MockResponse().setResponseCode(401))
+        val body = "{\"base_version\":2,\"preference\":\"LESS\"}"
+        assertTrue(api.updateInterest("00000000-0000-0000-0000-000000000001", body.toByteArray()) is ApiResult.Failure)
+        val request = server.takeRequest()
+        assertEquals("PUT", request.method)
+        assertEquals(body, request.body.readUtf8())
+        assertEquals(null, request.getHeader("Idempotency-Key"))
+        assertEquals(0, auth.refreshes)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test fun worldDeltaRequestsConfiguredPageBound() = runBlocking {
+        server.enqueue(MockResponse().setBody(m6Example("delta_page_1").toString()))
+        assertTrue(RetrofitEmbyrApi(config, auth).worldChanges(0, 500) is ApiResult.Success)
+        assertEquals("/api/v1/world/changes?after_revision=0&limit=500", server.takeRequest().path)
+    }
+
+    @Test fun interestPutDoesNotFollow503RetryAfterZero() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After","0"))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        val result = RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{\"base_version\":1,\"preference\":\"MORE\"}".toByteArray())
+        assertTrue(result is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+    @Test fun interestPutDoesNotFollow408() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(408))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        assertTrue(RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{}".toByteArray()) is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+    @Test fun interestPutDoesNotFollowRedirect() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(307).setHeader("Location",server.url("redirected")))
+        server.enqueue(MockResponse().setBody("""{"entity_id":"00000000-0000-0000-0000-000000000001","preference":"MORE","version":2}"""))
+        assertTrue(RetrofitEmbyrApi(config,auth).updateInterest("00000000-0000-0000-0000-000000000001","{}".toByteArray()) is ApiResult.Failure)
+        assertEquals(1,server.requestCount)
+    }
+
+    private fun m6Example(name: String): JsonObject {
+        val root = generateSequence(File(requireNotNull(System.getProperty("user.dir"))).canonicalFile) { it.parentFile }
+            .first { File(it,"docs/api/fixtures/m6-v1.json").isFile }
+        return Json.parseToJsonElement(File(root,"docs/api/fixtures/m6-v1.json").readText()).jsonObject
+            .getValue("public_examples").jsonObject.getValue(name).jsonObject
     }
 
     private class FakeAuth : AuthGateway {

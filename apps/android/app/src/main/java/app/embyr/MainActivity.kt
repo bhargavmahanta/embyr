@@ -21,13 +21,16 @@ class MainActivity : ComponentActivity() {
     private val explorations by viewModels<ExplorationViewModel> { ExplorationViewModel.Factory((application as EmbyrApplication).container) }
     private val assessments by viewModels<AssessmentViewModel> { AssessmentViewModel.Factory((application as EmbyrApplication).container) }
 
+    private val memory by viewModels<app.embyr.feature.memory.MemoryViewModel> { app.embyr.feature.memory.MemoryViewModel.Factory((application as EmbyrApplication).container) }
+    private val world by viewModels<app.embyr.feature.world.WorldViewModel> { app.embyr.feature.world.WorldViewModel.Factory((application as EmbyrApplication).container) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val themeFlow = (application as EmbyrApplication).container.uiPreferences.theme
         setContent {
             val theme by themeFlow.collectAsStateWithLifecycle(initialValue = ThemeChoice.SYSTEM)
-            EmbyrApp(viewModel, theme, explorations, assessments)
+            EmbyrApp(viewModel, theme, explorations, assessments, memory, world)
         }
     }
 }

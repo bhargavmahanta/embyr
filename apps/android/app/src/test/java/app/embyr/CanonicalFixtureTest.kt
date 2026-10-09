@@ -44,19 +44,19 @@ class CanonicalFixtureTest {
             val value = wrapper["value"] ?: wrapped
             when {
                 name.startsWith("memory") -> {
-                    val dto = json.decodeFromJsonElement(MemorySummaryDto.serializer(), value)
+                    val dto = app.embyr.core.model.M6Contract.memory(json.decodeFromJsonElement(MemorySummaryDto.serializer(), value))
                     assertEquals("memory-summary/v1", dto.contractVersion)
                 }
                 name.startsWith("world") -> {
-                    val dto = json.decodeFromJsonElement(WorldSnapshotDto.serializer(), value)
+                    val dto = app.embyr.core.model.M6Contract.snapshot(json.decodeFromJsonElement(WorldSnapshotDto.serializer(), value))
                     assertTrue(dto.revision >= 0)
                 }
                 name.startsWith("delta") -> {
-                    val dto = json.decodeFromJsonElement(WorldDeltaPageDto.serializer(), value)
+                    val dto = app.embyr.core.model.M6Contract.delta(json.decodeFromJsonElement(WorldDeltaPageDto.serializer(), value))
                     assertTrue(dto.currentRevision >= dto.toRevision)
                 }
                 name.startsWith("resync") -> {
-                    val dto = json.decodeFromJsonElement(WorldResyncRequiredDto.serializer(), value)
+                    val dto = app.embyr.core.model.M6Contract.resync(json.decodeFromJsonElement(WorldResyncRequiredDto.serializer(), value))
                     assertEquals("WORLD_RESYNC_REQUIRED", dto.code)
                 }
                 else -> error("Unreviewed public example: $name")

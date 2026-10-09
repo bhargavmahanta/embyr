@@ -34,6 +34,7 @@ data class WorldMetaEntity(
     val layoutVersion: Int,
     val generationSeed: String,
     val committedAtEpochMs: Long,
+    @androidx.room.ColumnInfo(defaultValue = "0") val cacheGeneration: Long = 0,
 )
 
 @Entity(tableName = "world_regions", primaryKeys = ["ownerId", "objectId"])

@@ -317,7 +317,9 @@ class JourneyFlowTest {
             return decisionResults.removeFirst()
         }
         override suspend fun world(): ApiResult<WorldSnapshotDto> = error("Unused")
-        override suspend fun worldChanges(afterRevision: Long): ApiResult<WorldDeltaPageDto> = error("Unused")
+        override suspend fun memorySummary(): ApiResult<app.embyr.core.model.MemorySummaryDto> = error("Unused")
+        override suspend fun updateInterest(entityId: String, canonicalPayload: ByteArray): ApiResult<app.embyr.core.model.InterestResultDto> = error("Unused")
+        override suspend fun worldChanges(afterRevision: Long, limit: Int): ApiResult<WorldDeltaPageDto> = error("Unused")
         override suspend fun nextRecommendation(canonicalPayload: ByteArray, idempotencyKey: String): ApiResult<RecommendationResult> {
             recommendationCalls += idempotencyKey to canonicalPayload.decodeToString()
             return recommendationResults.removeFirst()

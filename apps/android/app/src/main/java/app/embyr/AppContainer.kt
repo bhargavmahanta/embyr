@@ -25,6 +25,7 @@ import app.embyr.core.storage.DataStoreUiPreferences
 import app.embyr.core.storage.EmbyrDatabase
 import app.embyr.core.storage.MIGRATION_1_2
 import app.embyr.core.storage.MIGRATION_2_3
+import app.embyr.core.storage.MIGRATION_3_4
 import app.embyr.core.storage.RoomLearningStore
 import app.embyr.core.storage.RoomCommandOutbox
 import app.embyr.core.storage.RoomWorldStore
@@ -44,7 +45,7 @@ class AppContainer(private val context: Context) {
         context.applicationContext,
         EmbyrDatabase::class.java,
         "embyr-private.db",
-    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     val commandOutbox: CommandOutbox = RoomCommandOutbox(database.commandDao(), ownerSession)
     val commandDispatcher = CommandDispatcher(commandOutbox, ownerSession)
     val learningStore = RoomLearningStore(database.learningDao(), ownerSession)
@@ -58,5 +59,19 @@ class AppContainer(private val context: Context) {
     }
     val journeyStore = RoomJourneyStore(database.journeyDao(), ownerSession)
     val worldStore: WorldStore = RoomWorldStore(database, ownerSession)
+    val memoryStore = app.embyr.core.storage.RoomMemoryStore(database, ownerSession)
+    val memory = app.embyr.feature.memory.MemoryRepository(embyrApi, ownerSession, memoryStore)
+    val world = app.embyr.feature.world.WorldRepository(embyrApi, ownerSession, worldStore)
+    suspend fun knownWorldNames(binding: app.embyr.auth.OwnerBinding): Map<Pair<String,Long>,String> {
+        ownerSession.requireActive(binding)
+        val rows = database.learningDao().knownExplorations(binding.ownerId)
+        ownerSession.requireActive(binding)
+        return rows.mapNotNull { row ->
+            val detail = runCatching { row.detailJson?.let { app.embyr.core.storage.LearningJson.codec.decodeFromString(app.embyr.core.model.ExplorationDetailDto.serializer(), it) } }.getOrNull() ?: return@mapNotNull null
+            val entity = detail.entity ?: return@mapNotNull null
+            if (detail.id != row.explorationId || entity.id != detail.entityId || entity.entityVersion != detail.entityVersion) return@mapNotNull null
+            (detail.entityId to detail.entityVersion) to entity.title
+        }.toMap()
+    }
     val uiPreferences: UiPreferences = DataStoreUiPreferences(context)
 }
