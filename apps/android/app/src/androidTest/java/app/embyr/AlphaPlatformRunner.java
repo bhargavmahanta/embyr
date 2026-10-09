@@ -20,6 +20,7 @@ public final class AlphaPlatformRunner extends Instrumentation {
     private static final String CLASS = "app.embyr.AlphaPlatformRunner";
     private static final String TEST = "nonDebuggableAlphaLauncherCanBeInstrumented";
     private boolean storage;
+    private boolean forest;
     private String owner;
 
     @Override public void onCreate(Bundle arguments) {
@@ -33,8 +34,9 @@ public final class AlphaPlatformRunner extends Instrumentation {
         }
         String operation = arguments.getString("operation", "launch");
         storage = "storage".equals(operation);
+        forest = "forest".equals(operation);
         owner = arguments.getString("owner", "");
-        if ((!storage && !"launch".equals(operation)) || (storage &&
+        if ((!storage && !forest && !"launch".equals(operation)) || (storage &&
             !owner.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))) {
             Bundle result = new Bundle();
             result.putString("shortMsg", "Unsupported Alpha probe arguments");
@@ -47,7 +49,7 @@ public final class AlphaPlatformRunner extends Instrumentation {
     private Bundle status() {
         Bundle status = new Bundle();
         status.putString("class", CLASS);
-        status.putString("test", storage ? "readonlyOwnerStorageCanBeInspected" : TEST);
+        status.putString("test", storage ? "readonlyOwnerStorageCanBeInspected" : (forest ? "productionForestCanBePresented" : TEST));
         status.putInt("numtests", 1);
         status.putInt("current", 1);
         return status;
@@ -80,6 +82,12 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity = startActivitySync(intent);
             waitForIdleSync();
+            if (forest) {
+                final Activity foreground = activity;
+                runOnMainSync(() -> ForestReleaseProbe.present((MainActivity) foreground));
+                waitForIdleSync();
+                try { Thread.sleep(2000); } catch (InterruptedException e) { throw new AssertionError(e); }
+            }
             final Activity launched = activity;
             runOnMainSync(() -> {
                 if (launched.isFinishing() || !"app.embyr.alpha".equals(launched.getPackageName())) {
