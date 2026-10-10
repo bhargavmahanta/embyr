@@ -31,7 +31,7 @@ For each candidate, record reviewed source/tree, public configuration hash, tool
 
 ## Installation and rollback
 
-Every launcher must verify the approved physical Samsung serial and model/API, then pass that serial explicitly. Keep ADB bound to loopback. Never select an emulator. Before installing, inspect both packages' current UID, version and certificates and save their identities locally.
+Every launcher must verify the independently approved physical-device profile, serial and model/API, then pass that serial explicitly. Keep each device's records separate and ADB bound to loopback. Never select an emulator. Before installing, inspect both packages' current UID, version and certificates and save their identities locally. On Android16, use exact package UID enumeration with explicit Android user0 and verify the current user; do not assume the older dumpsys `userId` field is present or confuse an app ID with another user's UID.
 
 Fresh installation requires `app.embyr.alpha` to be absent. Use the verified signed APK. Record installation, startup and real journey separately. A compatible upgrade uses `adb -s <approved-serial> install -r <verified-apk>` only after package, signing certificate and non-decreasing version checks. Capture active flow, owner, outbox, draft and World stamps before/after. Never uninstall or clear `app.embyr` to manufacture fresh-install evidence.
 
@@ -72,3 +72,11 @@ Provider backup retention is a separate operator responsibility; record its poli
 Maintain a protected seven-item #121 matrix and separate ten-item #115 exit matrix with PASS/FAIL/NOT RUN, exact source/build/backend/runtime/environment/device and limitations. Historical M7-05 results retain their identities. Freeze and review fault/measurement harnesses before execution; synthetic data never enters Room or the backend. Capture actual phone settings before testing and restore them afterward.
 
 The fixed physical release performance protocol is documented in [the profiling gate](m7-06-performance-protocol.md). Retain every attempt and every valid measurement. Unavailable metrics or failed thresholds keep the gate open. Obtain exact-head source review, required CI/security checks, verified merge/main CI and independent seven-item acceptance before closing #121. Then conduct a separate independent umbrella exit review before closing #115/milestone 7. Stop after the M7 verdict.
+
+## Profiling preconditions and cleanup
+
+Check both the host launcher and installed test harness's actual preconditions before collection. The retained harness requires all accessibility services disabled, including non-TalkBack services. The operator selected temporary suspension of the new phone's Phone Link/Wispr Flow accessibility services for profiling. Review the exact suspension/restoration procedure, capture their original service list and enabled state, and restore both afterward. Keep that profiling environment consistent across qualification, baseline and optimized cases; do not silently disable additional services.
+
+Capture font, animation, motion smoothness, brightness policy/value and accessibility settings before any changes. Restore the requested brightness while manual policy is active and verify its readback before restoring the original automatic policy. Verify static settings separately: an adaptive brightness value can change after automatic policy is restored. Record the requested, verified manual and subsequent adaptive values without claiming that the adaptive numeric readout is fixed. Restore the operator's original refresh setting when the bounded profiling session ends.
+
+Retained APK/AAB static auditing supports signature, manifest, backup exclusions and configuration checks; runtime log/private-content checks and final source/merge correspondence still need evidence. The current bundle's embedded version-control metadata lacks a commit SHA, so retain external frozen build-input/source/artifact receipts. A local encrypted signing backup still requires verified off-device custody by the responsible operator. None of these supporting checkpoints closes an acceptance item.

@@ -1,10 +1,10 @@
 # M7-06 physical release performance gate
 
-Protocol approved during planning before measurements. Collector, extractor and scene source hashes must receive independent review and be frozen before baseline collection. No M7-06 results have been produced yet.
+Protocol approved during planning before measurements. Collector, extractor, device profile and scene source hashes must receive independent review and be frozen before collection. The retained Samsung SM-M127G attempt is NOT RUN: seven required measured app frame ends were incomplete. Preserve its ledger, traces and reviews; it is not a complete baseline or a Samsung performance pass.
 
 ## Comparable setup
 
-Use the actual signed, minified, non-debuggable, shell-profileable `app.embyr.alpha` APK on the serial-explicit physical Samsung SM-M127G/API33, at 60Hz ±0.5Hz. First prove that same-signature instrumentation can exercise this release without broad R8 keep rules. Synthetic scenes belong only to that harness and render production `NativeForest` with its 320dp viewport; never persist them in Room or the backend. Preserve the deterministic M7-05 scene generator and record its hash.
+Use the actual signed, minified, non-debuggable, shell-profileable `app.embyr.alpha` APK on an explicitly reviewed physical device at 60Hz ±0.5Hz. The original Samsung SM-M127G/API33 remains unqualified. The operator supplied a Samsung SM-A376E/API36 for separate qualification; availability and suitable display settings alone do not qualify its measurement source. First prove that same-signature instrumentation can exercise this release without broad R8 keep rules. Synthetic scenes belong only to that harness and render production `NativeForest` with its 320dp viewport; never persist them in Room or the backend. Preserve the deterministic M7-05 scene generator and record its hash.
 
 Record APK/source/tree/build inputs, certificate, power/charging, brightness, compilation, thermal state and actual pre-run accessibility/settings. Profile at font scale 1.0, animator scale 1.0 and TalkBack off; restore the captured settings afterward. Keep these conditions comparable between baseline and final runs. Thermal status no greater than LIGHT is a start precondition; allow at most two five-minute cooling retries before a run, recording every attempt. Heating during a valid run never permits discarding it.
 
@@ -14,6 +14,16 @@ Use digest-verified official tools:
 |---|---|
 | Perfetto v58.2 Linux amd64 ZIP | `32c739f71b2d39721afd294c0b038f2499a44a71b5b6bcdd85b83faca0b240b9` |
 | bundletool 1.18.3 JAR | `a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29` |
+
+## Alternate-device qualification
+
+Before a benchmark series, independently review the exact device profile, artifacts, collector, extractor, configuration and source-integrity checks. Keep separate device, qualification and benchmark ledgers. Inspect existing installations before installing; preserve unknown signing identities and account data. Reuse hash-verified artifacts when their inputs are unchanged.
+
+Qualify with one bounded synthetic500 capture using the existing five-second warmup, twenty-second workload and at most45-second recorder duration. Establish coverage from raw eligible starts before filtering. Require complete app actual/expected endpoints, CPU-frame joins and unique named-SurfaceFlinger display-token/presentation associations. Validate integer timestamps, trusted service bounds and the MONOTONIC/BOOTTIME relationship covering both original windows. A periodic snapshot setting alone does not prove that bracketing clock observations exist. Missing, sentinel, unsupported-clock or ambiguous data remains NOT RUN; never reconstruct missing timestamps or discard incomplete frames.
+
+Require at least100 complete samples in each independent population and zero loss. QUALIFIED establishes measurement-source reliability only; it is neither a baseline nor performance PASS. Retain threshold outcomes without using them to choose qualification attempts. Preserve all failures; any revised procedure or continuation needs independent review, with no automatic retry. Obtain independent qualification-evidence approval before the nine-case baseline, and repeat integrity checks in every case.
+
+Collect baseline and optimized results on the same qualified device, OS, display and frozen scene inputs. A device or material collector change requires a reviewed new comparison and retained history. Do not compare devices as optimization evidence or claim that another device's results qualify the Samsung SM-M127G.
 
 ## Workload and populations
 
