@@ -216,7 +216,15 @@ public final class ReleaseForestPerformance {
         ComposeView[] view = new ComposeView[1];
         instrument.runOnMainSync(() -> { try { view[0] = present(activity, nodes); } catch (Exception e) { throw new AssertionError(e); } });
         instrument.waitForIdleSync();
-        AccessibilityNodeInfo canvas = find(instrument.getUiAutomation().getRootInActiveWindow(), FOREST, false);
+        // Main-loop idle does not imply Compose's first frame/accessibility tree
+        // is published. Wait only before warmup; never shorten the fixed window.
+        long visibleDeadline = SystemClock.uptimeMillis() + 5000;
+        AccessibilityNodeInfo canvas;
+        do {
+            canvas = find(instrument.getUiAutomation().getRootInActiveWindow(), FOREST, false);
+            if (canvas != null && canvas.isVisibleToUser()) break;
+            SystemClock.sleep(50);
+        } while (SystemClock.uptimeMillis() < visibleDeadline);
         if (canvas == null || !canvas.isVisibleToUser()) throw new AssertionError("Visible production forest required");
         Rect bounds = new Rect(); canvas.getBoundsInScreen(bounds);
         if (bounds.width() <= 0 || bounds.height() <= 0) throw new AssertionError("Invalid forest viewport");
