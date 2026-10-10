@@ -155,11 +155,19 @@ public final class ReleaseForestPerformance {
         return null;
     }
 
-    private static void click(Instrumentation instrument, String label, boolean prefix) {
+    private static String click(Instrumentation instrument, String label, boolean prefix) {
         AccessibilityNodeInfo node = find(instrument.getUiAutomation().getRootInActiveWindow(), label, prefix);
+        String identity = null;
+        if (prefix) {
+            String text = node == null ? "" : String.valueOf(node.getText());
+            java.util.regex.Matcher match = java.util.regex.Pattern.compile("^Tree ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) ").matcher(text);
+            if (!match.find()) throw new AssertionError("Exact synthetic/generic tree identity required");
+            identity = "Tree " + match.group(1) + " ";
+        }
         while (node != null && !node.isClickable()) node = node.getParent();
         if (node == null || !node.isVisibleToUser() || !node.isEnabled() || !node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             throw new AssertionError("Required production action unavailable");
+        return identity;
     }
 
     private static final class Gesture {
@@ -256,6 +264,8 @@ public final class ReleaseForestPerformance {
         JSONArray actions = new JSONArray();
         boolean marker = false;
         boolean listenerRemoved = false;
+        String selectedTree = null;
+        JSONObject selectionObservation = new JSONObject();
         try {
             long warm = System.nanoTime();
             while (System.nanoTime() - warm < 5 * SECOND) { gesture.move((System.nanoTime() - warm) / 1e9); SystemClock.sleep(16); }
@@ -272,7 +282,7 @@ public final class ReleaseForestPerformance {
                     actions.put(new JSONObject().put("action", "reset").put("elapsed_ns", elapsed));
                 }
                 if (!selected && elapsed >= 10 * SECOND) {
-                    gesture.stop(); click(instrument, "Tree ", true); selected = true;
+                    gesture.stop(); selectedTree = click(instrument, "Tree ", true); selected = true;
                     actions.put(new JSONObject().put("action", "selection").put("elapsed_ns", elapsed));
                 }
                 if (!"real".equals(sceneName) && ((!grown && elapsed >= 15 * SECOND) || (!corrected && elapsed >= 17 * SECOND))) {
@@ -299,8 +309,14 @@ public final class ReleaseForestPerformance {
             if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not quiesce");
             JSONArray population;
             synchronized (samples) { population = new JSONArray(samples); }
-            AccessibilityNodeInfo selectedNode = find(instrument.getUiAutomation().getRootInActiveWindow(), "Tree ", true);
-            boolean selectionObserved = selectedNode != null && String.valueOf(selectedNode.getText()).contains("selected");
+            AccessibilityNodeInfo selectedNode = selectedTree == null ? null : find(instrument.getUiAutomation().getRootInActiveWindow(), selectedTree, true);
+            selectionObservation.put("identity_match", selectedNode != null);
+            while (selectedNode != null && !selectedNode.isClickable()) selectedNode = selectedNode.getParent();
+            selectionObservation.put("clickable_ancestor", selectedNode != null)
+                .put("visible", selectedNode != null && selectedNode.isVisibleToUser())
+                .put("enabled", selectedNode != null && selectedNode.isEnabled())
+                .put("selected", selectedNode != null && selectedNode.isSelected());
+            boolean selectionObserved = selectedNode != null && selectedNode.isVisibleToUser() && selectedNode.isEnabled() && selectedNode.isSelected();
             if (!selectionObserved) throw new AssertionError("Selection state was not observed");
             return new JSONObject().put("scene", sceneName).put("node_count", scene.length()).put("scene_sha256", sceneHash)
                 .put("samples", population).put("lost_samples", lost.get()).put("refresh_rate_hz", refresh)
@@ -308,6 +324,7 @@ public final class ReleaseForestPerformance {
                 .put("start_thermal_status", startThermal).put("end_thermal_status", power.getCurrentThermalStatus())
                 .put("actions", actions).put("injected_motion_count", gesture.moves)
                 .put("selection_observed", selectionObserved)
+                .put("selection_observation", selectionObservation)
                 .put("framework_sample_population", "INTENDED_VSYNC_TIMESTAMP in fixed 20s window; first draws included")
                 .put("performance_grade", "NOT GRADED: pinned external extractor required");
         } finally {
@@ -323,6 +340,7 @@ public final class ReleaseForestPerformance {
                         partialEvidence = new JSONObject().put("scene", sceneName).put("scene_sha256", sceneHash)
                             .put("samples", new JSONArray(samples)).put("lost_samples", lost.get())
                             .put("collection_complete", false).put("callback_thread_stopped", !samplesThread.isAlive())
+                            .put("selection_observation", selectionObservation)
                             .put("performance_grade", "NOT RUN: incomplete collection evidence only").toString();
                     }
                     if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not stop");
