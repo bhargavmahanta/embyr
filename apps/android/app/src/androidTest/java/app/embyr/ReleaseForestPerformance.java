@@ -206,6 +206,56 @@ public final class ReleaseForestPerformance {
         }
     }
 
+    private static JSONObject buttonObservation(Instrumentation instrument, String identity) throws Exception {
+        AccessibilityNodeInfo node = find(instrument.getUiAutomation().getRootInActiveWindow(), identity, true);
+        boolean found = node != null;
+        while (node != null && !node.isClickable()) node = node.getParent();
+        return new JSONObject().put("identity_match", found).put("clickable_ancestor", node != null)
+            .put("visible", node != null && node.isVisibleToUser()).put("enabled", node != null && node.isEnabled())
+            .put("checkable", node != null && node.isCheckable()).put("checked", node != null && node.isChecked());
+    }
+
+    /** Separate bounded diagnostic, no trace/FrameMetrics/window or acceptance grade. */
+    public static JSONObject interactionDiagnostic(Instrumentation instrument, MainActivity activity) throws Exception {
+        List<WorldNodeDto> nodes = decode(synthetic(1));
+        instrument.runOnMainSync(() -> { try { present(activity, nodes); } catch (Exception failure) { throw new AssertionError(failure); } });
+        instrument.waitForIdleSync();
+        long visibleDeadline = SystemClock.uptimeMillis() + 5000;
+        AccessibilityNodeInfo canvas;
+        do {
+            canvas = find(instrument.getUiAutomation().getRootInActiveWindow(), FOREST, false);
+            if (canvas != null && canvas.isVisibleToUser()) break;
+            SystemClock.sleep(50);
+        } while (SystemClock.uptimeMillis() < visibleDeadline);
+        if (canvas == null || !canvas.isVisibleToUser()) throw new AssertionError("Diagnostic forest not visible");
+        Rect bounds = new Rect(); canvas.getBoundsInScreen(bounds);
+        if (bounds.isEmpty()) throw new AssertionError("Diagnostic forest has no bounds");
+        String identity = click(instrument, "Tree ", true);
+        JSONObject afterClick;
+        long clickDeadline = SystemClock.uptimeMillis() + 1000;
+        do {
+            afterClick = buttonObservation(instrument, identity);
+            if (afterClick.getBoolean("checked")) break;
+            SystemClock.sleep(50);
+        } while (SystemClock.uptimeMillis() < clickDeadline);
+        JSONObject result = new JSONObject().put("kind", "Unmeasured synthetic interaction diagnostic; no acceptance grade")
+            .put("after_click", afterClick);
+        Gesture gesture = new Gesture(instrument, bounds);
+        try {
+            long motionStart = SystemClock.uptimeMillis();
+            gesture.move(0);
+            result.put("after_first_move", buttonObservation(instrument, identity));
+            while (SystemClock.uptimeMillis() - motionStart < 2000) {
+                gesture.move((SystemClock.uptimeMillis() - motionStart) / 1000.0); SystemClock.sleep(16);
+            }
+            result.put("before_cancel", buttonObservation(instrument, identity));
+        } finally {
+            gesture.stop();
+        }
+        SystemClock.sleep(100);
+        return result.put("after_cancel", buttonObservation(instrument, identity));
+    }
+
     public static JSONObject collect(Instrumentation instrument, MainActivity activity, String sceneName, String owner) throws Exception {
         partialEvidence = null;
         if (!java.util.Arrays.asList("real", "100", "500").contains(sceneName)) throw new AssertionError("Unsupported scene");
