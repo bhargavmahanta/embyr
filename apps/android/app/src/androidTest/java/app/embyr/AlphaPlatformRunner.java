@@ -126,6 +126,23 @@ public final class AlphaPlatformRunner extends Instrumentation {
             sendStatus(-2, failed);
             Bundle result = new Bundle();
             result.putString("shortMsg", "Alpha framework release probe failed");
+            // Preserve bounded code locations without exception messages, arguments,
+            // database contents or user values. These diagnostics do not grade a run.
+            JSONArray causes = new JSONArray();
+            Throwable cause = failure;
+            for (int depth = 0; cause != null && depth < 4; depth++, cause = cause.getCause()) {
+                JSONArray frames = new JSONArray();
+                StackTraceElement[] locations = cause.getStackTrace();
+                for (int index = 0; index < Math.min(16, locations.length); index++) {
+                    frames.put(locations[index].toString());
+                }
+                try {
+                    causes.put(new JSONObject().put("class", cause.getClass().getName()).put("frames", frames));
+                } catch (org.json.JSONException ignored) {
+                    // Diagnostics must not replace the original failed verdict.
+                }
+            }
+            result.putString("m706_failure_locations", causes.toString());
             if (performance) {
                 String partial = ReleaseForestPerformance.partialJson();
                 if (partial != null && partial.length() <= 900_000) result.putString("m706_metrics_partial", partial);
