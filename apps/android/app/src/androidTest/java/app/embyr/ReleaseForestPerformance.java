@@ -333,7 +333,20 @@ public final class ReleaseForestPerformance {
                 }
                 if (!selected && elapsed >= 10 * SECOND) {
                     gesture.stop(); selectedTree = click(instrument, "Tree ", true); selected = true;
-                    actions.put(new JSONObject().put("action", "selection").put("elapsed_ns", elapsed));
+                    // ACTION_CLICK dispatch is asynchronous. Require the actual
+                    // exact-row state before resuming input; this wait stays IN
+                    // the measured window and its presentation gap is graded.
+                    long acknowledgmentDeadline = SystemClock.uptimeMillis() + 1000;
+                    JSONObject acknowledgment;
+                    do {
+                        acknowledgment = buttonObservation(instrument, selectedTree);
+                        if (acknowledgment.getBoolean("checked")) break;
+                        SystemClock.sleep(50);
+                    } while (SystemClock.uptimeMillis() < acknowledgmentDeadline);
+                    actions.put(new JSONObject().put("action", "selection").put("elapsed_ns", elapsed)
+                        .put("acknowledged_elapsed_ns", System.nanoTime() - measurement)
+                        .put("acknowledged", acknowledgment.getBoolean("checked")));
+                    if (!acknowledgment.getBoolean("checked")) throw new AssertionError("Selection action was not acknowledged");
                 }
                 if (!"real".equals(sceneName) && ((!grown && elapsed >= 15 * SECOND) || (!corrected && elapsed >= 17 * SECOND))) {
                     boolean correction = grown;
@@ -395,6 +408,7 @@ public final class ReleaseForestPerformance {
                             .put("samples", new JSONArray(samples)).put("lost_samples", lost.get())
                             .put("collection_complete", false).put("callback_thread_stopped", !samplesThread.isAlive())
                             .put("selection_observation", selectionObservation)
+                            .put("actions", actions).put("measurement_start_monotonic_ns", start.get()).put("measurement_end_monotonic_ns", end.get())
                             .put("performance_grade", "NOT RUN: incomplete collection evidence only").toString();
                     }
                     if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not stop");
