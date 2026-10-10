@@ -315,8 +315,12 @@ public final class ReleaseForestPerformance {
             selectionObservation.put("clickable_ancestor", selectedNode != null)
                 .put("visible", selectedNode != null && selectedNode.isVisibleToUser())
                 .put("enabled", selectedNode != null && selectedNode.isEnabled())
-                .put("selected", selectedNode != null && selectedNode.isSelected());
-            boolean selectionObserved = selectedNode != null && selectedNode.isVisibleToUser() && selectedNode.isEnabled() && selectedNode.isSelected();
+                .put("selected", selectedNode != null && selectedNode.isSelected())
+                .put("checkable", selectedNode != null && selectedNode.isCheckable())
+                .put("checked", selectedNode != null && selectedNode.isChecked());
+            // Pinned Compose maps Selected on Role.Button to Android checked;
+            // Android selected is reserved for Role.Tab in that delegate.
+            boolean selectionObserved = selectedNode != null && selectedNode.isVisibleToUser() && selectedNode.isEnabled() && selectedNode.isChecked();
             if (!selectionObserved) throw new AssertionError("Selection state was not observed");
             return new JSONObject().put("scene", sceneName).put("node_count", scene.length()).put("scene_sha256", sceneHash)
                 .put("samples", population).put("lost_samples", lost.get()).put("refresh_rate_hz", refresh)
