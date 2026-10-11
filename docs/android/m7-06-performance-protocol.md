@@ -50,3 +50,11 @@ Every valid run must satisfy every threshold. All three runs per scene must pass
 Discrete reset/selection must also work visibly. This protocol makes no input-latency claim. Historical synthetic debug measurements remain historical; zero allocated misses alone does not prove smoothness.
 
 Definitions: [Perfetto frame metrics](https://perfetto.dev/docs/analysis/stdlib-docs#android-frames-per_frame_metrics), [FrameTimeline](https://perfetto.dev/docs/data-sources/frametimeline), [Android FrameMetrics](https://developer.android.com/reference/android/view/FrameMetrics).
+
+## Execution when a physical device is unavailable
+
+Preserve each attempt ledger, raw trace, original analysis, cleanup receipt and independent review. An independently approved later analysis is a separate artifact; it does not overwrite the original NOT RUN result. Device-source qualification establishes measurement reliability and is separate from both a comparable baseline and final performance acceptance.
+
+A first baseline case that fails source integrity stops the ordered series. Do not advance its ledger from framework completion, matching sample counts or partial metrics. A positive lifetime tracing-service discard count without a before-window observation cannot be assigned to a session or measurement window; per-buffer zeros alone do not resolve it. Investigate retained evidence and review any proposed additional observations before another capture. Numerical thresholds remain unchanged.
+
+When the phone is unavailable, continue release auditing, controlled-clock/JVM/schema checks, signing recovery, documentation and review. Physical accessibility, installation/upgrade, live journeys and the complete performance series remain pending. Renderer optimization requires the approved comparable baseline. Close neither the child issue nor the umbrella milestone from offline evidence alone.

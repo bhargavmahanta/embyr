@@ -29,6 +29,18 @@ Before distributing, create an encrypted backup of the keystore and its recovery
 
 For each candidate, record reviewed source/tree, public configuration hash, tool versions, signing certificate SHA-256, APK/AAB SHA-256, version and merged-main relationship. Verify the APK using `apksigner verify --verbose --print-certs`; inspect its manifest/package/version with SDK tooling. Validate the AAB with the digest-verified bundletool 1.18.3 and verify its JAR signature and certificate. AAB validation is not an installation test. Audit packaged assets/DEX/resources for secrets, learner content and test-only code; inspect exported components, backup exclusions and HTTPS policy.
 
+## Signing recovery checkpoints
+
+Record these separately: primary key identity, authenticated local backup round trip, off-device encrypted-backup custody, separate recovery-secret custody, and retrieval/recovery verification. A passing local round trip does not prove the external copy is retrievable. Keep unfinished checkpoints pending in the acceptance matrix.
+
+The protected setup uses the `embyr-signing-recovery-v1` envelope: AES-256-GCM with a 32-byte recovery key, a fresh 12-byte nonce, and authenticated context `embyr-internal-alpha-signing-recovery-v1`. The encrypted payload contains only the PKCS12 bytes and the four Alpha signing settings. Its recovery secret is stored separately. Neither operator database credentials nor tester data belong in this backup.
+
+To recover, retrieve the encrypted file and compare its SHA-256 with the retained trusted receipt. Use the reviewed local procedure and separate recovery secret to authenticate/decrypt the envelope before consuming the payload. Verify the PKCS12 alias, RSA4096 key, certificate SHA-256, SHA256withRSA certificate signature and matching key/certificate public numbers against the retained release identity. Never take the expected certificate identity from the supplied backup alone.
+
+Any restored plaintext keystore/configuration must use a new protected directory outside Git, with directory mode 0700 and file mode 0600. Update only the local keystore path for its new location. Keep passwords out of command arguments, shell history and logs. A failed authentication, identity mismatch, partial write or inaccessible external copy stops recovery; retain the failure evidence and inspect actual state. Do not replace the persistent signing key to work around recovery failure.
+
+After verification, supply the restored four values only to the designated local signing process with configuration caching disabled. Validate the resulting APK certificate before attempting a compatible upgrade. Delete only the temporary recovery copies created for the drill after evidence capture; preserve the primary key, external encrypted backup and separate recovery secret.
+
 ## Installation and rollback
 
 Every launcher must verify the independently approved physical-device profile, serial and model/API, then pass that serial explicitly. Keep each device's records separate and ADB bound to loopback. Never select an emulator. Before installing, inspect both packages' current UID, version and certificates and save their identities locally. On Android16, use exact package UID enumeration with explicit Android user0 and verify the current user; do not assume the older dumpsys `userId` field is present or confuse an app ID with another user's UID.
