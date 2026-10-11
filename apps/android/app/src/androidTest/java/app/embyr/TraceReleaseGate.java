@@ -2,21 +2,28 @@ package app.embyr;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 /** One-shot, bounded release of an instrumentation-only trace holder. */
 final class TraceReleaseGate {
     private final String nonce;
     private final long timeoutMs;
+    private final LongSupplier clock;
     private final CountDownLatch acknowledged = new CountDownLatch(1);
     private boolean ready, accepted, closed;
     private long readyNs, ackNs;
 
     TraceReleaseGate(String nonce, long timeoutMs) {
+        this(nonce, timeoutMs, System::nanoTime);
+    }
+
+    TraceReleaseGate(String nonce, long timeoutMs, LongSupplier clock) {
         if (nonce == null || !nonce.matches("[0-9a-f]{32}") || timeoutMs < 1 || timeoutMs > 15_000) {
             throw new IllegalArgumentException("Invalid bounded trace holder");
         }
         this.nonce = nonce;
         this.timeoutMs = timeoutMs;
+        this.clock = java.util.Objects.requireNonNull(clock);
     }
 
     synchronized void ready(long nowNs) {
@@ -38,11 +45,14 @@ final class TraceReleaseGate {
     synchronized long ackNs() { return ackNs; }
 
     boolean await() throws InterruptedException {
+        long remainingNs;
         synchronized (this) {
             if (!ready || closed) throw new IllegalStateException("Trace holder is not ready");
+            long elapsed = clock.getAsLong() - readyNs;
+            remainingNs = elapsed < 0 ? 0 : TimeUnit.MILLISECONDS.toNanos(timeoutMs) - elapsed;
         }
         try {
-            return acknowledged.await(timeoutMs, TimeUnit.MILLISECONDS);
+            return remainingNs > 0 && acknowledged.await(remainingNs, TimeUnit.NANOSECONDS);
         } finally {
             synchronized (this) { closed = true; }
         }

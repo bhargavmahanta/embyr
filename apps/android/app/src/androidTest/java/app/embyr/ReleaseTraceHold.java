@@ -25,7 +25,7 @@ final class ReleaseTraceHold implements AutoCloseable {
         }
         this.context = context;
         this.nonce = nonce;
-        gate = new TraceReleaseGate(nonce, 15_000);
+        gate = new TraceReleaseGate(nonce, 15_000, SystemClock::elapsedRealtimeNanos);
         receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
                 if (ACTION.equals(intent.getAction()) &&
