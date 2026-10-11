@@ -115,7 +115,7 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 finish(Activity.RESULT_OK, result); return;
             }
             if (performance) {
-                if (!traceHoldNonce.isEmpty()) traceHold = new ReleaseTraceHold(getContext(), traceHoldNonce);
+                if (!traceHoldNonce.isEmpty()) traceHold = new ReleaseTraceHold(getTargetContext(), traceHoldNonce);
                 JSONObject samples = ReleaseForestPerformance.collect(this, (MainActivity) activity, scene, owner);
                 if (samples.toString().length() > 900_000) throw new AssertionError("Bounded performance result exceeded");
                 if (traceHold != null) {

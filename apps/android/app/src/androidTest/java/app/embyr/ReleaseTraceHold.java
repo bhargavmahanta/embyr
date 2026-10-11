@@ -20,7 +20,7 @@ final class ReleaseTraceHold implements AutoCloseable {
     private boolean acknowledged;
 
     ReleaseTraceHold(Context context, String nonce) {
-        if (!"app.embyr.alpha.test".equals(context.getPackageName())) {
+        if (!"app.embyr.alpha".equals(context.getPackageName())) {
             throw new IllegalArgumentException("Wrong trace-holder package");
         }
         this.context = context;
@@ -29,7 +29,7 @@ final class ReleaseTraceHold implements AutoCloseable {
         receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
                 if (ACTION.equals(intent.getAction()) &&
-                        "app.embyr.alpha.test".equals(intent.getPackage())) {
+                        "app.embyr.alpha".equals(intent.getPackage())) {
                     long now = SystemClock.elapsedRealtimeNanos();
                     gate.accept(intent.getStringExtra("nonce"), now);
                 }
