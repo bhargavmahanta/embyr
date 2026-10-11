@@ -26,6 +26,7 @@ public final class AlphaPlatformRunner extends Instrumentation {
     private boolean interactions;
     private String scene;
     private String owner;
+    private String traceHoldNonce;
 
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
@@ -53,6 +54,13 @@ public final class AlphaPlatformRunner extends Instrumentation {
             finish(Activity.RESULT_CANCELED, result);
             return;
         }
+        traceHoldNonce = arguments.getString("trace_hold_nonce", "");
+        if (!traceHoldNonce.isEmpty() && (!performance || !traceHoldNonce.matches("[0-9a-f]{32}"))) {
+            Bundle result = new Bundle();
+            result.putString("shortMsg", "Unsupported trace-holder arguments");
+            finish(Activity.RESULT_CANCELED, result);
+            return;
+        }
         start();
     }
 
@@ -68,6 +76,7 @@ public final class AlphaPlatformRunner extends Instrumentation {
 
     @Override public void onStart() {
         Activity activity = null;
+        ReleaseTraceHold traceHold = null;
         sendStatus(1, status());
         try {
             if (!"app.embyr.alpha".equals(getTargetContext().getPackageName())) {
@@ -106,10 +115,18 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 finish(Activity.RESULT_OK, result); return;
             }
             if (performance) {
+                if (!traceHoldNonce.isEmpty()) traceHold = new ReleaseTraceHold(getContext(), traceHoldNonce);
                 JSONObject samples = ReleaseForestPerformance.collect(this, (MainActivity) activity, scene, owner);
                 if (samples.toString().length() > 900_000) throw new AssertionError("Bounded performance result exceeded");
+                if (traceHold != null) {
+                    sendStatus(2, traceHold.readyStatus());
+                    boolean released = traceHold.awaitRelease();
+                    traceHold.close();
+                    if (!released) throw new AssertionError("Trace-holder release timed out");
+                }
                 sendStatus(0, status());
                 Bundle result = new Bundle(); result.putString("m706_metrics", samples.toString());
+                if (traceHold != null) result.putString("m706_trace_hold", traceHold.receipt().toString());
                 finish(Activity.RESULT_OK, result); return;
             }
             if (forest) {
@@ -155,8 +172,15 @@ public final class AlphaPlatformRunner extends Instrumentation {
                 String partial = ReleaseForestPerformance.partialJson();
                 if (partial != null && partial.length() <= 900_000) result.putString("m706_metrics_partial", partial);
             }
+            if (traceHold != null) {
+                try {
+                    traceHold.close();
+                    result.putString("m706_trace_hold", traceHold.receipt().toString());
+                } catch (Exception ignored) { /* The original failure remains failed. */ }
+            }
             finish(Activity.RESULT_CANCELED, result);
         } finally {
+            if (traceHold != null) traceHold.close();
             if (activity != null) {
                 final Activity opened = activity;
                 runOnMainSync(opened::finish);
