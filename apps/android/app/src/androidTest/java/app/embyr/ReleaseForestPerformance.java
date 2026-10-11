@@ -30,6 +30,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import kotlin.Unit;
@@ -44,6 +46,21 @@ public final class ReleaseForestPerformance {
     public static String partialJson() { return partialEvidence; }
     private static final long SECOND = 1_000_000_000L;
     private static final String FOREST = "Forest map. Select a tree using the list below, or pan and pinch to zoom.";
+
+    private static void detachBounded(Activity activity, Window.OnFrameMetricsAvailableListener listener) throws Exception {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean expired = new AtomicBoolean();
+        boolean posted = new Handler(activity.getMainLooper()).post(() -> {
+            try { if (!expired.get()) activity.getWindow().removeOnFrameMetricsAvailableListener(listener); }
+            catch (Throwable error) { failure.set(error); }
+            finally { done.countDown(); }
+        });
+        if (!posted || !done.await(2, TimeUnit.SECONDS)) {
+            expired.set(true); throw new AssertionError("FrameMetrics detach not acknowledged");
+        }
+        if (failure.get() != null) throw new AssertionError("FrameMetrics detach failed", failure.get());
+    }
 
     private static String sha(String value) throws Exception {
         StringBuilder result = new StringBuilder();
@@ -310,16 +327,16 @@ public final class ReleaseForestPerformance {
             }
         };
         instrument.runOnMainSync(() -> activity.getWindow().addOnFrameMetricsAvailableListener(listener, new Handler(samplesThread.getLooper())));
-        Gesture gesture = new Gesture(instrument, bounds);
+        ForestFrameMotion motion = new ForestFrameMotion(view[0], bounds);
         JSONArray actions = new JSONArray();
         boolean marker = false;
         boolean listenerRemoved = false;
+        String listenerDetachError = null;
         String selectedTree = null;
         JSONObject selectionObservation = new JSONObject();
         try {
-            long warm = System.nanoTime();
-            while (System.nanoTime() - warm < 5 * SECOND) { gesture.move((System.nanoTime() - warm) / 1e9); SystemClock.sleep(16); }
-            gesture.stop();
+            motion.startBounded();
+            while (System.nanoTime() - motion.epoch() < 5 * SECOND) { motion.check(); SystemClock.sleep(16); }
             if (!Trace.isEnabled()) throw new AssertionError("Perfetto app tracing must be active");
             long measurement = System.nanoTime();
             start.set(measurement); end.set(measurement + 20 * SECOND);
@@ -328,14 +345,17 @@ public final class ReleaseForestPerformance {
             while (System.nanoTime() < end.get()) {
                 long elapsed = System.nanoTime() - measurement;
                 if (!reset && elapsed >= 5 * SECOND) {
-                    gesture.stop(); click(instrument, "Reset view", false); reset = true;
-                    actions.put(new JSONObject().put("action", "reset").put("elapsed_ns", elapsed));
+                    click(instrument, "Reset view", false); reset = true;
+                    long phase = System.nanoTime() - motion.epoch();
+                    actions.put(new JSONObject().put("action", "reset").put("elapsed_ns", elapsed)
+                        .put("observed_after_dispatch_phase_ns", phase).put("phase_expanding_after_dispatch", ForestMotionPath.expanding(phase))
+                        .put("execution_timestamp_observed", false));
                 }
                 if (!selected && elapsed >= 10 * SECOND) {
-                    gesture.stop(); selectedTree = click(instrument, "Tree ", true); selected = true;
+                    selectedTree = click(instrument, "Tree ", true); selected = true;
                     // ACTION_CLICK dispatch is asynchronous. Require the actual
-                    // exact-row state before resuming input; this wait stays IN
-                    // the measured window and its presentation gap is graded.
+                    // exact-row state while the main-thread motion callback
+                    // continues. This wait and every frame remain measured.
                     long acknowledgmentDeadline = SystemClock.uptimeMillis() + 1000;
                     JSONObject acknowledgment;
                     do {
@@ -358,15 +378,15 @@ public final class ReleaseForestPerformance {
                     if (correction) corrected = true; else grown = true;
                     actions.put(new JSONObject().put("action", correction ? "correction" : "growth").put("elapsed_ns", elapsed));
                 }
-                gesture.move(elapsed / 1e9); SystemClock.sleep(16);
+                motion.check(); SystemClock.sleep(16);
             }
             Trace.endSection(); marker = false;
-            gesture.stop();
+            motion.stopBounded(); motion.check();
             // Force an unmeasured sentinel frame to report any trailing drops,
             // then detach and stop the callback thread before freezing its data.
             instrument.runOnMainSync(() -> activity.getWindow().getDecorView().invalidate());
             if (!tailDelivered.await(5, TimeUnit.SECONDS)) throw new AssertionError("FrameMetrics tail not delivered");
-            instrument.runOnMainSync(() -> activity.getWindow().removeOnFrameMetricsAvailableListener(listener));
+            detachBounded(activity, listener);
             listenerRemoved = true;
             samplesThread.quitSafely(); samplesThread.join(2000);
             if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not quiesce");
@@ -389,26 +409,30 @@ public final class ReleaseForestPerformance {
                 .put("samples", population).put("lost_samples", lost.get()).put("refresh_rate_hz", refresh)
                 .put("measurement_start_monotonic_ns", start.get()).put("measurement_end_monotonic_ns", end.get())
                 .put("start_thermal_status", startThermal).put("end_thermal_status", power.getCurrentThermalStatus())
-                .put("actions", actions).put("injected_motion_count", gesture.moves)
+                .put("actions", actions).put("injected_motion_count", motion.moves()).put("motion_workload", motion.evidence())
                 .put("selection_observed", selectionObserved)
-                .put("selection_observation", selectionObservation)
+                .put("selection_observation", selectionObservation).put("listener_detached", listenerRemoved)
                 .put("framework_sample_population", "INTENDED_VSYNC_TIMESTAMP in fixed 20s window; first draws included")
                 .put("performance_grade", "NOT GRADED: pinned external extractor required");
         } finally {
             try {
                 if (marker) Trace.endSection();
-                gesture.stop();
+                motion.stopBounded();
             } finally {
                 try {
-                    if (!listenerRemoved) instrument.runOnMainSync(() -> activity.getWindow().removeOnFrameMetricsAvailableListener(listener));
+                    if (!listenerRemoved) {
+                        try { detachBounded(activity, listener); listenerRemoved = true; }
+                        catch (Throwable error) { listenerDetachError = error.getClass().getSimpleName(); }
+                    }
                 } finally {
                     samplesThread.quitSafely(); samplesThread.join(2000);
                     synchronized (samples) {
                         partialEvidence = new JSONObject().put("scene", sceneName).put("scene_sha256", sceneHash)
                             .put("samples", new JSONArray(samples)).put("lost_samples", lost.get())
                             .put("collection_complete", false).put("callback_thread_stopped", !samplesThread.isAlive())
+                            .put("listener_detached", listenerRemoved).put("listener_detach_error_type", listenerDetachError == null ? JSONObject.NULL : listenerDetachError)
                             .put("selection_observation", selectionObservation)
-                            .put("actions", actions).put("measurement_start_monotonic_ns", start.get()).put("measurement_end_monotonic_ns", end.get())
+                            .put("actions", actions).put("motion_workload", motion.evidence()).put("measurement_start_monotonic_ns", start.get()).put("measurement_end_monotonic_ns", end.get())
                             .put("performance_grade", "NOT RUN: incomplete collection evidence only").toString();
                     }
                     if (samplesThread.isAlive()) throw new AssertionError("FrameMetrics collector did not stop");
