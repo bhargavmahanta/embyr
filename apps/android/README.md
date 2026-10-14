@@ -1,10 +1,10 @@
 # Embyr Android internal alpha
 
-This native Kotlin and Jetpack Compose project includes the M7-02 foundation (#117) and M7-03 auth, onboarding, and recommendation flow (#118). The app signs in with a Supabase email code, bootstraps the mapped Embyr owner, lets the learner choose up to 20 starter interests, then offers explicit Explore or Surprise recommendations. ACCEPT stops at an Exploration ready handoff; Exploration delivery belongs to #119.
+This native Kotlin and Jetpack Compose project includes auth/onboarding/recommendation, reviewed Exploration and optional asynchronous assessment, factual Memory, and the native World forest. M7-06 adds signed Internal Alpha packaging and integrated hardening. Completion requires the physical and live-alpha gates in the [operator runbook](../../docs/android/m7-06-internal-alpha-runbook.md).
 
 ## Build configuration
 
-Use JDK 21, Gradle wrapper 9.5.0, AGP 9.3.1, Kotlin/Compose compiler plugin 2.4.20, and Compose BOM 2026.09.00. The application namespace and ID are `app.embyr`. `minSdk=26`, `targetSdk=36`, and `compileSdk=37`. Install SDK Platform 37.0 and SDK Build Tools 36.0.0. External Play application-ID ownership must be checked before distribution.
+Use JDK 21, Gradle wrapper 9.5.0, AGP 9.3.1, Kotlin/Compose compiler plugin 2.4.20, and Compose BOM 2026.09.00. The namespace and debug application ID are `app.embyr`; release uses `app.embyr.alpha` (Embyr Alpha), version code 2/name `0.1.0-alpha.1`. `minSdk=26`, `targetSdk=36`, and `compileSdk=37`. Install SDK Platform 37.0 and SDK Build Tools 36.0.0. Distribution is protected local USB installation.
 
 Set these three **client-safe** values as environment variables or in ignored `apps/android/local.properties` before launching:
 
@@ -22,7 +22,7 @@ The email code request uses Supabase OTP with `createUser=false` and no redirect
 
 After session restore or code verification, the app calls unkeyed `POST /api/v1/session/bootstrap` before binding any private storage. It binds the local owner only to the validated Embyr profile UUID, then refreshes `GET /api/v1/me`. Bootstrap alone has a coordinator-owned, bounded retry; ordinary unkeyed POSTs are not automatically replayed.
 
-Onboarding, recommendation generation, and recommendation decisions persist canonical request bytes and a unique idempotency key before sending. An ambiguous command replays the same bytes and key for less than 23 hours. After that cutoff, onboarding reconciles through `GET /me`, and an ambiguous ACCEPT searches at most five pages of `GET /explorations` for the exact recommendation ID. An expired SKIP or recommendation generation remains visibly unresolved. A new generation request requires an explicit learner action. Room's version 1 to 2 migration adds owner-scoped journey state without deleting the M7-02 outbox or World data.
+Keyed POST commands persist canonical request bytes and a unique idempotency key before sending. An ambiguous command replays the same bytes and key for less than 23 hours. After that cutoff, supported reads reconcile results; unsupported lookup leaves visible ambiguity. A new generation request requires an explicit learner action. Room4 preserves commands, learning drafts/assessment recovery, Memory operations and owner-scoped atomic World state. Versioned interest PUT and reflection PATCH have separate recovery policies.
 
 ## Commands
 
@@ -32,9 +32,8 @@ From `apps/android`:
 ./gradlew :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
 python -m pip install -r tools/requirements-contracts.txt
 python tools/validate_m6_public_examples.py
-./gradlew :app:connectedDebugAndroidTest
 ```
 
-The JVM fixture tests read canonical files under the repository's `docs/api/fixtures` directory; the schema script reads the canonical M6 schema. Device tests cover Room migration and persistence, owner isolation, Keystore storage, and Compose journey screens. CI runs lint, JVM/schema tests, and debug/release builds. Run `connectedDebugAndroidTest` on API 26 and a current emulator, and record the result in the PR. A real alpha completion check also needs invited Supabase users, the email code template, a reachable backend, eligible recommendation data, and a no-result scenario.
+The JVM fixture tests read canonical files under the repository's `docs/api/fixtures` directory; the schema script reads the canonical M6 schema. Device tests cover Room migration/persistence, owner isolation, Keystore storage and Compose screens. Physical-device launchers must verify and explicitly target the approved serial; no emulator is authorized. Destructive storage tests use an isolated verification UID. Direct AndroidJUnitRunner results must be labeled as such, rather than as Gradle connected-task results. Real-alpha completion also requires closed enrollment, OTP delivery, reviewed content and operating workers.
 
-Release assembly is unsigned and R8 enabled. Distribution signing and hosted Internal Alpha validation belong to M7-06.
+`assembleRelease` remains available unsigned for CI. `signedAlphaRelease` requires all four protected signing environment variables described in the runbook, and builds the signed APK/AAB without configuration caching. Release remains non-debuggable, R8/resource-shrunk and shell-profileable for the audited local performance gate. To assemble same-signature release instrumentation, supply signing inputs and use `-PembyrTestBuildType=release :app:assembleReleaseAndroidTest`. This selects the bounded Java `AlphaPlatformRunner` framework launch probe; it does not run release JUnit selections. Debug retains AndroidJUnitRunner. Framework probe results must use that label, and assembly alone does not prove execution, live journeys or performance.

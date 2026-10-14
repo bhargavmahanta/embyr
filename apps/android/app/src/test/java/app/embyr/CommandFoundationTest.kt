@@ -70,6 +70,36 @@ class CommandFoundationTest {
         assertFalse(ReplayWindow.mayReplay(1000, 1000 + ReplayWindow.SAFE_WINDOW_MS))
     }
 
+    /** Controlled clock boundaries; this does not claim natural day-long device aging. */
+    @Test fun replayBoundaryPreservesExactIntentAndNeverRevivesExpiredCommands() = runBlocking {
+        val created = 1_000L
+        for (age in listOf(-1L, 0L, ReplayWindow.SAFE_WINDOW_MS - 1, ReplayWindow.SAFE_WINDOW_MS,
+            ReplayWindow.SERVER_WINDOW_MS - 1, ReplayWindow.SERVER_WINDOW_MS, ReplayWindow.SERVER_WINDOW_MS + 1)) {
+            val outbox = MemoryOutbox()
+            val bytes = "{\"decision\":\"ACCEPT\"}".toByteArray()
+            val command = CommandEntity("id", "owner-a", "POST", "api/v1/test", bytes, "original-key", created, "AMBIGUOUS")
+            outbox.enqueue(command)
+            val owners = OwnerSession().apply { switchTo("owner-a") }
+            val dispatcher = CommandDispatcher(outbox, owners)
+            var sends = 0
+            val state = dispatcher.retry("owner-a", "id", created + age) {
+                sends++
+                assertArrayEquals(bytes, it.canonicalPayload)
+                assertEquals("original-key", it.idempotencyKey)
+                TransmissionOutcome.Ambiguous
+            }
+            val allowed = age >= 0 && age < ReplayWindow.SAFE_WINDOW_MS
+            assertEquals("age=$age", if (allowed) 1 else 0, sends)
+            assertEquals(if (allowed) CommandState.AMBIGUOUS else CommandState.EXPIRED, state)
+            assertEquals(1, outbox.commands.size)
+            if (!allowed) {
+                assertEquals(CommandState.EXPIRED, dispatcher.retry("owner-a", "id", created) {
+                    error("Clock rollback revived an expired command")
+                })
+            }
+        }
+    }
+
     @Test fun ownerTransitionCancelsOldOwnerWork() = runBlocking {
         val owners = OwnerSession().apply { switchTo("owner-a") }
         val work = owners.scopeFor("owner-a").launch { awaitCancellation() }
