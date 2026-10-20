@@ -333,6 +333,7 @@ public final class ReleaseForestPerformance {
         boolean listenerRemoved = false;
         String listenerDetachError = null;
         String selectedTree = null;
+        boolean selectionAcknowledged = false;
         JSONObject selectionObservation = new JSONObject();
         try {
             motion.startBounded();
@@ -363,10 +364,12 @@ public final class ReleaseForestPerformance {
                         if (acknowledgment.getBoolean("checked")) break;
                         SystemClock.sleep(50);
                     } while (SystemClock.uptimeMillis() < acknowledgmentDeadline);
+                    selectionAcknowledged = acknowledgment.getBoolean("checked");
                     actions.put(new JSONObject().put("action", "selection").put("elapsed_ns", elapsed)
                         .put("acknowledged_elapsed_ns", System.nanoTime() - measurement)
-                        .put("acknowledged", acknowledgment.getBoolean("checked")));
-                    if (!acknowledgment.getBoolean("checked")) throw new AssertionError("Selection action was not acknowledged");
+                        .put("acknowledged", selectionAcknowledged));
+                    // Retain slow-action frames and later growth/correction even
+                    // when the acknowledgment fails. Reject only after collection.
                 }
                 if (!"real".equals(sceneName) && ((!grown && elapsed >= 15 * SECOND) || (!corrected && elapsed >= 17 * SECOND))) {
                     boolean correction = grown;
@@ -404,6 +407,7 @@ public final class ReleaseForestPerformance {
             // Pinned Compose maps Selected on Role.Button to Android checked;
             // Android selected is reserved for Role.Tab in that delegate.
             boolean selectionObserved = selectedNode != null && selectedNode.isVisibleToUser() && selectedNode.isEnabled() && selectedNode.isChecked();
+            if (!selectionAcknowledged) throw new AssertionError("Selection action was not acknowledged; full measurement retained");
             if (!selectionObserved) throw new AssertionError("Selection state was not observed");
             return new JSONObject().put("scene", sceneName).put("node_count", scene.length()).put("scene_sha256", sceneHash)
                 .put("samples", population).put("lost_samples", lost.get()).put("refresh_rate_hz", refresh)
